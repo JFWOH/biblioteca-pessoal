@@ -1,0 +1,1 @@
+"""Módulo GUI da aplicação."""

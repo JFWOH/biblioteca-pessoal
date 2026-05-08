@@ -1,0 +1,1 @@
+"""Módulo core da biblioteca."""

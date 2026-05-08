@@ -1,0 +1,21 @@
+# Core GUI
+PyQt6>=6.6.0
+
+# Document Readers
+PyMuPDF>=1.23.0          # PDF rendering & text extraction
+EbookLib>=0.18           # EPUB parsing
+python-docx>=1.1.0       # DOCX parsing
+beautifulsoup4>=4.12.0   # HTML/XML parsing for EPUB
+markdown>=3.5.0          # Markdown rendering
+
+# Image Processing
+Pillow>=10.0.0           # Cover image processing
+
+# Utilities
+natsort>=8.4.0           # Natural sorting for filenames
+
+# Development
+pytest>=7.4.0
+pytest-qt>=4.2.0
+pytest-cov>=4.1.0
+ruff>=0.1.0
