@@ -226,6 +226,30 @@ class LibraryDB:
             (collection_id,)).fetchall()
         return [dict(r) for r in rows]
 
+    def get_all_collections(self) -> list[dict]:
+        return self.get_collections()
+
+    def rename_collection(self, collection_id: int, new_name: str) -> None:
+        self.conn.execute(
+            "UPDATE collections SET name = ? WHERE id = ?", (new_name, collection_id))
+        self.conn.commit()
+
+    def delete_collection(self, collection_id: int) -> None:
+        self.conn.execute("DELETE FROM collections WHERE id = ?", (collection_id,))
+        self.conn.commit()
+
+    def get_book_collections(self, book_id: int) -> list[dict]:
+        rows = self.conn.execute(
+            """SELECT c.* FROM collections c JOIN book_collections bc ON c.id=bc.collection_id
+               WHERE bc.book_id=? ORDER BY c.name""", (book_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def remove_book_from_collection(self, book_id: int, collection_id: int) -> None:
+        self.conn.execute(
+            "DELETE FROM book_collections WHERE book_id=? AND collection_id=?",
+            (book_id, collection_id))
+        self.conn.commit()
+
     # ── Tags ───────────────────────────────────────────────────────────
 
     def create_tag(self, name: str, color="#8b5cf6") -> int:
@@ -249,6 +273,14 @@ class LibraryDB:
             """SELECT t.* FROM tags t JOIN book_tags bt ON t.id=bt.tag_id
                WHERE bt.book_id=? ORDER BY t.name""", (book_id,)).fetchall()
         return [dict(r) for r in rows]
+
+    def get_all_tags(self) -> list[dict]:
+        return self.get_tags()
+
+    def remove_tag_from_book(self, book_id: int, tag_id: int) -> None:
+        self.conn.execute(
+            "DELETE FROM book_tags WHERE book_id=? AND tag_id=?", (book_id, tag_id))
+        self.conn.commit()
 
     # ── Anotações ──────────────────────────────────────────────────────
 

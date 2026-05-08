@@ -7,8 +7,10 @@ from src.readers.epub_reader import EPUBReader
 from src.readers.mobi_reader import MOBIReader
 from src.readers.txt_reader import TXTReader
 from src.readers.docx_reader import DOCXReader
+from src.readers.cbz_reader import CBZReader
 from src.utils.constants import (
     PDF_FORMATS, EPUB_FORMATS, MOBI_FORMATS, TEXT_FORMATS, DOCX_FORMATS,
+    COMIC_FORMATS,
 )
 
 
@@ -26,6 +28,8 @@ def create_reader(filepath: str | Path) -> BaseReader:
         return TXTReader(filepath)
     elif ext in DOCX_FORMATS:
         return DOCXReader(filepath)
+    elif ext in COMIC_FORMATS:
+        return CBZReader(filepath)
     else:
         # Fallback para texto simples
         return TXTReader(filepath)
@@ -34,5 +38,6 @@ def create_reader(filepath: str | Path) -> BaseReader:
 def get_supported_reader_formats() -> list[str]:
     """Retorna lista de formatos com leitor disponível."""
     return sorted(
-        PDF_FORMATS | EPUB_FORMATS | MOBI_FORMATS | TEXT_FORMATS | DOCX_FORMATS
+        PDF_FORMATS | EPUB_FORMATS | MOBI_FORMATS | TEXT_FORMATS
+        | DOCX_FORMATS | COMIC_FORMATS
     )

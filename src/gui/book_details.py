@@ -10,6 +10,8 @@ from PyQt6.QtGui import QPixmap, QFont
 from src.utils.file_utils import format_file_size
 from src.utils.constants import READ_STATUS_LABELS
 from src.gui.widgets.star_rating import StarRating
+from src.gui.widgets.tag_manager import TagManager
+from src.core.database import LibraryDB
 
 
 class BookDetails(QWidget):
@@ -19,10 +21,13 @@ class BookDetails(QWidget):
     favorite_toggled = pyqtSignal(int)
     delete_requested = pyqtSignal(int)
     rating_changed = pyqtSignal(int, int)  # book_id, rating
+    tags_changed = pyqtSignal(int)  # book_id
+    add_to_collection_requested = pyqtSignal(int)  # book_id
 
-    def __init__(self, parent=None):
+    def __init__(self, db: LibraryDB = None, parent=None):
         super().__init__(parent)
         self._book: dict | None = None
+        self._db = db
         self.setMinimumWidth(280)
         self.setMaximumWidth(340)
         self._setup_ui()
@@ -67,6 +72,14 @@ class BookDetails(QWidget):
         self._meta_label.setStyleSheet("color: #71717a; font-size: 12px; line-height: 1.5;")
         layout.addWidget(self._meta_label)
 
+        # Tags
+        if self._db:
+            self._tag_manager = TagManager(self._db)
+            self._tag_manager.tags_changed.connect(lambda bid: self.tags_changed.emit(bid))
+            layout.addWidget(self._tag_manager)
+        else:
+            self._tag_manager = None
+
         # Descrição
         self._desc = QLabel()
         self._desc.setWordWrap(True)
@@ -81,14 +94,22 @@ class BookDetails(QWidget):
         btn_layout.setSpacing(8)
 
         self._open_btn = QPushButton("📖  Abrir")
+        self._open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._open_btn.setObjectName("primaryBtn")
         self._open_btn.clicked.connect(lambda: self._emit_action("open"))
         btn_layout.addWidget(self._open_btn)
 
         self._fav_btn = QPushButton("⭐  Favoritar")
         self._fav_btn.setObjectName("secondaryBtn")
+        self._fav_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._fav_btn.clicked.connect(lambda: self._emit_action("favorite"))
         btn_layout.addWidget(self._fav_btn)
+
+        self._col_btn = QPushButton("📂  Coleção")
+        self._col_btn.setObjectName("secondaryBtn")
+        self._col_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._col_btn.clicked.connect(lambda: self._emit_action("collection"))
+        btn_layout.addWidget(self._col_btn)
 
         self._del_btn = QPushButton("🗑  Remover")
         self._del_btn.setStyleSheet("""
@@ -152,6 +173,10 @@ class BookDetails(QWidget):
         # Avaliação
         self._star_rating.rating = book.get("rating", 0)
 
+        # Tags
+        if self._tag_manager:
+            self._tag_manager.set_book(book["id"])
+
         self.show()
 
     def _emit_action(self, action: str):
@@ -162,12 +187,16 @@ class BookDetails(QWidget):
             self.open_requested.emit(book_id)
         elif action == "favorite":
             self.favorite_toggled.emit(book_id)
+        elif action == "collection":
+            self.add_to_collection_requested.emit(book_id)
         elif action == "delete":
             self.delete_requested.emit(book_id)
 
     def clear(self):
         self._book = None
         self._star_rating.rating = 0
+        if self._tag_manager:
+            self._tag_manager.set_book(0)
         self.hide()
 
     def _on_rating_changed(self, rating: int):

@@ -22,8 +22,11 @@ from src.gui.book_details import BookDetails
 from src.gui.styles import get_theme
 from src.gui.import_dialog import ImportDialog
 from src.gui.settings_dialog import SettingsDialog
+from src.gui.collection_dialog import CollectionDialog, AddToCollectionDialog
 from src.gui.widgets.stats_panel import StatsPanel
 from src.utils.constants import FILE_FILTER, DATA_DIR
+from src.utils.export import export_annotations_markdown
+from src.core.watcher import DirectoryWatcher
 
 
 class MainWindow(QMainWindow):
@@ -45,6 +48,7 @@ class MainWindow(QMainWindow):
         self._setup_statusbar()
         self._apply_theme()
         self._load_library()
+        self._setup_watcher()
 
     def _setup_window(self):
         self.setWindowTitle("📚 Biblioteca Pessoal")
@@ -102,6 +106,19 @@ class MainWindow(QMainWindow):
         settings_action.triggered.connect(self._show_settings)
         view_menu.addAction(settings_action)
 
+        # Menu Organizar
+        org_menu = menubar.addMenu("&Organizar")
+
+        col_action = QAction("📂 Gerenciar Coleções...", self)
+        col_action.triggered.connect(self._show_collections)
+        org_menu.addAction(col_action)
+
+        org_menu.addSeparator()
+
+        export_action = QAction("📝 Exportar Anotações...", self)
+        export_action.triggered.connect(self._export_annotations)
+        org_menu.addAction(export_action)
+
         # Menu Ajuda
         help_menu = menubar.addMenu("A&juda")
         about = QAction("Sobre", self)
@@ -149,11 +166,12 @@ class MainWindow(QMainWindow):
         self._library_view.book_open.connect(self._on_book_open)
         lib_splitter.addWidget(self._library_view)
 
-        self._book_details = BookDetails()
+        self._book_details = BookDetails(db=self._db)
         self._book_details.open_requested.connect(self._on_book_open)
         self._book_details.favorite_toggled.connect(self._on_favorite_toggle)
         self._book_details.delete_requested.connect(self._on_delete_book)
         self._book_details.rating_changed.connect(self._on_rating_changed)
+        self._book_details.add_to_collection_requested.connect(self._add_book_to_collection)
         lib_splitter.addWidget(self._book_details)
 
         lib_splitter.setStretchFactor(0, 1)
@@ -391,10 +409,92 @@ class MainWindow(QMainWindow):
             "multi-formato sofisticado.</p>"
             "<p>Formatos: PDF, EPUB, MOBI, TXT, DOCX, Markdown</p>",
         )
+    # ── Organização ─────────────────────────────────────────────────────
+
+    def _show_collections(self):
+        """Abre o diálogo de gerenciamento de coleções."""
+        dialog = CollectionDialog(self._db, self)
+        dialog.collections_changed.connect(self._update_sidebar_collections)
+        dialog.exec()
+
+    def _update_sidebar_collections(self):
+        """Atualiza a sidebar com coleções do banco."""
+        collections = self._db.get_all_collections()
+        for col in collections:
+            self._sidebar.add_collection_button(col["name"], col["id"])
+
+    def _export_annotations(self):
+        """Exporta anotações do livro selecionado."""
+        # Determina o livro (do details ou do reader)
+        book_id = None
+        if self._main_stack.currentIndex() == 1:
+            book_id = self._reader_view._book_id
+        elif self._book_details._book:
+            book_id = self._book_details._book.get("id")
+
+        if not book_id:
+            QMessageBox.information(
+                self, "Exportar Anotações",
+                "Selecione um livro primeiro para exportar suas anotações."
+            )
+            return
+
+        book = self._db.get_book(book_id)
+        annotations = self._db.get_annotations(book_id)
+        if not annotations:
+            QMessageBox.information(
+                self, "Exportar Anotações",
+                f'O livro "{book["title"]}" não possui anotações.'
+            )
+            return
+
+        # Seleciona local de salvamento
+        default_name = f"anotacoes_{book['title'][:30].replace(' ', '_')}.md"
+        filepath, _ = QFileDialog.getSaveFileName(
+            self, "Salvar Anotações", default_name,
+            "Markdown (*.md);;Todos (*.*)"
+        )
+        if filepath:
+            output = export_annotations_markdown(self._db, book_id, filepath)
+            self._statusbar.showMessage(
+                f"📝 Anotações exportadas: {output.name}", 5000
+            )
+
+    def _add_book_to_collection(self, book_id: int):
+        """Abre diálogo para adicionar livro a uma coleção."""
+        dialog = AddToCollectionDialog(self._db, book_id, self)
+        dialog.exec()
+
+    # ── Monitoramento ──────────────────────────────────────────────────
+
+    def _setup_watcher(self):
+        """Inicia o monitoramento de diretórios configurados."""
+        watch_dirs = self._config.get("library.watch_directories", [])
+        self._watcher = None
+        if watch_dirs:
+            self._watcher = DirectoryWatcher(
+                self._library, watch_dirs, interval_seconds=60
+            )
+            self._watcher.import_completed.connect(self._on_watcher_import)
+            self._watcher.error_occurred.connect(
+                lambda msg: self._statusbar.showMessage(f"⚠️ {msg}", 5000)
+            )
+            self._watcher.start()
+
+    def _on_watcher_import(self, count: int):
+        """Callback quando o watcher importa novos arquivos."""
+        self._statusbar.showMessage(
+            f"📂 Auto-importação: {count} novo(s) arquivo(s) detectado(s)", 5000
+        )
+        self._load_library()
 
     # ── Lifecycle ──────────────────────────────────────────────────────
 
     def closeEvent(self, event):
+        # Para o watcher
+        if self._watcher and self._watcher.is_active:
+            self._watcher.stop()
+            self._watcher.wait(3000)
         # Salva dimensões da janela
         if not self.isMaximized():
             self._config.set("window.width", self.width())
