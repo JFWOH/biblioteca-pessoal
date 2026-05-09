@@ -43,8 +43,8 @@ class DirectoryWatcher(QThread):
                     for filepath in sorted(new_files):
                         try:
                             self.file_found.emit(filepath)
-                            result = self._library.import_file(filepath)
-                            if result:
+                            book, is_new = self._library.import_file(filepath)
+                            if book and is_new:
                                 count += 1
                         except Exception as e:
                             self.error_occurred.emit(

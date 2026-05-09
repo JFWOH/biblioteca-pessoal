@@ -367,8 +367,8 @@ class MainWindow(QMainWindow):
         if files:
             count = 0
             for f in files:
-                result = self._library.import_file(f)
-                if result:
+                book, is_new = self._library.import_file(f)
+                if book and is_new:
                     count += 1
             self._statusbar.showMessage(
                 f"✅ {count} arquivo(s) importado(s)", 5000

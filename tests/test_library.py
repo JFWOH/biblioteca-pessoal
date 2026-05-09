@@ -22,32 +22,36 @@ class TestLibraryManager:
         lib, db, tmp_path = library
         txt = tmp_path / "book.txt"
         txt.write_text("Este é o conteúdo do livro.", encoding="utf-8")
-        result = lib.import_file(str(txt))
-        assert result is not None
+        book, is_new = lib.import_file(str(txt))
+        assert book is not None
+        assert is_new is True
         assert db.count_books() == 1
 
     def test_import_duplicate_path_returns_existing(self, library):
         lib, db, tmp_path = library
         txt = tmp_path / "dup.txt"
         txt.write_text("Conteúdo.", encoding="utf-8")
-        first = lib.import_file(str(txt))
-        second = lib.import_file(str(txt))
-        assert second is not None  # retorna o livro existente
-        assert first["id"] == second["id"]
+        first_book, first_is_new = lib.import_file(str(txt))
+        second_book, second_is_new = lib.import_file(str(txt))
+        assert second_book is not None  # retorna o livro existente
+        assert second_is_new is False
+        assert first_book["id"] == second_book["id"]
         assert db.count_books() == 1
 
     def test_import_nonexistent(self, library):
         lib, db, tmp_path = library
-        result = lib.import_file(str(tmp_path / "nope.pdf"))
-        assert result is None
+        book, is_new = lib.import_file(str(tmp_path / "nope.pdf"))
+        assert book is None
+        assert is_new is False
         assert db.count_books() == 0
 
     def test_import_unsupported_format(self, library):
         lib, db, tmp_path = library
         f = tmp_path / "data.xyz"
         f.write_bytes(b"not supported")
-        result = lib.import_file(str(f))
-        assert result is None  # formato não suportado
+        book, is_new = lib.import_file(str(f))
+        assert book is None  # formato não suportado
+        assert is_new is False
         assert db.count_books() == 0
 
     def test_import_directory(self, library):

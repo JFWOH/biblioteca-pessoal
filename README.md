@@ -118,7 +118,7 @@ src/
 │       └── toc_widget.py
 ├── utils/          # Utilitários
 └── main.py         # Entry point
-tests/              # 48 testes automatizados
+tests/              # 99 testes automatizados
 ```
 
 ## 🧪 Testes

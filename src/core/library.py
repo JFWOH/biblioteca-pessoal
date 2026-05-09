@@ -23,23 +23,23 @@ class LibraryManager:
     def db(self) -> LibraryDB:
         return self._db
 
-    def import_file(self, filepath: str | Path) -> dict | None:
-        """Importa um único arquivo para a biblioteca. Retorna o livro ou None."""
+    def import_file(self, filepath: str | Path) -> tuple[dict | None, bool]:
+        """Importa um único arquivo. Retorna (livro, eh_novo) ou (None, False)."""
         filepath = Path(filepath)
         if not filepath.exists() or not is_supported_format(filepath):
-            return None
+            return None, False
 
         # Verifica duplicata por caminho
         existing = self._db.get_book_by_path(str(filepath))
         if existing:
-            return existing
+            return existing, False
 
         # Verifica duplicata por hash
         if self._config.get("import.detect_duplicates", True):
             file_hash = calculate_file_hash(filepath)
             dup = self._db.get_book_by_hash(file_hash)
             if dup:
-                return None  # Duplicata encontrada
+                return dup, False  # Duplicata encontrada
         else:
             file_hash = ""
 
@@ -76,17 +76,17 @@ class LibraryManager:
 
         self._db.update_book(book_id, cover_path=cover_path)
 
-        return self._db.get_book(book_id)
+        return self._db.get_book(book_id), True
 
     def import_directory(self, directory: str | Path,
                          recursive: bool = True) -> list[dict]:
-        """Importa todos os documentos de um diretório."""
+        """Importa todos os documentos de um diretório. Retorna lista apenas de *novos* importados."""
         documents = find_documents(directory, recursive)
         imported = []
         for doc_path in documents:
-            result = self.import_file(doc_path)
-            if result:
-                imported.append(result)
+            book, is_new = self.import_file(doc_path)
+            if book and is_new:
+                imported.append(book)
         return imported
 
     def remove_book(self, book_id: int) -> bool:

@@ -1,5 +1,6 @@
 # Core GUI
 PyQt6>=6.6.0
+PyQt6-WebEngine>=6.6.0
 
 # Document Readers
 PyMuPDF>=1.23.0          # PDF rendering & text extraction

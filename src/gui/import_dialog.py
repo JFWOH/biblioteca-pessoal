@@ -37,13 +37,13 @@ class ImportWorker(QThread):
             self.progress.emit(i + 1, total, name)
 
             try:
-                result = self._library.import_file(filepath)
-                if result:
+                book, is_new = self._library.import_file(filepath)
+                if book and is_new:
                     imported += 1
-                    self.file_imported.emit(result)
+                    self.file_imported.emit(book)
                 else:
                     skipped += 1
-                    self.file_skipped.emit(filepath, "Duplicata ou formato inválido")
+                    self.file_skipped.emit(filepath, "Já existe na biblioteca (duplicata)")
             except Exception as e:
                 skipped += 1
                 self.file_skipped.emit(filepath, str(e))
