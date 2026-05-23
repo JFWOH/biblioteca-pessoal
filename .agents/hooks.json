@@ -1,0 +1,39 @@
+{
+  "pre-command-safety-gate": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .agents/scripts/safety_gate.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "post-edit-automated-tests": {
+    "PostToolUse": [
+      {
+        "matcher": "write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .agents/scripts/run_automated_tests.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  },
+  "session-stop-summary": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python .agents/scripts/session_summary.py",
+        "timeout": 10
+      }
+    ]
+  }
+}
