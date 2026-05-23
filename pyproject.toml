@@ -46,3 +46,11 @@ target-version = "py310"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyqt6"
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks integration tests",
+    "requires_ollama: marks tests that require Ollama running",
+    "requires_chromadb: marks tests that require ChromaDB persistence"
+]

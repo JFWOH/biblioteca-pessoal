@@ -23,6 +23,8 @@ class BookDetails(QWidget):
     rating_changed = pyqtSignal(int, int)  # book_id, rating
     tags_changed = pyqtSignal(int)  # book_id
     add_to_collection_requested = pyqtSignal(int)  # book_id
+    remove_from_collection_requested = pyqtSignal(int)  # book_id
+    fetch_metadata_requested = pyqtSignal(int)  # book_id
 
     def __init__(self, db: LibraryDB = None, parent=None):
         super().__init__(parent)
@@ -111,6 +113,19 @@ class BookDetails(QWidget):
         self._col_btn.clicked.connect(lambda: self._emit_action("collection"))
         btn_layout.addWidget(self._col_btn)
 
+        self._meta_btn = QPushButton("🌐  Metadados")
+        self._meta_btn.setObjectName("secondaryBtn")
+        self._meta_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._meta_btn.clicked.connect(lambda: self._emit_action("fetch_metadata"))
+        btn_layout.addWidget(self._meta_btn)
+
+        self._remove_col_btn = QPushButton("❌  Tirar desta Coleção")
+        self._remove_col_btn.setObjectName("secondaryBtn")
+        self._remove_col_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._remove_col_btn.clicked.connect(lambda: self._emit_action("remove_from_collection"))
+        self._remove_col_btn.hide()
+        btn_layout.addWidget(self._remove_col_btn)
+
         self._del_btn = QPushButton("🗑  Remover")
         self._del_btn.setStyleSheet("""
             QPushButton { background: transparent; border: 1px solid #3f3f46;
@@ -189,8 +204,16 @@ class BookDetails(QWidget):
             self.favorite_toggled.emit(book_id)
         elif action == "collection":
             self.add_to_collection_requested.emit(book_id)
+        elif action == "remove_from_collection":
+            self.remove_from_collection_requested.emit(book_id)
+        elif action == "fetch_metadata":
+            self.fetch_metadata_requested.emit(book_id)
         elif action == "delete":
             self.delete_requested.emit(book_id)
+
+    def set_collection_mode(self, in_collection: bool):
+        """Mostra ou esconde o botão de remover da coleção."""
+        self._remove_col_btn.setVisible(in_collection)
 
     def clear(self):
         self._book = None

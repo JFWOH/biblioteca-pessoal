@@ -18,19 +18,8 @@ class AnnotationItem(QFrame):
         super().__init__(parent)
         self._annotation = annotation
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet("""
-            QFrame {
-                background-color: #1e1e24;
-                border: 1px solid #27272a;
-                border-radius: 8px;
-                padding: 2px;
-            }
-            QFrame:hover {
-                border-color: #3f3f46;
-                background-color: #23232b;
-            }
-        """)
         self._setup_ui()
+        self.set_theme("dark")
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -43,15 +32,15 @@ class AnnotationItem(QFrame):
         type_icons = {"highlight": "🖍️", "note": "📝", "bookmark": "🔖"}
         type_labels = {"highlight": "Destaque", "note": "Nota", "bookmark": "Marcador"}
 
-        type_lbl = QLabel(f"{type_icons.get(ann_type, '📝')} {type_labels.get(ann_type, ann_type)}")
-        type_lbl.setStyleSheet("color: #818cf8; font-size: 11px; font-weight: 600;")
-        header.addWidget(type_lbl)
+        self._type_lbl = QLabel(f"{type_icons.get(ann_type, '📝')} {type_labels.get(ann_type, ann_type)}")
+        self._type_lbl.setStyleSheet("color: #818cf8; font-size: 11px; font-weight: 600;")
+        header.addWidget(self._type_lbl)
 
         header.addStretch()
 
         page = self._annotation.get("page_number", 0)
-        page_btn = QPushButton(f"Pág. {page + 1}")
-        page_btn.setStyleSheet("""
+        self._page_btn = QPushButton(f"Pág. {page + 1}")
+        self._page_btn.setStyleSheet("""
             QPushButton {
                 background: rgba(99, 102, 241, 0.15);
                 border: none; border-radius: 4px;
@@ -60,19 +49,20 @@ class AnnotationItem(QFrame):
             }
             QPushButton:hover { background: rgba(99, 102, 241, 0.3); }
         """)
-        page_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        page_btn.clicked.connect(lambda: self.goto_requested.emit(page))
-        header.addWidget(page_btn)
+        self._page_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._page_btn.clicked.connect(lambda: self.goto_requested.emit(page))
+        header.addWidget(self._page_btn)
 
         layout.addLayout(header)
 
         # Conteúdo
         content = self._annotation.get("content", "")
+        self._content_lbl = None
         if content:
-            content_lbl = QLabel(content)
-            content_lbl.setWordWrap(True)
-            content_lbl.setStyleSheet("color: #d4d4d8; font-size: 12px; line-height: 1.5;")
-            layout.addWidget(content_lbl)
+            self._content_lbl = QLabel(content)
+            self._content_lbl.setWordWrap(True)
+            self._content_lbl.setStyleSheet("color: #d4d4d8; font-size: 12px; line-height: 1.5;")
+            layout.addWidget(self._content_lbl)
 
         # Cor do destaque
         color = self._annotation.get("highlight_color", "#fbbf24")
@@ -85,28 +75,101 @@ class AnnotationItem(QFrame):
         # Footer: data + deletar
         footer = QHBoxLayout()
         date = self._annotation.get("created_at", "")
+        self._date_lbl = None
         if date:
-            date_lbl = QLabel(date[:16])
-            date_lbl.setStyleSheet("color: #52525b; font-size: 10px;")
-            footer.addWidget(date_lbl)
+            self._date_lbl = QLabel(date[:16])
+            self._date_lbl.setStyleSheet("color: #52525b; font-size: 10px;")
+            footer.addWidget(self._date_lbl)
 
         footer.addStretch()
 
-        del_btn = QPushButton("✕")
-        del_btn.setFixedSize(20, 20)
-        del_btn.setStyleSheet("""
+        self._del_btn = QPushButton("✕")
+        self._del_btn.setFixedSize(20, 20)
+        self._del_btn.setStyleSheet("""
             QPushButton {
                 background: transparent; border: none;
                 color: #52525b; font-size: 12px;
             }
             QPushButton:hover { color: #ef4444; }
         """)
-        del_btn.clicked.connect(
+        self._del_btn.clicked.connect(
             lambda: self.delete_requested.emit(self._annotation.get("id", 0))
         )
-        footer.addWidget(del_btn)
+        footer.addWidget(self._del_btn)
 
         layout.addLayout(footer)
+
+    def set_theme(self, theme: str):
+        if theme == "light":
+            bg_color = "#ffffff"
+            border_color = "#e4e4e7"
+            hover_border = "#a1a1aa"
+            hover_bg = "#f4f4f5"
+            type_color = "#6366f1"
+            page_bg = "rgba(99, 102, 241, 0.1)"
+            page_fg = "#6366f1"
+            page_hover = "rgba(99, 102, 241, 0.2)"
+            content_color = "#1A1A1A"
+            date_color = "#71717a"
+            del_color = "#71717a"
+        elif theme == "sepia":
+            bg_color = "#faf5ed"
+            border_color = "#d4cbb8"
+            hover_border = "#8b7355"
+            hover_bg = "#ebe5d9"
+            type_color = "#8b6c42"
+            page_bg = "rgba(139, 108, 66, 0.15)"
+            page_fg = "#8b6c42"
+            page_hover = "rgba(139, 108, 66, 0.3)"
+            content_color = "#5B4636"
+            date_color = "#8b7355"
+            del_color = "#8b7355"
+        else: # dark
+            bg_color = "#1e1e24"
+            border_color = "#27272a"
+            hover_border = "#3f3f46"
+            hover_bg = "#23232b"
+            type_color = "#818cf8"
+            page_bg = "rgba(99, 102, 241, 0.15)"
+            page_fg = "#818cf8"
+            page_hover = "rgba(99, 102, 241, 0.3)"
+            content_color = "#d4d4d8"
+            date_color = "#52525b"
+            del_color = "#52525b"
+
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: {bg_color};
+                border: 1px solid {border_color};
+                border-radius: 8px;
+                padding: 2px;
+            }}
+            QFrame:hover {{
+                border-color: {hover_border};
+                background-color: {hover_bg};
+            }}
+        """)
+        self._type_lbl.setStyleSheet(f"color: {type_color}; font-size: 11px; font-weight: 600; background: transparent; border: none;")
+        self._page_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {page_bg};
+                border: none; border-radius: 4px;
+                padding: 2px 8px; color: {page_fg};
+                font-size: 11px;
+            }}
+            QPushButton:hover {{ background: {page_hover}; }}
+        """)
+        if hasattr(self, "_content_lbl") and self._content_lbl:
+            self._content_lbl.setStyleSheet(f"color: {content_color}; font-size: 12px; line-height: 1.5; background: transparent; border: none;")
+        if hasattr(self, "_date_lbl") and self._date_lbl:
+            self._date_lbl.setStyleSheet(f"color: {date_color}; font-size: 10px; background: transparent; border: none;")
+        self._del_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; border: none;
+                color: {del_color}; font-size: 12px;
+            }}
+            QPushButton:hover {{ color: #ef4444; }}
+        """)
 
 
 class AnnotationPanel(QWidget):
@@ -139,13 +202,13 @@ class AnnotationPanel(QWidget):
         layout.setSpacing(10)
 
         # Título
-        title = QLabel("📝 Anotações")
-        font = title.font()
+        self._title = QLabel("📝 Anotações")
+        font = self._title.font()
         font.setPointSize(13)
         font.setWeight(QFont.Weight.Bold)
-        title.setFont(font)
-        title.setStyleSheet("color: #e4e4e7;")
-        layout.addWidget(title)
+        self._title.setFont(font)
+        self._title.setStyleSheet("color: #e4e4e7;")
+        layout.addWidget(self._title)
 
         # Filtro por tipo
         filter_layout = QHBoxLayout()
@@ -171,15 +234,15 @@ class AnnotationPanel(QWidget):
         layout.addLayout(filter_layout)
 
         # Área de nova anotação
-        add_frame = QFrame()
-        add_frame.setStyleSheet("""
+        self._add_frame = QFrame()
+        self._add_frame.setStyleSheet("""
             QFrame {
                 background-color: #18181b;
                 border: 1px solid #27272a;
                 border-radius: 8px;
             }
         """)
-        add_layout = QVBoxLayout(add_frame)
+        add_layout = QVBoxLayout(self._add_frame)
         add_layout.setContentsMargins(10, 8, 10, 8)
         add_layout.setSpacing(6)
 
@@ -219,33 +282,34 @@ class AnnotationPanel(QWidget):
         actions.addStretch()
 
         # Botão adicionar nota
-        add_note_btn = QPushButton("+ Nota")
-        add_note_btn.setStyleSheet("""
+        self._add_note_btn = QPushButton("+ Nota")
+        self._add_note_btn.setStyleSheet("""
             QPushButton {
                 background: #6366f1; border: none; border-radius: 4px;
                 padding: 4px 12px; color: white; font-size: 11px; font-weight: 600;
             }
             QPushButton:hover { background: #818cf8; }
+        }
         """)
-        add_note_btn.clicked.connect(self._add_note)
-        actions.addWidget(add_note_btn)
+        self._add_note_btn.clicked.connect(self._add_note)
+        actions.addWidget(self._add_note_btn)
 
         # Botão marcador
-        bookmark_btn = QPushButton("🔖")
-        bookmark_btn.setFixedSize(28, 28)
-        bookmark_btn.setToolTip("Adicionar marcador nesta página")
-        bookmark_btn.setStyleSheet("""
+        self._bookmark_btn = QPushButton("🔖")
+        self._bookmark_btn.setFixedSize(28, 28)
+        self._bookmark_btn.setToolTip("Adicionar marcador nesta página")
+        self._bookmark_btn.setStyleSheet("""
             QPushButton {
                 background: #27272a; border: none; border-radius: 4px;
                 font-size: 14px;
             }
             QPushButton:hover { background: #3f3f46; }
         """)
-        bookmark_btn.clicked.connect(self._add_bookmark)
-        actions.addWidget(bookmark_btn)
+        self._bookmark_btn.clicked.connect(self._add_bookmark)
+        actions.addWidget(self._bookmark_btn)
 
         add_layout.addLayout(actions)
-        layout.addWidget(add_frame)
+        layout.addWidget(self._add_frame)
 
         # Lista de anotações (scroll)
         self._scroll = QScrollArea()
@@ -267,25 +331,147 @@ class AnnotationPanel(QWidget):
         self._count_label.setStyleSheet("color: #52525b; font-size: 11px;")
         layout.addWidget(self._count_label)
 
+        self.set_theme("dark")
+
+    def set_theme(self, theme: str):
+        self._theme = theme
+
+        if theme == "light":
+            text_main = "#1A1A1A"
+            text_sec = "#71717a"
+            bg_input = "#f4f4f5"
+            border_color = "#d4d4d8"
+            bg_panel = "#ffffff"
+            add_bg = "#f4f4f5"
+            btn_primary_bg = "#6366f1"
+            btn_primary_hover = "#818cf8"
+            btn_sec_bg = "#e4e4e7"
+            btn_sec_hover = "#d4d4d8"
+            btn_sec_fg = "#1A1A1A"
+        elif theme == "sepia":
+            text_main = "#5B4636"
+            text_sec = "#8b7355"
+            bg_input = "#ebe5d9"
+            border_color = "#d4cbb8"
+            bg_panel = "#faf5ed"
+            add_bg = "#ebe5d9"
+            btn_primary_bg = "#8b6c42"
+            btn_primary_hover = "#a18055"
+            btn_sec_bg = "#dfd8c8"
+            btn_sec_hover = "#d4cbb8"
+            btn_sec_fg = "#5B4636"
+        else: # dark
+            text_main = "#e4e4e7"
+            text_sec = "#52525b"
+            bg_input = "#0f0f17"
+            border_color = "#27272a"
+            bg_panel = "#18181b"
+            add_bg = "#18181b"
+            btn_primary_bg = "#6366f1"
+            btn_primary_hover = "#818cf8"
+            btn_sec_bg = "#27272a"
+            btn_sec_hover = "#3f3f46"
+            btn_sec_fg = "#e4e4e7"
+
+        # Apply styles to self
+        self.setStyleSheet(f"background-color: {bg_panel};")
+
+        # Título
+        self._title.setStyleSheet(f"color: {text_main};")
+
+        # Filtro
+        self._type_filter.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {bg_panel}; border: 1px solid {border_color};
+                border-radius: 6px; padding: 6px 10px; color: {text_main};
+                font-size: 12px;
+            }}
+            QComboBox::drop-down {{ border: none; }}
+            QComboBox QAbstractItemView {{
+                background-color: {bg_panel}; border: 1px solid {border_color};
+                selection-background-color: {bg_input};
+                color: {text_main};
+            }}
+        """)
+
+        # Add frame
+        self._add_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {add_bg};
+                border: 1px solid {border_color};
+                border-radius: 8px;
+            }}
+        """)
+
+        # Note input
+        self._note_input.setStyleSheet(f"""
+            QTextEdit {{
+                background: {bg_input}; border: 1px solid {border_color};
+                border-radius: 6px; padding: 6px; color: {text_main};
+                font-size: 12px;
+            }}
+            QTextEdit:focus {{ border-color: {btn_primary_bg}; }}
+        """)
+
+        # Note button
+        self._add_note_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {btn_primary_bg}; border: none; border-radius: 4px;
+                padding: 4px 12px; color: white; font-size: 11px; font-weight: 600;
+            }}
+            QPushButton:hover {{ background: {btn_primary_hover}; }}
+        """)
+
+        # Bookmark button
+        self._bookmark_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {btn_sec_bg}; border: none; border-radius: 4px;
+                color: {btn_sec_fg};
+                font-size: 14px;
+            }}
+            QPushButton:hover {{ background: {btn_sec_hover}; }}
+        """)
+
+        # Count label
+        self._count_label.setStyleSheet(f"color: {text_sec}; font-size: 11px;")
+
+        # Propagar tema para os itens da lista
+        for i in range(self._list_layout.count()):
+            w = self._list_layout.itemAt(i).widget()
+            if isinstance(w, AnnotationItem):
+                w.set_theme(theme)
+
     def set_page(self, page: int):
         """Define a página atual para novas anotações."""
         self._current_page = page
 
+    def set_book_id(self, book_id: int):
+        """Define o book_id para filtrar as anotações."""
+        self._book_id = book_id
+
     def load_annotations(self, annotations: list[dict]):
-        """Carrega lista de anotações no painel."""
+        """Carrega lista de anotações no painel com filtragem estrita por book_id."""
         # Limpa lista atual
         while self._list_layout.count():
             item = self._list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        for ann in annotations:
+        # Filtro estrito em memória para garantir isolamento na UI
+        filtered_annotations = [
+            ann for ann in annotations
+            if ann.get("book_id") == self._book_id
+        ]
+
+        for ann in filtered_annotations:
             widget = AnnotationItem(ann)
+            if hasattr(self, "_theme"):
+                widget.set_theme(self._theme)
             widget.delete_requested.connect(self.annotation_deleted.emit)
             widget.goto_requested.connect(self.goto_page.emit)
             self._list_layout.addWidget(widget)
 
-        count = len(annotations)
+        count = len(filtered_annotations)
         self._count_label.setText(
             f"{count} {'anotação' if count == 1 else 'anotações'}"
         )

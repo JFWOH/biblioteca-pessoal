@@ -249,7 +249,6 @@ class AddToCollectionDialog(QDialog):
                 else Qt.CheckState.Unchecked
             )
             self._collection_list.addItem(item)
-
         layout.addWidget(self._collection_list, stretch=1)
 
         # Botões

@@ -15,26 +15,49 @@ class TOCWidget(QTreeWidget):
         self.setHeaderHidden(True)
         self.setIndentation(20)
         self.setAnimated(True)
-        self.setStyleSheet("""
-            QTreeWidget {
-                background-color: #18181b;
+        self.set_theme("dark")
+        self.itemClicked.connect(self._on_item_clicked)
+
+    def set_theme(self, theme: str):
+        """Aplica folha de estilos (QSS) correspondente ao tema selecionado (Claro, Sépia ou Escuro)."""
+        if theme == "light":
+            bg = "#f4f4f5"
+            fg = "#1A1A1A"
+            hover = "#e4e4e7"
+            selected_bg = "rgba(99, 102, 241, 0.1)"
+            selected_fg = "#6366f1"
+        elif theme == "sepia":
+            bg = "#ebe5d9"
+            fg = "#5B4636"
+            hover = "#dfd8c8"
+            selected_bg = "rgba(139, 108, 66, 0.15)"
+            selected_fg = "#8b6c42"
+        else: # "dark" ou fallback
+            bg = "#18181b"
+            fg = "#e4e4e7"
+            hover = "#27272a"
+            selected_bg = "rgba(99, 102, 241, 0.2)"
+            selected_fg = "#818cf8"
+
+        self.setStyleSheet(f"""
+            QTreeWidget {{
+                background-color: {bg};
                 border: none;
-                color: #e4e4e7;
+                color: {fg};
                 font-size: 13px;
-            }
-            QTreeWidget::item {
+            }}
+            QTreeWidget::item {{
                 padding: 6px 8px;
                 border-radius: 4px;
-            }
-            QTreeWidget::item:hover {
-                background-color: #27272a;
-            }
-            QTreeWidget::item:selected {
-                background-color: rgba(99, 102, 241, 0.2);
-                color: #818cf8;
-            }
+            }}
+            QTreeWidget::item:hover {{
+                background-color: {hover};
+            }}
+            QTreeWidget::item:selected {{
+                background-color: {selected_bg};
+                color: {selected_fg};
+            }}
         """)
-        self.itemClicked.connect(self._on_item_clicked)
 
     def load_toc(self, entries: list[TOCEntry]) -> None:
         """Carrega o sumário no widget."""

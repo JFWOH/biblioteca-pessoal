@@ -11,6 +11,7 @@ class Sidebar(QWidget):
     """Barra lateral com navegação por seções."""
 
     section_changed = pyqtSignal(str)  # nome da seção
+    opds_toggled = pyqtSignal(bool)    # estado do servidor
 
     SECTIONS = [
         ("all", "📚  Todos os Livros"),
@@ -18,6 +19,7 @@ class Sidebar(QWidget):
         ("unread", "📋  Não Lidos"),
         ("read", "✅  Lidos"),
         ("favorites", "⭐  Favoritos"),
+        ("global_search", "🔍  Pesquisa Global"),
     ]
 
     def __init__(self, parent=None):
@@ -34,14 +36,14 @@ class Sidebar(QWidget):
         layout.setSpacing(2)
 
         # Logo / Título
-        title = QLabel("📚 Biblioteca")
-        title.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        font = title.font()
+        self._title = QLabel("📚 Biblioteca")
+        self._title.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        font = self._title.font()
         font.setPointSize(16)
         font.setWeight(QFont.Weight.Bold)
-        title.setFont(font)
-        title.setStyleSheet("color: #e4e4e7; padding: 0 4px 16px 4px;")
-        layout.addWidget(title)
+        self._title.setFont(font)
+        self._title.setStyleSheet("color: #e4e4e7; padding: 0 4px 16px 4px;")
+        layout.addWidget(self._title)
 
         # Seção: Biblioteca
         section_label = QLabel("BIBLIOTECA")
@@ -55,15 +57,20 @@ class Sidebar(QWidget):
             layout.addWidget(btn)
             self._buttons[key] = btn
 
-        # Seção: Coleções (placeholder para expansão futura)
+        # Seção: Coleções
         layout.addSpacing(16)
         collections_label = QLabel("COLEÇÕES")
         collections_label.setObjectName("sidebarSection")
         layout.addWidget(collections_label)
 
-        add_collection_btn = QPushButton("➕  Nova Coleção")
-        add_collection_btn.setObjectName("secondaryBtn")
-        layout.addWidget(add_collection_btn)
+        self._collections_layout = QVBoxLayout()
+        self._collections_layout.setContentsMargins(0, 0, 0, 0)
+        self._collections_layout.setSpacing(2)
+        layout.addLayout(self._collections_layout)
+
+        self.add_collection_btn = QPushButton("➕  Nova Coleção")
+        self.add_collection_btn.setObjectName("secondaryBtn")
+        layout.addWidget(self.add_collection_btn)
 
         # Seção: Tags
         layout.addSpacing(16)
@@ -88,8 +95,47 @@ class Sidebar(QWidget):
         self._stats_label.setWordWrap(True)
         layout.addWidget(self._stats_label)
 
+        # Servidor OPDS
+        layout.addSpacing(8)
+        self._opds_btn = QPushButton("📡  Iniciar Servidor OPDS")
+        self._opds_btn.setCheckable(True)
+        self._opds_btn.setStyleSheet("""
+            QPushButton { background: transparent; border: 1px solid #3f3f46; border-radius: 6px; color: #a1a1aa; padding: 6px; }
+            QPushButton:checked { background: rgba(16, 185, 129, 0.2); border-color: #10b981; color: #10b981; }
+        """)
+        self._opds_btn.toggled.connect(self.opds_toggled.emit)
+        layout.addWidget(self._opds_btn)
+
         # Seleciona "Todos" por padrão
         self._buttons["all"].setChecked(True)
+
+        # Inicializa o tema padrão como escuro
+        self.set_theme("dark")
+
+    def set_theme(self, theme: str) -> None:
+        """Aplica folha de estilo específica da barra lateral dependendo do tema ativo."""
+        if theme == "light":
+            title_color = "#1A1A1A"
+            stats_color = "#555555"
+            opds_color = "#555555"
+            opds_border = "#d4d4d8"
+        elif theme == "sepia":
+            title_color = "#433422"
+            stats_color = "#705E4B"
+            opds_color = "#433422"
+            opds_border = "#d4cbb8"
+        else: # dark
+            title_color = "#e4e4e7"
+            stats_color = "#52525b"
+            opds_color = "#a1a1aa"
+            opds_border = "#3f3f46"
+
+        self._title.setStyleSheet(f"color: {title_color}; padding: 0 4px 16px 4px;")
+        self._stats_label.setStyleSheet(f"color: {stats_color}; font-size: 11px; padding: 8px 4px;")
+        self._opds_btn.setStyleSheet(f"""
+            QPushButton {{ background: transparent; border: 1px solid {opds_border}; border-radius: 6px; color: {opds_color}; padding: 6px; }}
+            QPushButton:checked {{ background: rgba(16, 185, 129, 0.2); border-color: #10b981; color: #10b981; }}
+        """)
 
     def _on_section_click(self, key: str):
         for k, btn in self._buttons.items():
@@ -105,7 +151,21 @@ class Sidebar(QWidget):
             f"📊 {total} livros · {reading} lendo · {read} lidos"
         )
 
+    def clear_collections(self):
+        """Limpa as coleções carregadas."""
+        while self._collections_layout.count():
+            item = self._collections_layout.takeAt(0)
+            if item.widget():
+                key = [k for k, v in self._buttons.items() if v == item.widget()]
+                if key:
+                    del self._buttons[key[0]]
+                item.widget().deleteLater()
+
     def add_collection_button(self, name: str, collection_id: int):
         """Adiciona um botão de coleção à sidebar."""
-        # Implementação futura
-        pass
+        key = f"collection_{collection_id}"
+        btn = QPushButton(f"📁  {name}")
+        btn.setCheckable(True)
+        btn.clicked.connect(lambda checked, k=key: self._on_section_click(k))
+        self._collections_layout.addWidget(btn)
+        self._buttons[key] = btn

@@ -21,9 +21,14 @@ from src.gui.reader_view import ReaderView
 from src.gui.book_details import BookDetails
 from src.gui.styles import get_theme
 from src.gui.import_dialog import ImportDialog
-from src.gui.settings_dialog import SettingsDialog
 from src.gui.collection_dialog import CollectionDialog, AddToCollectionDialog
+from src.gui.workers.metadata_worker import MetadataWorker
+from src.gui.workers.opds_worker import OPDSWorker
+from src.gui.workers.rag_worker import RAGWorker
+import os
+from PyQt6.QtGui import QPixmap
 from src.gui.widgets.stats_panel import StatsPanel
+from src.gui.widgets.rag_panel import RAGPanel
 from src.utils.constants import FILE_FILTER, DATA_DIR
 from src.utils.export import export_annotations_markdown
 from src.core.watcher import DirectoryWatcher
@@ -42,6 +47,11 @@ class MainWindow(QMainWindow):
         self._library = LibraryManager(self._db, self._config)
         self._search_engine = SearchEngine(self._db)
 
+        # Inicializa RAG engine (graceful — não trava se Ollama offline)
+        self._rag_engine = None
+        self._rag_worker = None
+        self._setup_rag_engine()
+
         self._setup_window()
         self._setup_menu()
         self._setup_ui()
@@ -49,6 +59,13 @@ class MainWindow(QMainWindow):
         self._apply_theme()
         self._load_library()
         self._setup_watcher()
+
+        # Workers
+        self._metadata_worker = None
+        self._opds_worker = None
+
+        # Verifica status do Ollama após UI pronta
+        self._check_ollama_status()
 
     def _setup_window(self):
         self.setWindowTitle("📚 Biblioteca Pessoal")
@@ -119,6 +136,19 @@ class MainWindow(QMainWindow):
         export_action.triggered.connect(self._export_annotations)
         org_menu.addAction(export_action)
 
+        # Menu Ferramentas (RAG)
+        tools_menu = menubar.addMenu("&Ferramentas")
+        ai_action = QAction("🧠 Assistente de Livros (IA)", self)
+        ai_action.setShortcut(QKeySequence("Ctrl+Shift+A"))
+        ai_action.triggered.connect(self._show_rag_panel)
+        tools_menu.addAction(ai_action)
+
+        tools_menu.addSeparator()
+
+        reindex_action = QAction("🔄 Reindexar Biblioteca (IA)", self)
+        reindex_action.triggered.connect(self._on_rag_index_all)
+        tools_menu.addAction(reindex_action)
+
         # Menu Ajuda
         help_menu = menubar.addMenu("A&juda")
         about = QAction("Sobre", self)
@@ -132,10 +162,17 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
+        # Main horizontal splitter
+        self._main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._main_splitter.setHandleWidth(1)
+        self._main_splitter.setStyleSheet("QSplitter::handle { background: #27272a; }")
+
         # Sidebar
         self._sidebar = Sidebar()
         self._sidebar.section_changed.connect(self._on_section_changed)
-        main_layout.addWidget(self._sidebar)
+        self._sidebar.add_collection_btn.clicked.connect(self._on_new_collection)
+        self._sidebar.opds_toggled.connect(self._on_opds_toggled)
+        self._main_splitter.addWidget(self._sidebar)
 
         # Conteúdo principal (stack: biblioteca | leitor)
         self._main_stack = QStackedWidget()
@@ -164,6 +201,7 @@ class MainWindow(QMainWindow):
         self._library_view = LibraryView()
         self._library_view.book_selected.connect(self._on_book_selected)
         self._library_view.book_open.connect(self._on_book_open)
+        self._library_view.bulk_delete_requested.connect(self._on_bulk_delete)
         lib_splitter.addWidget(self._library_view)
 
         self._book_details = BookDetails(db=self._db)
@@ -172,6 +210,8 @@ class MainWindow(QMainWindow):
         self._book_details.delete_requested.connect(self._on_delete_book)
         self._book_details.rating_changed.connect(self._on_rating_changed)
         self._book_details.add_to_collection_requested.connect(self._add_book_to_collection)
+        self._book_details.remove_from_collection_requested.connect(self._remove_from_collection)
+        self._book_details.fetch_metadata_requested.connect(self._on_fetch_metadata)
         lib_splitter.addWidget(self._book_details)
 
         lib_splitter.setStretchFactor(0, 1)
@@ -187,13 +227,55 @@ class MainWindow(QMainWindow):
         self._reader_view.annotation_added.connect(self._on_annotation_added)
         self._reader_view.annotation_deleted.connect(self._on_annotation_deleted)
         self._reader_view.fullscreen_toggled.connect(self._on_fullscreen)
+        self._reader_view.reading_context_updated.connect(lambda b, t, p, txt: self._rag_panel.set_reading_context(b, t, p, txt))
+        self._reader_view.ai_action_requested.connect(self._on_ai_action_requested)
         self._main_stack.addWidget(self._reader_view)  # index 1
 
         # ── Página de Estatísticas ──
         self._stats_panel = StatsPanel()
         self._main_stack.addWidget(self._stats_panel)  # index 2
 
-        main_layout.addWidget(self._main_stack, stretch=1)
+        # ── Página do Assistente IA (RAG) ──
+        self._rag_panel = RAGPanel()
+        self._rag_panel.query_requested.connect(self._on_rag_query)
+        self._rag_panel.index_requested.connect(self._on_rag_index_all)
+        self._rag_panel.stop_requested.connect(self._on_rag_stop)
+        self._rag_panel.model_changed.connect(self._on_model_changed)
+        self._rag_panel.save_annotation_requested.connect(self._on_rag_annotation_save)
+        self._rag_panel.back_requested.connect(lambda: self._main_stack.setCurrentIndex(0))
+        self._main_stack.addWidget(self._rag_panel)  # index 3
+
+        self._main_splitter.addWidget(self._main_stack)
+        main_layout.addWidget(self._main_splitter, stretch=1)
+
+        # Splitter stretch factors
+        self._main_splitter.setStretchFactor(0, 0)
+        self._main_splitter.setStretchFactor(1, 1)
+        self._main_splitter.setSizes([240, 1040])
+
+        # Shortcuts
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        self._shortcut_sidebar = QShortcut(QKeySequence("Ctrl+B"), self)
+        self._shortcut_sidebar.activated.connect(self._toggle_sidebar)
+
+        self._shortcut_rag = QShortcut(QKeySequence("Ctrl+R"), self)
+        self._shortcut_rag.activated.connect(self._toggle_rag)
+
+    def _toggle_sidebar(self):
+        self._sidebar.setVisible(not self._sidebar.isVisible())
+
+    def _toggle_rag(self):
+        current_index = self._main_stack.currentIndex()
+        if current_index == 1:
+            # Se o leitor (ReaderView) estiver ativo, delega o toggle do painel RAG interno
+            self._reader_view._ai_panel_btn.setChecked(not self._reader_view._ai_panel_btn.isChecked())
+            self._reader_view._toggle_ai_panel()
+        else:
+            # Se estiver na visualização da biblioteca/estatísticas, alterna a visibilidade do RAGPanel como página standalone
+            if current_index == 3:
+                self._main_stack.setCurrentIndex(0)
+            else:
+                self._show_rag_panel()
 
     def _setup_statusbar(self):
         self._statusbar = QStatusBar()
@@ -204,6 +286,8 @@ class MainWindow(QMainWindow):
         theme = self._config.theme
         self.setStyleSheet(get_theme(theme))
         self._reader_view.set_theme(theme)
+        self._sidebar.set_theme(theme)
+        self._rag_panel.set_theme(theme)
 
     def _set_theme(self, theme: str):
         self._config.theme = theme
@@ -219,22 +303,42 @@ class MainWindow(QMainWindow):
             books = self._db.get_favorite_books()
         elif section in ("unread", "reading", "read"):
             books = self._db.get_books_by_status(section)
+        elif section.startswith("collection_"):
+            try:
+                col_id = int(section.split("_")[1])
+                books = self._db.get_books_in_collection(col_id)
+            except ValueError:
+                books = self._db.get_all_books()
         else:
             books = self._db.get_all_books()
 
+        self._load_collections()
         self._library_view.load_books(books)
         stats = self._db.get_statistics()
         self._sidebar.update_stats(stats)
         self._update_statusbar()
 
+    def _load_collections(self):
+        """Carrega coleções na barra lateral."""
+        self._sidebar.clear_collections()
+        collections = self._db.get_collections()
+        for col in collections:
+            self._sidebar.add_collection_button(col["name"], col["id"])
+
     # ── Handlers ───────────────────────────────────────────────────────
 
     def _on_section_changed(self, section: str):
+        self._current_section = section
         self._book_details.clear()
+        self._book_details.set_collection_mode(section.startswith("collection_"))
         if section == "stats":
             stats = self._db.get_statistics()
             self._stats_panel.update_stats(stats)
             self._main_stack.setCurrentIndex(2)
+        elif section in ("ai_assistant", "global_search"):
+            if section == "global_search":
+                self._rag_panel.clear_reading_context()
+            self._show_rag_panel()
         else:
             self._main_stack.setCurrentIndex(0)
             self._load_library(section)
@@ -274,6 +378,12 @@ class MainWindow(QMainWindow):
         start_page = progress["current_page"] if progress else 0
 
         self._reader_view.open_book(book, start_page)
+        
+        # Injeta o RAGPanel no leitor e o esconde por padrão
+        if self._rag_panel.parentWidget() != self._reader_view:
+            self._reader_view.set_ai_panel(self._rag_panel)
+        self._reader_view.hide_ai_panel()
+        
         self._main_stack.setCurrentIndex(1)
         self._sidebar.hide()
         self._config.add_recent_file(filepath)
@@ -284,6 +394,7 @@ class MainWindow(QMainWindow):
 
     def _close_reader(self):
         self._reader_view.close_reader()
+        self._reader_view.hide_ai_panel()
         self._main_stack.setCurrentIndex(0)
         self._sidebar.show()
         self._load_library()
@@ -292,14 +403,29 @@ class MainWindow(QMainWindow):
         self._db.update_reading_progress(book_id, page, total)
         self._reader_view.set_annotation_page(page)
 
+    def _on_rag_annotation_save(self, book_id: int, page: int, content: str):
+        """Salva uma anotação gerada pela IA, capturando o book_id de forma explícita."""
+        current_book_id = self._reader_view._book_id
+        if current_book_id <= 0:
+            current_book_id = book_id
+        
+        self._on_annotation_added(
+            current_book_id,
+            {"page": page, "content": content, "type": "ai_note", "color": "#6366f1"}
+        )
+
     def _on_annotation_added(self, book_id: int, data: dict):
         """Persiste uma nova anotação no banco."""
+        if self._reader_view._book_id > 0 and book_id != self._reader_view._book_id:
+            book_id = self._reader_view._book_id
+
         self._db.add_annotation(
             book_id=book_id,
-            page_number=data.get("page", 0),
+            page_number=data.get("page", data.get("page_number", 0)),
             content=data.get("content", ""),
-            highlight_color=data.get("color", "#fbbf24"),
-            annotation_type=data.get("type", "note"),
+            highlight_color=data.get("color", data.get("highlight_color", "#fbbf24")),
+            annotation_type=data.get("type", data.get("annotation_type", "note")),
+            position_data=data.get("position_data", "{}"),
         )
         # Recarrega anotações no painel
         annotations = self._db.get_annotations(book_id)
@@ -460,10 +586,435 @@ class MainWindow(QMainWindow):
                 f"📝 Anotações exportadas: {output.name}", 5000
             )
 
+    def _on_new_collection(self):
+        """Cria uma nova coleção através da sidebar."""
+        from src.gui.widgets.collection_dialog import CollectionDialog
+        dialog = CollectionDialog(self._db, self)
+        if dialog.exec():
+            self._load_collections()
+
     def _add_book_to_collection(self, book_id: int):
         """Abre diálogo para adicionar livro a uma coleção."""
+        from src.gui.collection_dialog import AddToCollectionDialog
         dialog = AddToCollectionDialog(self._db, book_id, self)
-        dialog.exec()
+        if dialog.exec():
+            self._load_collections()
+            
+            # Recarrega a biblioteca para atualizar a view se estiver em uma coleção
+            for key, btn in self._sidebar._buttons.items():
+                if btn.isChecked():
+                    self._load_library(key)
+                    break
+
+    def _remove_from_collection(self, book_id: int):
+        """Remove o livro apenas da coleção que está sendo visualizada."""
+        if hasattr(self, "_current_section") and self._current_section.startswith("collection_"):
+            col_id = int(self._current_section.split("_")[1])
+            self._db.remove_book_from_collection(book_id, col_id)
+            self._book_details.clear()
+            self._load_collections()
+            self._load_library(self._current_section)
+
+    def _on_fetch_metadata(self, book_id: int):
+        book = self._db.get_book(book_id)
+        if not book:
+            return
+            
+        title = book.get("title", "")
+        author = book.get("author", "")
+        
+        self._statusbar.showMessage("🌐 Buscando metadados na web...")
+        
+        self._metadata_worker = MetadataWorker(title, author)
+        self._metadata_worker.metadata_found.connect(lambda md: self._on_metadata_found(book_id, md))
+        self._metadata_worker.cover_downloaded.connect(lambda cover_bytes: self._on_cover_downloaded(book_id, cover_bytes))
+        self._metadata_worker.error_occurred.connect(lambda err: self._statusbar.showMessage(f"⚠️ {err}", 5000))
+        self._metadata_worker.finished_work.connect(lambda: self._statusbar.showMessage("✅ Busca concluída", 3000))
+        self._metadata_worker.start()
+        
+    def _on_metadata_found(self, book_id: int, md: dict):
+        # Atualiza apenas os campos importantes e ignora os vazios
+        updates = {}
+        if md.get("title"): updates["title"] = md["title"]
+        if md.get("author"): updates["author"] = md["author"]
+        if md.get("publisher"): updates["publisher"] = md["publisher"]
+        if md.get("published_year"): updates["published_year"] = md["published_year"]
+        if md.get("description"): updates["description"] = md["description"]
+        if md.get("isbn"): updates["isbn"] = md["isbn"]
+        
+        if updates:
+            self._db.update_book(book_id, **updates)
+            self._load_library(getattr(self, "_current_section", "all"))
+            # Atualiza o painel de detalhes
+            self._book_details.show_book(self._db.get_book(book_id))
+
+    def _on_cover_downloaded(self, book_id: int, cover_bytes: bytes):
+        covers_dir = self._config.get("library.covers_dir", "data/covers")
+        os.makedirs(covers_dir, exist_ok=True)
+        cover_path = os.path.join(covers_dir, f"cover_{book_id}.jpg")
+        
+        try:
+            with open(cover_path, "wb") as f:
+                f.write(cover_bytes)
+            self._db.update_book(book_id, cover_path=cover_path)
+            self._load_library(getattr(self, "_current_section", "all"))
+            self._book_details.show_book(self._db.get_book(book_id))
+        except Exception as e:
+            self._statusbar.showMessage(f"Erro ao salvar capa: {e}", 5000)
+
+    def _on_opds_toggled(self, checked: bool):
+        from src.utils.network import obter_ip_local
+        if checked:
+            ip = obter_ip_local()
+            self._statusbar.showMessage("Iniciando Servidor OPDS...")
+            self._opds_worker = OPDSWorker(host="0.0.0.0", port=8000)
+            self._opds_worker.server_started.connect(
+                lambda url: self._sidebar._opds_btn.setText(f"Servidor ON ({ip})")
+            )
+            self._opds_worker.error_occurred.connect(
+                lambda err: self._statusbar.showMessage(f"⚠️ {err}", 5000)
+            )
+            self._opds_worker.start()
+            
+            # QMessageBox com instruções - Não modal para não bloquear a interface principal indefinidamente,
+            # ou bloqueante mas com a certeza que o worker já está rodando em background.
+            full_url = f"http://{ip}:8000/opds"
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Servidor OPDS Ativo")
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setText("O servidor OPDS está rodando em background.")
+            msg.setInformativeText(
+                f"Você pode conectar seus aplicativos de leitura usando o endereço abaixo:\n\n"
+                f"<b>{full_url}</b>\n\n"
+                "Instruções para aplicativos móveis (ex: Moon+ Reader):\n"
+                "• Abra a aba de 'Rede' ou 'Net Library'.\n"
+                "• Escolha a opção para 'Adicionar novo catálogo' (Add new catalog).\n"
+                f"• Insira a URL exata: {full_url}\n"
+                "• Salve e atualize para carregar todos os livros."
+            )
+            # Torna o diálogo não-modal para permitir o uso da biblioteca enquanto o servidor roda
+            msg.setModal(False)
+            msg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            msg.show()
+            self._opds_msg = msg
+        else:
+            if self._opds_worker:
+                self._opds_worker.stop()
+                self._sidebar._opds_btn.setText("📡  Iniciar Servidor OPDS")
+                self._statusbar.showMessage("Servidor OPDS Parado", 3000)
+
+    # ── RAG / IA ───────────────────────────────────────────────────────
+
+    def _setup_rag_engine(self) -> None:
+        """Inicializa o RAGEngine. Falha silenciosamente se ChromaDB indisponível."""
+        try:
+            from src.core.rag_engine import RAGEngine
+            from src.utils.constants import DATA_DIR
+            chroma_path = DATA_DIR / "chroma_db"
+            db_path = self._db._db_path
+            self._rag_engine = RAGEngine(
+                db_path=db_path,
+                chroma_path=chroma_path,
+                ollama_url=self._config.get("rag.ollama_url", "http://localhost:11434"),
+                embed_model=self._config.get("rag.embed_model", "nomic-embed-text"),
+                llm_model=self._config.get("rag.llm_model", "gemma4:e4b"),
+            )
+        except Exception as exc:
+            import traceback
+            print(
+                f"[RAGEngine][INIT ERROR] Falha ao inicializar o motor RAG: {exc}",
+                flush=True,
+            )
+            traceback.print_exc()
+            self._rag_engine = None
+
+    def _check_ollama_status(self) -> None:
+        """Verifica status do Ollama, aciona o wizard se ausente, e atualiza o painel RAG."""
+        if self._rag_engine is None:
+            self._rag_panel.set_ollama_status(False)
+            return
+
+        available = self._rag_engine.is_ollama_available()
+
+        # Se não detectado e usuário abriu o assistente de IA
+        if not available:
+            from PyQt6.QtWidgets import QDialog
+            from src.gui.dialogs.ollama_wizard import OllamaWizardDialog
+            wizard = OllamaWizardDialog(self)
+            if wizard.exec() == QDialog.DialogCode.Accepted:
+                available = self._rag_engine.is_ollama_available()
+
+        if available:
+            # Atualiza lista de modelos no UI
+            models = self._rag_engine.list_local_models()
+            installed_names = [m["name"] for m in models]
+            self._rag_panel.update_model_list(installed_names)
+
+        model = self._config.get("rag.llm_model", "gemma4:e4b")
+        self._rag_panel.set_ollama_status(available, model if available else "")
+        count = self._rag_engine.get_indexed_count()
+        self._rag_panel.set_indexed_count(count)
+
+    def _on_model_changed(self, model_id: str) -> None:
+        """Salva a preferência de modelo do usuário e atualiza o motor RAG."""
+        self._config.set("rag.llm_model", model_id)
+        if self._rag_engine:
+            self._rag_engine.set_llm_model(model_id)
+        self._statusbar.showMessage(f"🤖 Modelo IA alterado para {model_id}", 3000)
+        # Sincroniza o indicador de status da interface
+        self._rag_panel.set_ollama_status(True, model_id)
+
+    def _show_rag_panel(self) -> None:
+        """Navega para o painel do Assistente IA (visão cheia)."""
+        # Se estiver ancorado no leitor, devolve para a stack principal
+        if self._rag_panel.parentWidget() != self._main_stack:
+            self._main_stack.insertWidget(3, self._rag_panel)
+            self._reader_view._ai_panel_container = None
+            self._reader_view._ai_panel_btn.setChecked(False)
+
+        self._sidebar.show()
+        self._rag_panel.set_standalone_mode(True)
+        self._main_stack.setCurrentIndex(3)
+        self._check_ollama_status()
+
+    def _on_rag_query(self, question: str) -> None:
+        """Inicia uma consulta RAG em background."""
+        if self._rag_engine is None:
+            self._rag_panel.on_error(
+                "RAGEngine não inicializado. Verifique se o ChromaDB está instalado."
+            )
+            return
+        if self._rag_worker and self._rag_worker.isRunning():
+            return
+            
+        ctx = self._rag_panel.get_reading_context()
+        is_global = getattr(self._rag_panel, "_is_standalone", False)
+        
+        book_id = None
+        if ctx and not is_global:
+            book_id = ctx.get("book_id")
+            # Anexa o contexto invisivelmente à query
+            question_payload = f"Contexto de Leitura Atual:\nLivro: '{ctx['title']}' | ID do Livro: {ctx['book_id']} | Página: {ctx['page']}\nTexto visível:\n{ctx['text']}\n\n---\nPedido do Usuário: {question}"
+        else:
+            question_payload = question
+
+        self._rag_worker = RAGWorker(
+            self._rag_engine, mode=RAGWorker.MODE_QUERY, question=question_payload, book_id=book_id
+        )
+        self._rag_worker.token_received.connect(self._rag_panel.on_token_received)
+        self._rag_worker.answer_complete.connect(self._rag_panel.on_answer_complete)
+        self._rag_worker.sources_found.connect(self._rag_panel.on_sources_found)
+        self._rag_worker.error_occurred.connect(self._rag_panel.on_error)
+        self._rag_worker.ui_mutation_requested.connect(self._on_ui_mutation)
+        self._rag_worker.finished_work.connect(
+            lambda: self._rag_panel.set_indexed_count(
+                self._rag_engine.get_indexed_count() if self._rag_engine else 0
+            )
+        )
+        self._rag_worker.start()
+        self._statusbar.showMessage("🧠 Consultando Assistente IA…")
+
+    def _on_ai_action_requested(self, action_type: str, text: str) -> None:
+        """Processa requisições de IA vindas do menu de contexto de leitura."""
+        if action_type == "translate":
+            question = f"Traduza o seguinte trecho com precisão literária: '{text}'"
+        elif action_type == "explain":
+            question = f"Explique o contexto e o significado deste trecho detalhadamente: '{text}'"
+        elif action_type == "search":
+            question = f"Busque na web informações complementares sobre: '{text}' e resuma os achados."
+        elif action_type == "save_note":
+            question = f"Gere uma anotação sucinta, clara e em formato Markdown para o seguinte trecho (não precisa usar ferramentas, apenas responda com o texto da anotação): '{text}'"
+        else:
+            return
+            
+        # Garante que o painel esteja ancorado ao leitor e o mostra
+        if self._rag_panel.parentWidget() != self._reader_view:
+            self._reader_view.set_ai_panel(self._rag_panel)
+            
+        self._reader_view.show_ai_panel()
+        
+        # Preenche o input e envia automaticamente
+        self._rag_panel._question_input.setText(question)
+        self._rag_panel._on_send()
+
+    def _on_rag_index_all(self) -> None:
+        """Reindexação completa da biblioteca em background."""
+        if self._rag_engine is None:
+            self._rag_panel.on_error(
+                "RAGEngine não inicializado. Certifique-se de que o Ollama está rodando."
+            )
+            return
+        if self._rag_worker and self._rag_worker.isRunning():
+            self._statusbar.showMessage("⚠️ Uma operação RAG já está em andamento.", 3000)
+            return
+
+        try:
+            self._rag_worker = RAGWorker(self._rag_engine, mode=RAGWorker.MODE_INDEX_ALL)
+            self._rag_worker.progress_updated.connect(self._rag_panel.on_progress_updated)
+            self._rag_worker.file_not_found.connect(self._on_file_not_found)
+            self._rag_worker.error_occurred.connect(self._handle_rag_error)
+            self._rag_worker.finished_work.connect(self._rag_panel.on_indexing_complete)
+            self._rag_worker.finished_work.connect(
+                lambda: self._rag_panel.set_indexed_count(
+                    self._rag_engine.get_indexed_count() if self._rag_engine else 0
+                )
+            )
+            self._rag_worker.finished_work.connect(
+                lambda: self._statusbar.showMessage("✅ Indexação RAG concluída", 4000)
+            )
+            self._rag_worker.start()
+            self._statusbar.showMessage("🔄 Indexando biblioteca para IA…")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self._handle_rag_error(str(e))
+
+    def _handle_rag_error(self, err: str) -> None:
+        self._statusbar.showMessage(f"⚠️ Erro RAG: {err}", 5000)
+        self._rag_panel.on_error(err)
+        QMessageBox.critical(self, "Falha na IA", f"Ocorreu um erro no processamento do assistente:\n\n{err}")
+
+    def _on_rag_stop(self) -> None:
+        """Para o worker RAG em andamento."""
+        if self._rag_worker and self._rag_worker.isRunning():
+            self._rag_worker.stop()
+            self._statusbar.showMessage("⛔ Operação IA cancelada.", 3000)
+
+    def _on_ui_mutation(self, action_type: str, data: dict) -> None:
+        """Processa mutações visuais solicitadas pela IA (Main Thread).
+
+        Chamado via sinal Qt a partir da worker thread, portanto já está
+        na Main Thread e é seguro manipular widgets.
+        """
+        try:
+            if action_type == "highlight":
+                self._handle_ai_highlight(data)
+            elif action_type == "bookmark":
+                self._handle_ai_bookmark(data)
+            else:
+                print(f"[UI Mutation] Ação desconhecida: {action_type}", flush=True)
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            self._statusbar.showMessage(f"⚠️ Erro na mutação visual: {exc}", 4000)
+
+    def _handle_ai_highlight(self, data: dict) -> None:
+        """Destaca texto na página atual do livro aberto."""
+        from src.readers.pdf_reader import PDFReader
+
+        text_to_find = data.get("text_to_find", "")
+        color = data.get("color", "#fbbf24")
+
+        # Verifica se temos um leitor PDF aberto
+        reader = self._reader_view._reader
+        if not reader or not isinstance(reader, PDFReader):
+            self._statusbar.showMessage("⚠️ Destaque só disponível em PDFs.", 3000)
+            return
+
+        current_page = reader.current_page
+
+        # Usa PyMuPDF search_for para encontrar o texto na página
+        page_obj = reader._doc[current_page]
+        instances = page_obj.search_for(text_to_find)
+
+        if not instances:
+            # Tenta busca parcial (primeiras 40 chars)
+            if len(text_to_find) > 40:
+                instances = page_obj.search_for(text_to_find[:40])
+
+        if not instances:
+            self._statusbar.showMessage(
+                f"🔍 Texto não encontrado na pág. {current_page + 1} para destaque.", 3000
+            )
+            return
+
+        # Para cada ocorrência, salva no banco e re-renderiza
+        import json
+        for rect in instances:
+            # Normaliza coordenadas para percentual
+            page_rect = page_obj.rect
+            coords = (
+                rect.x0 / page_rect.width,
+                rect.y0 / page_rect.height,
+                rect.x1 / page_rect.width,
+                rect.y1 / page_rect.height,
+            )
+            position_data = json.dumps({"coords": list(coords)})
+            book_id = self._reader_view._book_id
+
+            self._db.add_annotation(
+                book_id=book_id,
+                page_number=current_page,
+                content=text_to_find[:200],
+                highlight_color=color,
+                annotation_type="highlight",
+                position_data=position_data,
+            )
+
+        # Recarrega anotações para renderizar os destaques
+        book_id = self._reader_view._book_id
+        annotations = self._db.get_annotations(book_id)
+        self._reader_view.load_annotations(annotations)
+        self._statusbar.showMessage(
+            f"📝 IA destacou \"{text_to_find[:30]}...\" na pág. {current_page + 1}", 4000
+        )
+
+    def _handle_ai_bookmark(self, data: dict) -> None:
+        """Cria um marcador inteligente (anotação tipo bookmark) na página atual."""
+        note = data.get("note", "")
+        book_id = self._reader_view._book_id
+
+        if book_id <= 0:
+            self._statusbar.showMessage("⚠️ Nenhum livro aberto para criar marcador.", 3000)
+            return
+
+        current_page = 0
+        if self._reader_view._reader:
+            current_page = self._reader_view._reader.current_page
+
+        self._db.add_annotation(
+            book_id=book_id,
+            page_number=current_page,
+            content=f"🔖 {note}",
+            highlight_color="#6366f1",
+            annotation_type="ai_bookmark",
+            position_data="{}",
+        )
+
+        # Recarrega anotações
+        annotations = self._db.get_annotations(book_id)
+        self._reader_view.load_annotations(annotations)
+        self._statusbar.showMessage(
+            f"🔖 Marcador IA criado na pág. {current_page + 1}", 4000
+        )
+
+    def _on_bulk_delete(self, book_ids: list) -> None:
+        """Remove livros do SQLite e do ChromaDB simultaneamente."""
+        removed = 0
+        for book_id in book_ids:
+            try:
+                self._db.delete_book(book_id)
+                removed += 1
+            except Exception as exc:
+                self._statusbar.showMessage(f"⚠️ Erro ao remover livro {book_id}: {exc}", 4000)
+            if self._rag_engine:
+                try:
+                    self._rag_engine.delete_book_index(book_id)
+                except Exception:
+                    pass
+        self._load_library()
+        self._book_details.clear()
+        self._statusbar.showMessage(
+            f"🗑️ {removed} {'livro removido' if removed == 1 else 'livros removidos'} "
+            "do banco e do índice vetorial.", 5000
+        )
+
+    def _on_file_not_found(self, book_id: int) -> None:
+        """Notificação visual quando a indexação encontra arquivo ausente."""
+        self._statusbar.showMessage(
+            f"⚠️ Livro #{book_id}: arquivo não encontrado no disco — ignorado na indexação.",
+            6000,
+        )
 
     # ── Monitoramento ──────────────────────────────────────────────────
 
@@ -491,6 +1042,10 @@ class MainWindow(QMainWindow):
     # ── Lifecycle ──────────────────────────────────────────────────────
 
     def closeEvent(self, event):
+        # Para o worker RAG
+        if self._rag_worker and self._rag_worker.isRunning():
+            self._rag_worker.stop()
+            self._rag_worker.wait(2000)
         # Para o watcher
         if self._watcher and self._watcher.is_active:
             self._watcher.stop()
