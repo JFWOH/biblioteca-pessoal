@@ -156,6 +156,12 @@ class LibraryDB:
         self.conn.commit()
 
     def delete_book(self, book_id: int) -> None:
+        # Apaga manualmente os registros relacionados para garantir compatibilidade e isolamento referencial
+        self.conn.execute("DELETE FROM annotations WHERE book_id = ?", (book_id,))
+        self.conn.execute("DELETE FROM reading_progress WHERE book_id = ?", (book_id,))
+        self.conn.execute("DELETE FROM book_collections WHERE book_id = ?", (book_id,))
+        self.conn.execute("DELETE FROM book_tags WHERE book_id = ?", (book_id,))
+        
         self.conn.execute("DELETE FROM books WHERE id = ?", (book_id,))
         self.conn.commit()
 

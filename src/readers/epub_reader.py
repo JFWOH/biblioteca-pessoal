@@ -11,6 +11,11 @@ class EPUBReader(BaseReader):
         super().__init__(filepath)
         self._book = None
         self._chapters: list[dict] = []  # {title, content_html}
+        self.is_double_page = False
+
+    def set_double_page(self, active: bool) -> None:
+        """Ativa/Desativa o modo de leitura em página dupla."""
+        self.is_double_page = active
 
     def open(self) -> None:
         import ebooklib
@@ -46,10 +51,16 @@ class EPUBReader(BaseReader):
     def get_page(self, page_number: int) -> PageContent:
         if 0 <= page_number < len(self._chapters):
             chapter = self._chapters[page_number]
+            content = chapter["content"]
+            
+            if self.is_double_page:
+                script = "<script>document.head.insertAdjacentHTML('beforeend', '<style>body { column-count: 2; column-gap: 20px; height: 100vh; overflow-y: hidden; overflow-x: auto; }</style>');</script>"
+                content += script
+                
             return PageContent(
                 page_number=page_number,
                 total_pages=self._total_pages,
-                content=chapter["content"],
+                content=content,
                 content_type="html",
             )
         return PageContent(page_number=page_number, total_pages=self._total_pages,
