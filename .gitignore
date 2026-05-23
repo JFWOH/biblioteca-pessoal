@@ -22,6 +22,18 @@ env/
 # Data
 data/*.db
 data/*.db-journal
+data/covers/
+data/chroma_db/
+data/config.json
+chroma/
+
+# Debug / scratch
+debug_*.py
+debug_*.txt
+diag_*.py
+
+# Agent ephemeral brain data
+.agents/brain/
 
 # OS
 .DS_Store
