@@ -289,7 +289,6 @@ class AnnotationPanel(QWidget):
                 padding: 4px 12px; color: white; font-size: 11px; font-weight: 600;
             }
             QPushButton:hover { background: #818cf8; }
-        }
         """)
         self._add_note_btn.clicked.connect(self._add_note)
         actions.addWidget(self._add_note_btn)

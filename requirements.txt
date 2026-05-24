@@ -30,3 +30,6 @@ ruff>=0.1.0
 # RAG / IA Local
 chromadb>=0.4.0,<1.0    # Vector store local (sem servidor externo)
 ollama>=0.2.0            # Python client para o daemon Ollama
+
+# Leitor de Audio Local Offline
+pyttsx3>=2.99            # TTS Engine offline local

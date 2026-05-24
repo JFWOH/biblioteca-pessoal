@@ -218,6 +218,18 @@ class ReaderView(QWidget):
         self._ai_panel_btn.clicked.connect(self._toggle_ai_panel)
         tb_layout.addWidget(self._ai_panel_btn)
 
+        # Botão Áudio/TTS (Leitura de página)
+        self._audio_btn = QPushButton("🔊")
+        self._audio_btn.setFixedSize(32, 32)
+        self._audio_btn.setToolTip("Ouvir Página (TTS)")
+        self._audio_btn.setStyleSheet("""
+            QPushButton { background: transparent; border: 1px solid #27272a;
+                          border-radius: 6px; font-size: 14px; }
+            QPushButton:hover { background: #27272a; }
+        """)
+        self._audio_btn.clicked.connect(self._toggle_audio)
+        tb_layout.addWidget(self._audio_btn)
+
         self._toolbar = toolbar
         left_layout.addWidget(toolbar)
 
@@ -471,6 +483,7 @@ class ReaderView(QWidget):
             )
 
     def _go_to_page(self, page: int):
+        self._stop_audio_if_running()
         if self._reader:
             content = self._reader.go_to_page(page)
             if content:
@@ -565,6 +578,7 @@ class ReaderView(QWidget):
 
     def close_reader(self):
         """Fecha o leitor atual."""
+        self._stop_audio_if_running()
         if self._reader and self._reader.is_open:
             self._reader.close()
             self._reader = None
@@ -708,6 +722,15 @@ class ReaderView(QWidget):
             }}
             QPushButton:hover {{ background: {btn_hover_bg}; }}
             QPushButton:checked {{ {checked_style} }}
+        """)
+        self._audio_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: 1px solid {btn_bg};
+                border-radius: 6px;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{ background: {btn_hover_bg}; }}
         """)
         self._highlight_mode_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1048,3 +1071,60 @@ class ReaderView(QWidget):
         
         # Esconde a rubber band após destacar
         self._rubber_band.hide()
+
+    def _toggle_audio(self):
+        """Alterna a leitura de áudio (TTS) da página atual."""
+        if hasattr(self, "_audio_worker") and self._audio_worker and self._audio_worker.isRunning():
+            self._stop_audio_if_running()
+            return
+
+        if not self._reader:
+            return
+
+        page = self._reader.current_page
+        page_text = ""
+        if hasattr(self._reader, "get_page_text"):
+            page_text = self._reader.get_page_text(page)
+        elif hasattr(self._reader, "get_chapter_text"):
+            page_text = self._reader.get_chapter_text(page)
+
+        page_text = page_text.strip()
+        if not page_text:
+            return
+
+        from src.gui.workers.audio_worker import AudioWorker
+        self._audio_worker = AudioWorker(page_text, parent=self)
+        
+        self._audio_worker.playback_started.connect(self._on_audio_started)
+        self._audio_worker.playback_finished.connect(self._on_audio_finished)
+        self._audio_worker.error_occurred.connect(self._on_audio_error)
+        self._audio_worker.finished.connect(self._on_audio_worker_finished)
+        
+        self._audio_worker.start()
+
+    def _on_audio_started(self):
+        self._audio_btn.setText("⏹️")
+        self._audio_btn.setToolTip("Parar Leitura (TTS)")
+
+    def _on_audio_finished(self, chunks):
+        pass
+
+    def _on_audio_error(self, err_msg):
+        parent_window = self.window()
+        if parent_window and hasattr(parent_window, "_statusbar") and parent_window._statusbar:
+            parent_window._statusbar.showMessage(f"Erro de Áudio: {err_msg}", 5000)
+
+    def _on_audio_worker_finished(self):
+        """Garante a limpeza de referências e restaura o estado visual do botão."""
+        self._audio_btn.setText("🔊")
+        self._audio_btn.setToolTip("Ouvir Página (TTS)")
+        if hasattr(self, "_audio_worker") and self._audio_worker:
+            self._audio_worker.deleteLater()
+            self._audio_worker = None
+
+    def _stop_audio_if_running(self):
+        """Para a reprodução de áudio de forma segura e não bloqueante."""
+        if hasattr(self, "_audio_worker") and self._audio_worker and self._audio_worker.isRunning():
+            self._audio_worker.stop()
+            self._audio_worker.wait()
+            # _on_audio_worker_finished é invocado via sinal finished, limpando a referência.
