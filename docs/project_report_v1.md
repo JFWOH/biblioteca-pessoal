@@ -252,6 +252,35 @@ Aplicação Desktop
 ### P2-004 — Configurações Dinâmicas do TTS
 *   **Aceite:** O painel lateral (ReaderView) deve abrigar sliders nativos controlando Rate/Speed da narração persistida via Settings.
 
+### P2-005 — Reader UI Refresh / Design System Dark-First
+**Status:** Pendente  
+**Tipo:** UI / UX / Acessibilidade  
+**Prioridade:** P2 / Alta  
+
+#### Contexto
+O aspecto visual é central para um aplicativo de leitura. Foi proposta uma nova UI dark-first com painéis laterais modernos, foco no conteúdo, RAG Panel menos poluído e controles TTS integrados à toolbar.
+
+#### Decisão
+A proposta é aprovada como direção visual. O HTML/Tailwind fornecido é protótipo e não implementação final.
+
+#### Não fazer
+- Não usar CDNs externas no app final.
+- Não substituir PyQt6 por QWebEngine sem ADR.
+- Não remover temas claro e sépia.
+- Não aplicar glassmorphism ao corpo do texto longo.
+- Não esconder status crítico de RAG/TTS.
+- Não ativar OPDS/web search implicitamente.
+
+#### Critérios de aceite
+- App funciona 100% offline.
+- Tema dark passa contraste WCAG AA.
+- Light e sépia continuam disponíveis.
+- Reader mantém prioridade visual sobre ferramentas.
+- RAG Panel pode ser ocultado/redimensionado.
+- Audio Reader mantém Play/Stop/replay.
+- Sem regressão na suíte completa.
+- Smoke visual em resoluções comuns.
+
 ### P3 e P4 (Futuro próximo)
 - **P3:** Atalhos globais de Teclado (Space/Play/Pause) para Áudio; Autoplay da próxima página (com break limit).
 - **P4:** Leitura de Sinopses.
