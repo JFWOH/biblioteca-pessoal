@@ -483,7 +483,7 @@ class TestRAGWorker:
         worker = RAGWorker(mock_engine, mode=RAGWorker.MODE_QUERY, question="teste")
         received_tokens = []
 
-        with patch.object(mock_engine, "query_rag", side_effect=fake_query):
+        with patch("src.core.rag.orchestrator.Orchestrator.query_rag", side_effect=fake_query):
             with patch.object(mock_engine, "get_sources", return_value=[]):
                 worker.token_received.connect(received_tokens.append)
                 with qtbot.waitSignal(worker.finished_work, timeout=5000):
@@ -500,7 +500,7 @@ class TestRAGWorker:
         worker = RAGWorker(mock_engine, mode=RAGWorker.MODE_QUERY, question="q?")
         answers = []
 
-        with patch.object(mock_engine, "query_rag", side_effect=fake_query):
+        with patch("src.core.rag.orchestrator.Orchestrator.query_rag", side_effect=fake_query):
             with patch.object(mock_engine, "get_sources", return_value=[]):
                 worker.answer_complete.connect(answers.append)
                 with qtbot.waitSignal(worker.finished_work, timeout=5000):
@@ -518,7 +518,7 @@ class TestRAGWorker:
         worker = RAGWorker(mock_engine, mode=RAGWorker.MODE_QUERY, question="q?")
         errors = []
 
-        with patch.object(mock_engine, "query_rag", side_effect=fake_query):
+        with patch("src.core.rag.orchestrator.Orchestrator.query_rag", side_effect=fake_query):
             with patch.object(mock_engine, "get_sources", return_value=[]):
                 worker.error_occurred.connect(errors.append)
                 with qtbot.waitSignal(worker.finished_work, timeout=5000):
@@ -618,7 +618,7 @@ class TestRAGWorker:
         worker = RAGWorker(mock_engine, mode=RAGWorker.MODE_QUERY, question="q?")
         tokens = []
 
-        with patch.object(mock_engine, "query_rag", side_effect=short_query):
+        with patch("src.core.rag.orchestrator.Orchestrator.query_rag", side_effect=short_query):
             with patch.object(mock_engine, "get_sources", return_value=[]):
                 worker.token_received.connect(tokens.append)
                 with qtbot.waitSignal(worker.finished_work, timeout=5000):

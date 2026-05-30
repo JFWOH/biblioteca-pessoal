@@ -100,30 +100,11 @@ class RAGWorker(QThread):
         # Geração de streaming com controle de rounds e AgentState
         full_answer: list[str] = []
         
-        # Detecção de mock nos testes da UI para assegurar compatibilidade reversa perfeita
-        import unittest.mock
-        is_mocked = False
-        if hasattr(self._engine, "query_rag"):
-            func = self._engine.query_rag
-            if isinstance(func, (unittest.mock.Mock, unittest.mock.MagicMock)):
-                is_mocked = True
-            elif hasattr(func, "__self__") and func.__self__ is not self._engine:
-                is_mocked = True
-            elif not hasattr(func, "__self__"):
-                is_mocked = True
-
-        if is_mocked:
-            generator = self._engine.query_rag(
-                self._question,
-                book_id=self._book_id,
-                ui_mutation_callback=self._emit_ui_mutation,
-            )
-        else:
-            generator = self._orchestrator.query_rag(
-                self._question,
-                book_id=self._book_id,
-                ui_mutation_callback=self._emit_ui_mutation,
-            )
+        generator = self._orchestrator.query_rag(
+            self._question,
+            book_id=self._book_id,
+            ui_mutation_callback=self._emit_ui_mutation,
+        )
 
         for token in generator:
             if self.isInterruptionRequested():

@@ -22,7 +22,7 @@ Primary goals: minimize compute waste, preserve architectural boundaries, enforc
 ## 🛡️ Architecture & Safety Compliance
 
 - Before modifying code, read all ADRs relevant to the touched subsystem.
-- If unsure which ADR applies, inspect `.agents/adr/README.md` first.
+- If unsure which ADR applies, inspect `.agents/adr/README.md` or the ADR index first.
 - Comply with all accepted ADRs in `.agents/adr/`.
 - Keep GUI components (`src/gui/`, PyQt6) strictly decoupled from Core AI Components (`src/core/rag/`).
 - Core AI code must not import PyQt6 or GUI modules.
