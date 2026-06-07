@@ -185,9 +185,7 @@ class MainWindow(QMainWindow):
 
         # Search bar
         search_container = QWidget()
-        search_container.setStyleSheet(
-            "background-color: #0f0f17; border-bottom: 1px solid #1e1e24;"
-        )
+        search_container.setObjectName("searchContainer")
         sc_layout = QHBoxLayout(search_container)
         sc_layout.setContentsMargins(24, 12, 24, 12)
         self._search_bar = SearchBar()

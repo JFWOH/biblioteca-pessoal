@@ -41,18 +41,7 @@ class SearchBar(QWidget):
         self._format_filter.addItem("DOCX", "docx")
         self._format_filter.setFixedWidth(150)
         self._format_filter.currentIndexChanged.connect(lambda: self._debounce_timer.start())
-        self._format_filter.setStyleSheet("""
-            QComboBox {
-                background-color: #18181b; border: 1px solid #27272a;
-                border-radius: 8px; padding: 8px 12px; color: #e4e4e7;
-            }
-            QComboBox:hover { border-color: #3f3f46; }
-            QComboBox::drop-down { border: none; padding-right: 8px; }
-            QComboBox QAbstractItemView {
-                background-color: #18181b; border: 1px solid #27272a;
-                selection-background-color: #6366f1;
-            }
-        """)
+        self._format_filter.setObjectName("formatFilter")
         layout.addWidget(self._format_filter)
 
     def _emit_search(self):

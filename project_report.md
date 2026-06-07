@@ -468,22 +468,49 @@ Além do núcleo Reader + RAG, o projeto já incorpora ou possui base funcional 
 
 ---
 
-## 11. Roadmap de Melhorias Futuras
+## 11. Roadmap Revisado — Evolução do Projeto
 
-O projeto possui um caminho claro de evolução técnica e de produto:
+*(Revisado e Consolidado)*
 
-```markdown
-- [x] OCR local para PDFs escaneados (Tesseract) (concluído na Fase 5)
-- [ ] Melhor suporte multimodal local para diagramas, imagens e tabelas
-- [ ] Sincronização local/multi-dispositivo de anotações
-- [x] Tradução offline de trechos selecionados (Fase 8: NLLB-200, escopo em MVC restrito a blocos curtos <= 2000 chars. **Nota:** Exige internet na primeira execução para o bootstrap/download do modelo; subsequentes 100% offline).
-- [ ] Geração de flashcards / integração com Anki
-- [x] Política de retenção/rotação para `data/traces/` (concluído na Fase 3)
-- [x] Ferramentas locais de inspeção e consulta de traces por `session_id` (concluído na Fase 3 e 4)
-- [x] Evolução do `AgentState` para maior aderência ao ADR-002 e métricas de loop (concluído na Fase 4)
-- [x] Criação de um RAG Evaluation Harness para inspecionar qualidade semântica e operacional de traces
-- [ ] Refinamento da UI do leitor com base no plano de redesign já documentado
-```
+### Princípio Orientador
+Manter o projeto **local-first**, com evolução por valor prático, risco controlado e boa rastreabilidade. Separar fases por domínio técnico para melhorar a clareza do produto e evitar acoplamento excessivo.
+
+### Estado Atual Consolidado (Concluídas)
+- **Fase 1–8**: Núcleo do leitor, OCR local, RAG local, tradução offline, hardening técnico e documentação.
+- **Fase 9**: Reader UI Refresh / Design System Dark-First.
+- **Fase 10**: Robustez de Saída do Agente / Anti-Truncation.
+
+### Próximas Fases (Ordem de Implementação Recomendada)
+
+#### Fase 11 — Agente Proativo de Leitura (MVP)
+**Objetivo:** Permitir que o sistema gere observações assistivas discretas e opcionais a partir da página/trecho atual (ex: nota de rodapé interativa).
+- Uso local-first, com toggle liga/desliga e intensidades variadas.
+- Fallback seguro entre Gemma 4 E4B (padrão) e 12B (modo avançado quando suportado por hardware).
+- Labels estritos de confiança, tipo de nota e regras fortes anti-spoiler.
+
+#### Fase 12 — Ferramentas de Estudo (Flashcards) + Integração Local com Anki
+**Objetivo:** Transformar trechos, bookmarks e explicações do agente em flashcards reutilizáveis.
+- Integração estritamente local usando AnkiConnect.
+
+#### Fase 13 — Audio Reader 2.0 / Narração Expressiva
+**Objetivo:** Elevar significativamente a qualidade do TTS local para conforto em leitura longa.
+- Avaliação de motores avançados locais (ex: Qwen3-TTS, Kokoro, Piper).
+- Perfis separados para "narrador do livro" e "narrador do assistente".
+
+#### Fase 14 — Suporte Multimodal Avançado
+**Objetivo:** Ampliar a capacidade do sistema para ler diagramas, tabelas, imagens e layouts complexos.
+- Aproveitamento do potencial multimodal local da família Gemma 4.
+
+#### Fase 15 — Sincronização de Dados
+**Objetivo:** Sincronizar destaques, bookmarks, anotações e progresso de forma multi-dispositivo.
+- Foco em resolver concorrência, conflitos e segurança de forma transparente.
+
+#### Fase Extra — UX para Scans
+**Objetivo:** Melhorar ergonomia (ex: overlays de seleção e integração visual OCR) para páginas não digitais. (Aguardando refinamento).
+
+### Trilhas Transversais de Melhoria Contínua
+- **Trilha A — Programa Gemma 4:** Ampliação orgânica do uso da família Gemma 4 (E4B padrão, 12B avançado) focando em reasoning e multimodalidade.
+- **Trilha B — Qualidade de IA Assistiva:** Refino constante de empacotamento de contexto, fallback de degradação graciosa e distinção fato/hipótese.
 
 ---
 

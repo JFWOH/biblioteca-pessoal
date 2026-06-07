@@ -66,13 +66,13 @@ class RAGPanel(QWidget):
         self._back_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
-                color: #818cf8;
+                color: #10b981;
                 border: none;
                 font-weight: 500;
                 font-size: 13px;
                 padding-right: 12px;
             }
-            QPushButton:hover { color: #a5b4fc; }
+            QPushButton:hover { color: #34d399; }
         """)
         self._back_btn.setVisible(False)
         self._back_btn.clicked.connect(self.back_requested.emit)
@@ -155,16 +155,16 @@ class RAGPanel(QWidget):
         self._save_note_btn.setVisible(False)
         self._save_note_btn.setStyleSheet("""
             QPushButton {
-                background-color: rgba(99, 102, 241, 0.15);
-                color: #818cf8;
-                border: 1px solid #6366f1;
+                background-color: rgba(16, 185, 129, 0.15);
+                color: #10b981;
+                border: 1px solid #059669;
                 border-radius: 8px;
                 padding: 8px 16px;
                 font-weight: bold;
                 font-size: 12px;
             }
             QPushButton:hover {
-                background-color: rgba(99, 102, 241, 0.25);
+                background-color: rgba(16, 185, 129, 0.25);
             }
             QPushButton:disabled {
                 background-color: rgba(39, 39, 42, 0.5);
@@ -209,7 +209,7 @@ class RAGPanel(QWidget):
         self._send_btn.setStyleSheet("""
             QPushButton#primaryBtn {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #6366f1, stop:1 #818cf8);
+                    stop:0 #059669, stop:1 #10b981);
                 color: white;
                 border: none;
                 border-radius: 8px;
@@ -219,9 +219,9 @@ class RAGPanel(QWidget):
             }
             QPushButton#primaryBtn:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #818cf8, stop:1 #a78bfa);
+                    stop:0 #10b981, stop:1 #34d399);
             }
-            QPushButton#primaryBtn:pressed { background: #4f46e5; }
+            QPushButton#primaryBtn:pressed { background: #047857; }
             QPushButton#primaryBtn:disabled { background: #27272a; color: #52525b; }
         """)
         self._send_btn.clicked.connect(self._on_send)
@@ -266,7 +266,7 @@ class RAGPanel(QWidget):
 
         idx_title = QLabel("📚 Indexação")
         idx_title.setStyleSheet(
-            "color: #818cf8; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;"
+            "color: #10b981; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;"
         )
         idx_layout.addWidget(idx_title)
 
@@ -426,17 +426,17 @@ class RAGPanel(QWidget):
             
         else: # "dark" ou fallback
             # Cores do tema Escuro
-            bg_main = "#0f0f17"
-            bg_input = "#18181b"
-            border_color = "#27272a"
-            text_main = "#e4e4e7"
-            text_sec = "#52525b"
-            header_gradient = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1a1a2e, stop:1 #16213e)"
-            bg_sidebar = "#111117"
-            border_sidebar = "1px solid #1e1e24"
-            bg_tips = "#0f1f0f"
-            border_tips = "1px solid #1a3a1a"
-            text_tips = "#4ade80"
+            bg_main = "#0f1115"
+            bg_input = "#161920"
+            border_color = "#2d333f"
+            text_main = "#e5e7eb"
+            text_sec = "#cbd5e1"
+            header_gradient = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #161920, stop:1 #20242d)"
+            bg_sidebar = "#161920"
+            border_sidebar = "1px solid #2d333f"
+            bg_tips = "rgba(16, 185, 129, 0.05)"
+            border_tips = "1px solid rgba(16, 185, 129, 0.2)"
+            text_tips = "#10b981"
 
         # 1. Header
         self._header.setStyleSheet(f"""
@@ -466,10 +466,10 @@ class RAGPanel(QWidget):
                 color: {text_main};
                 font-size: 14px;
                 line-height: 1.6;
-                selection-background-color: #6366f1;
+                selection-background-color: #10b981;
             }}
             QTextEdit#responseArea:focus {{
-                border-color: #6366f1;
+                border-color: #10b981;
             }}
         """)
         
@@ -482,7 +482,7 @@ class RAGPanel(QWidget):
             }}
             QProgressBar::chunk {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #6366f1, stop:1 #a78bfa);
+                    stop:0 #059669, stop:1 #10b981);
                 border-radius: 3px;
             }}
         """)
@@ -496,7 +496,7 @@ class RAGPanel(QWidget):
                 border-radius: 12px;
             }}
             QFrame:focus-within {{
-                border-color: #6366f1;
+                border-color: #10b981;
             }}
         """)
         self._question_input.setStyleSheet(f"""
@@ -525,7 +525,7 @@ class RAGPanel(QWidget):
         self._index_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {bg_main};
-                color: #818cf8;
+                color: #10b981;
                 border: 1px solid {border_color};
                 border-radius: 8px;
                 padding: 8px 12px;
@@ -533,8 +533,8 @@ class RAGPanel(QWidget):
                 font-weight: 600;
                 text-align: left;
             }}
-            QPushButton:hover {{ background-color: {bg_input}; border-color: #6366f1; }}
-            QPushButton:pressed {{ background-color: #4338ca; color: white; }}
+            QPushButton:hover {{ background-color: {bg_input}; border-color: #10b981; }}
+            QPushButton:pressed {{ background-color: #047857; color: white; }}
         """)
         
         # Frame de Modelo de IA
@@ -575,7 +575,7 @@ class RAGPanel(QWidget):
                 border-bottom: 1px solid {border_color};
             }}
             QListWidget::item:hover {{ background-color: {bg_main}; color: {text_main}; }}
-            QListWidget::item:selected {{ background-color: rgba(99,102,241,0.15); color: #818cf8; }}
+            QListWidget::item:selected {{ background-color: rgba(16,185,129,0.15); color: #10b981; }}
         """)
         
         # Dicas

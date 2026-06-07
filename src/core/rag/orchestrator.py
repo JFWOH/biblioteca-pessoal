@@ -513,15 +513,20 @@ class Orchestrator:
         """Helper para chamar o Ollama Chat API."""
         import urllib.request
         from src.core.rag_engine import _TOOLS_DEF
-        
+        options = {
+            "num_predict": 4096,
+            "num_ctx": 8192,
+        }
+        if temperature is not None:
+            options["temperature"] = temperature
+
         payload_dict = {
             "model": self.engine._llm_model.strip(),
             "messages": msgs,
             "stream": stream,
             "tools": _TOOLS_DEF,
+            "options": options,
         }
-        if temperature is not None:
-            payload_dict["options"] = {"temperature": temperature}
 
         payload = json.dumps(payload_dict).encode("utf-8")
         endpoint = f"{self.engine._ollama_url.rstrip('/')}/api/chat"
@@ -759,6 +764,7 @@ class Orchestrator:
 
             if not message.get("tool_calls"):
                 content = message.get("content", "")
+                done_reason = data.get("done_reason", "")
                 if content:
                     trace_logger.emit("final_answer_started", step=state.current_round, round_num=state.current_round)
                     import time
@@ -770,6 +776,15 @@ class Orchestrator:
                         yield char
                         time.sleep(0.003)
                     trace_logger.emit("final_answer_completed", step=state.current_round, round_num=state.current_round, payload={"length": len(content)})
+                
+                # Tratamento de continuação
+                if done_reason == "length" and getattr(state, "continuation_count", 0) < 1:
+                    state.continuation_count = getattr(state, "continuation_count", 0) + 1
+                    messages.append(message)
+                    messages.append({"role": "user", "content": "Continue exatamente de onde parou."})
+                    logger.info("Continuação transparente acionada no round %d", state.current_round)
+                    continue  # Continua no loop while budget_ok, fará nova chamada sem tool_calls
+
                 payload = {
                     "sources_used": list(state.sources_used),
                     "books_consulted": list(state.books_consulted),
@@ -833,6 +848,7 @@ class Orchestrator:
         trace_logger.emit("final_answer_started", step=state.current_round, round_num=state.current_round)
         try:
             with self._call_chat_api(messages, stream=True) as resp:
+                accumulated_content = []
                 for line in resp:
                     if self.engine._cancelled:
                         trace_logger.emit("early_exit", step=state.current_round, reason="cancelled")
@@ -844,9 +860,27 @@ class Orchestrator:
                         chunk = json.loads(line.decode("utf-8"))
                         token = chunk.get("message", {}).get("content", "")
                         if token:
+                            accumulated_content.append(token)
                             yield token
                         if chunk.get("done", False):
+                            done_reason = chunk.get("done_reason", "")
                             trace_logger.emit("final_answer_completed", step=state.current_round, round_num=state.current_round)
+                            if done_reason == "length" and getattr(state, "continuation_count", 0) < 1:
+                                state.continuation_count = getattr(state, "continuation_count", 0) + 1
+                                yield "\n[⚠️ A resposta foi interrompida pelo limite de tokens. Retomando...]\n"
+                                messages.append({"role": "assistant", "content": "".join(accumulated_content)})
+                                messages.append({"role": "user", "content": "Continue exatamente de onde parou."})
+                                try:
+                                    with self._call_chat_api(messages, stream=True) as resp_cont:
+                                        for line_cont in resp_cont:
+                                            if not line_cont: continue
+                                            try:
+                                                c = json.loads(line_cont.decode("utf-8"))
+                                                t = c.get("message", {}).get("content", "")
+                                                if t: yield t
+                                            except json.JSONDecodeError: continue
+                                except Exception:
+                                    pass
                             trace_logger.emit("query_completed", step=state.current_round + 1)
                             return
                     except json.JSONDecodeError:

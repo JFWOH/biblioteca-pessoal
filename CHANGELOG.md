@@ -5,9 +5,25 @@ Todas as mudanças notáveis no projeto **Biblioteca Pessoal Inteligente** serã
 O formato é estruturado para humanos, orientado ao impacto e baseado no padrão [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 ## [Unreleased]
-- **Integração Visual de OCR**: Uso do cache OCR derivado nativamente no `pdf_reader.py` para habilitar highlight e seleção de texto visual em documentos escaneados.
-- **Reader UI Refresh**: Redesign visual profundo "Dark-First" com Glassmorphism (atualmente prototipado em HTML, aguardando implementação nativa PyQt6/QSS via backlog P2-005).
-- **Recursos Futuros**: Multimodalidade para diagramas e integração com Anki (Flashcards).
+- **Recursos Futuros**: Agente Proativo de Leitura, Multimodalidade e Integração com Anki (Flashcards).
+
+## [Fase 10] - Anti-Truncation e Robustez de Saída
+### Added
+- **Configuração Estrita de Limites**: Parâmetros `num_predict` e `num_ctx` injetados dinamicamente no payload de chamadas da Ollama API, evitando interrupções curtas.
+- **Continuação Transparente e Segura**: Identificação proativa de `done_reason="length"` para forçar a continuação do output do assistente sem reiniciar as cadeias lógicas (limitado para prevenir looping).
+### Fixed
+- Interrupções textuais no meio de mensagens mais densas ou em explicações embutidas nos bookmarks gerados pela inteligência.
+- Truncagem de output visual nas respostas combinadas a chamadas de ferramentas.
+
+## [Fase 9] - Reader UI Refresh & Audio TTS
+### Added
+- **Design System Emerald**: Refatoração completa da paleta de cores para o tom "Dark-First Emerald" nos temas Dark, Light e Sépia (remoção das antigas heranças roxas).
+- **Leitor de Áudio (TTS)**: Integração de um leitor de texto nativo (`pyttsx3`) rodando em background (`QThread`) sem bloquear a UI. Inclui sanitização avançada de texto para ignorar quebras de linha e referências bibliográficas do PDF.
+- **Barra de Pesquisa (Overlay)**: Tema escuro hardcoded removido. Agora a barra respeita dinamicamente o tema ativo da interface.
+- **Tipografia**: Unificação de fontes para que todos os temas (incluindo o Sépia) usem a fonte padronizada (Segoe UI / Inter).
+### Changed
+- **Sidebars Refinadas**: Painéis de TOC, RAG e Anotações modernizados com bordas sutis, gradientes de destaque para elementos selecionados e alinhamento responsivo.
+- **Navegação de Página**: Comportamento de navegação ajustado para sempre resetar o viewport para o topo ao trocar de página, garantindo consistência na leitura contínua (EPUB e PDF).
 
 ## [Fase 8] - Tradução Offline (MVP)
 ### Added
