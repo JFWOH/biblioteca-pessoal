@@ -15,6 +15,9 @@ from src.gui.widgets.reading_progress import ReadingProgressBar
 from src.gui.widgets.annotation_panel import AnnotationPanel
 from src.gui.widgets.search_overlay import DocumentSearchBar
 from src.gui.styles import get_reader_css
+from src.gui.widgets.proactive_footer import ProactiveFooterWidget
+from src.core.proactive_reader_service import ProactiveReaderService
+from PyQt6.QtWidgets import QComboBox
 
 
 class ReaderView(QWidget):
@@ -36,8 +39,11 @@ class ReaderView(QWidget):
         self._is_fullscreen = False
         self._search_results: list[dict] = []
         self._annotations: list[dict] = []
+        self._proactive_service = ProactiveReaderService(parent=self)
+        self._proactive_service.observation_ready.connect(self._on_proactive_observation)
         self._setup_ui()
         self._setup_shortcuts()
+        self.reading_context_updated.connect(lambda b, t, p, txt: self._proactive_service.process_page_context(txt, p))
 
     def _setup_ui(self):
         # O layout raiz agora é um QSplitter horizontal para Side-by-Side
@@ -230,6 +236,18 @@ class ReaderView(QWidget):
         self._audio_btn.clicked.connect(self._toggle_audio)
         tb_layout.addWidget(self._audio_btn)
 
+        # Proactive Agent Toggle
+        self._proactive_combo = QComboBox()
+        self._proactive_combo.addItems(["Desligado", "Leve", "Moderado", "Estudo"])
+        self._proactive_combo.setToolTip("Agente Proativo de Leitura")
+        self._proactive_combo.setFixedSize(90, 32)
+        self._proactive_combo.setStyleSheet("""
+            QComboBox { background: transparent; border: 1px solid #2d333f; border-radius: 6px; color: #94a3b8; padding-left: 5px; }
+            QComboBox::drop-down { border: none; }
+        """)
+        self._proactive_combo.currentTextChanged.connect(self._proactive_service.set_intensity)
+        tb_layout.addWidget(self._proactive_combo)
+
         self._toolbar = toolbar
         left_layout.addWidget(toolbar)
 
@@ -301,6 +319,10 @@ class ReaderView(QWidget):
         splitter.setStretchFactor(2, 0)  # Anotações fixo
 
         left_layout.addWidget(splitter, stretch=1)
+
+        # Proactive Footer Widget (starts hidden)
+        self._proactive_footer = ProactiveFooterWidget()
+        left_layout.addWidget(self._proactive_footer)
 
         # Barra de progresso inferior
         self._progress_bar_widget = QWidget()
@@ -598,6 +620,12 @@ class ReaderView(QWidget):
         self._annotation_panel.set_theme(theme)
         if hasattr(self, '_search_bar') and hasattr(self._search_bar, 'set_theme'):
             self._search_bar.set_theme(theme)
+        if hasattr(self, '_proactive_footer') and hasattr(self._proactive_footer, 'set_theme'):
+            self._proactive_footer.set_theme(theme)
+
+        # Apply CSS to current reader if open
+        if self._reader and hasattr(self._reader, "set_theme_css"):
+            self._reader.set_theme_css(get_reader_css(theme))
 
         if theme == "light":
             bg_toolbar = "#f4f4f5"
@@ -1132,8 +1160,13 @@ class ReaderView(QWidget):
             self._audio_worker = None
 
     def _stop_audio_if_running(self):
-        """Para a reprodução de áudio de forma segura e não bloqueante."""
-        if hasattr(self, "_audio_worker") and self._audio_worker and self._audio_worker.isRunning():
+        """Pausa o áudio se o worker estiver ativo."""
+        if hasattr(self, '_audio_worker') and self._audio_worker and self._audio_worker.isRunning():
             self._audio_worker.stop()
-            self._audio_worker.wait()
-            # _on_audio_worker_finished é invocado via sinal finished, limpando a referência.
+            self._audio_worker.wait(2000)
+            self._audio_worker = None
+        self._audio_btn.setText("🔊 Play")
+
+    def _on_proactive_observation(self, obs: dict):
+        """Exibe a observação proativa recebida."""
+        self._proactive_footer.set_observation(obs)
