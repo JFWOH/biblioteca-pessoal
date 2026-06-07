@@ -22,8 +22,11 @@ env/
 # Data
 data/*.db
 data/*.db-journal
+data/*.db-shm
+data/*.db-wal
 data/covers/
 data/chroma_db/
+data/traces/
 data/config.json
 chroma/
 

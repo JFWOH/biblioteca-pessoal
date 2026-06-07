@@ -94,8 +94,6 @@ class RAGWorker(QThread):
         except Exception:
             pass  # Fontes são opcionais, não interrompemos a geração
 
-        # Instancia AgentState para a sessão de chat atual
-        state = AgentState()
 
         # Geração de streaming com controle de rounds e AgentState
         full_answer: list[str] = []

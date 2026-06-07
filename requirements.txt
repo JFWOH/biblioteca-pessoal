@@ -33,3 +33,8 @@ ollama>=0.2.0            # Python client para o daemon Ollama
 
 # Leitor de Audio Local Offline
 pyttsx3>=2.99            # TTS Engine offline local
+
+# Tradução Offline (Fase 8)
+torch>=2.0.0             # Tensor Backend para inferência local
+transformers>=4.33.0     # Suporte ao NLLB-200
+sentencepiece>=0.1.99    # Tokenizer exigido pelo NLLB-200

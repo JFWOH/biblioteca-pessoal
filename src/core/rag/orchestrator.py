@@ -1,10 +1,12 @@
 import hashlib
 import json
 import logging
+import uuid
 from typing import List, Dict, Any, Optional, Generator
 
 from src.core.rag.agent_state import AgentState
 from src.core.rag.tools.base import ToolOutput, create_tool_output
+from src.core.rag.trace_logger import TraceLogger
 
 logger = logging.getLogger(__name__)
 
@@ -125,15 +127,12 @@ class Orchestrator:
             
         return alternatives
 
-    def execute_vector_search(self, query: str, book_id: Optional[int] = None, state: Optional[AgentState] = None) -> ToolOutput:
-        """Executa a busca vetorial semântica.
-        
-        Se falhar por bloqueio ou erro do banco vetorial (ChromaDB/Embeddings),
-        captura o erro, define o status como 'error' e realiza o fallback elegante
-        para a busca textual por palavra-chave no SQLite.
-        """
+    def execute_vector_search(self, query: str, book_id: Optional[int] = None, state: Optional[AgentState] = None, trace_logger: Optional[TraceLogger] = None) -> ToolOutput:
+        """Executa a busca vetorial semântica."""
         if state:
             state.called_tools.append("vector_search")
+            if book_id is not None:
+                state.books_consulted.add(str(book_id))
             
         try:
             # Tenta busca vetorial no motor RAG
@@ -157,10 +156,13 @@ class Orchestrator:
         except Exception as exc:
             logger.warning("vector_search falhou, iniciando fallback para keyword_search: %s", exc)
             if state:
+                state.add_error("VectorSearchError", str(exc))
                 state.history.append({
                     "role": "system",
                     "content": f"vector_search falhou com erro: {exc}. Iniciando fallback para keyword_search no SQLite."
                 })
+            if trace_logger:
+                trace_logger.emit("fallback_activated", step=state.current_round if state else 0, reason="vector_search_failed", payload={"error": str(exc)}, round_num=state.current_round if state else 0)
             
             # Lógica de Fallback: busca por palavras-chave
             try:
@@ -184,6 +186,8 @@ class Orchestrator:
                 )
             except Exception as fallback_exc:
                 logger.error("Fallback para keyword_search também falhou: %s", fallback_exc)
+                if state:
+                    state.add_error("KeywordSearchFallbackError", str(fallback_exc))
                 return create_tool_output(
                     status="error",
                     data=[],
@@ -192,7 +196,7 @@ class Orchestrator:
                     confidence=0.0
                 )
 
-    def execute_search_web(self, query: str, state: Optional[AgentState] = None) -> ToolOutput:
+    def execute_search_web(self, query: str, state: Optional[AgentState] = None, trace_logger: Optional[TraceLogger] = None) -> ToolOutput:
         """Executa a busca externa na web com suporte à Query Reformulation robusta.
         
         Executa sequencialmente as queries reformuladas até encontrar resultados válidos.
@@ -277,10 +281,13 @@ class Orchestrator:
             err_msg = "A busca externa falhou ou não retornou resultados úteis."
             logger.warning("search_web falhou em todas as tentativas: %s", err_msg)
             if state:
+                state.add_error("WebSearchError", err_msg)
                 state.history.append({
                     "role": "system",
                     "content": f"search_web falhou em todas as tentativas. Detalhe: {err_msg}"
                 })
+            if trace_logger:
+                trace_logger.emit("fallback_activated", step=state.current_round if state else 0, reason="web_search_failed", payload={"error": err_msg}, round_num=state.current_round if state else 0)
             
             # Lógica de Degradação Elegante: busca local similar
             try:
@@ -307,6 +314,8 @@ class Orchestrator:
                 )
             except Exception as local_exc:
                 logger.error("Busca local de fallback também falhou: %s", local_exc)
+                if state:
+                    state.add_error("WebFallbackToLocalError", str(local_exc))
                 return create_tool_output(
                     status="error",
                     data=[],
@@ -320,6 +329,8 @@ class Orchestrator:
         """Executa a busca textual por palavras-chave exatas."""
         if state:
             state.called_tools.append("keyword_search")
+            if book_id is not None:
+                state.books_consulted.add(str(book_id))
             
         try:
             hits = self.engine.keyword_search_db(term, book_id=book_id)
@@ -341,6 +352,8 @@ class Orchestrator:
             )
         except Exception as exc:
             logger.error("keyword_search falhou: %s", exc)
+            if state:
+                state.add_error("KeywordSearchError", str(exc))
             return create_tool_output(
                 status="error",
                 data=[],
@@ -353,6 +366,8 @@ class Orchestrator:
         """Executa a busca por referência cruzada excluindo o livro atual."""
         if state:
             state.called_tools.append("cross_reference")
+            if current_book_id is not None:
+                state.books_consulted.add(str(current_book_id))
             
         try:
             if self.engine._collection is not None and current_book_id is not None:
@@ -401,6 +416,8 @@ class Orchestrator:
                 )
         except Exception as exc:
             logger.error("cross_reference falhou: %s", exc)
+            if state:
+                state.add_error("CrossReferenceError", str(exc))
             return create_tool_output(
                 status="error",
                 data=[],
@@ -426,8 +443,11 @@ class Orchestrator:
         max_time_ms: int = 20000
     ) -> Dict[str, Any]:
         """Executa o loop de agente síncrono simplificado."""
-        state = AgentState(max_rounds=max_rounds, max_time_ms=max_time_ms)
+        session_id = str(uuid.uuid4())
+        trace_logger = TraceLogger(session_id)
+        state = AgentState(session_id=session_id, max_rounds=max_rounds, max_time_ms=max_time_ms)
         logger.info("Iniciando loop resiliente de orquestração RAG.")
+        trace_logger.emit("query_started", step=0, query=question, book_id=book_id)
 
         while state.is_budget_ok():
             state.current_round += 1
@@ -435,11 +455,11 @@ class Orchestrator:
 
             # Roteamento de Ferramentas Simulado:
             if "web" in question.lower() or "internet" in question.lower() or "atual" in question.lower():
-                out = self.execute_search_web(question, state)
+                out = self.execute_search_web(question, state, trace_logger)
                 round_outputs.append(out)
                 state.update_provenance(out["provenance"])
             else:
-                out = self.execute_vector_search(question, book_id=book_id, state=state)
+                out = self.execute_vector_search(question, book_id=book_id, state=state, trace_logger=trace_logger)
                 round_outputs.append(out)
                 state.update_provenance(out["provenance"])
 
@@ -448,11 +468,13 @@ class Orchestrator:
                 round_outputs.append(kw_out)
 
             digest = self.compute_results_digest(round_outputs)
-            if state.last_results_digest and state.last_results_digest == digest:
+            if state.last_result_hash and state.last_result_hash == digest:
+                state.repeated_result_count += 1
                 logger.info("Early-Exit ativado: resultados idênticos detectados no round %d.", state.current_round)
+                trace_logger.emit("early_exit", step=state.current_round, reason="resultados_identicos", round_num=state.current_round)
                 break
             
-            state.last_results_digest = digest
+            state.last_result_hash = digest
 
             state.history.append({
                 "round": state.current_round,
@@ -466,17 +488,26 @@ class Orchestrator:
 
             if state.confidence_score >= 0.85 and state.current_round >= 2:
                 logger.info("Encerramento precoce por alto score de confiança (%.2f).", state.confidence_score)
+                trace_logger.emit("early_exit", step=state.current_round, reason="alta_confianca", confidence=state.confidence_score, round_num=state.current_round)
                 break
 
-        return {
+        final_result = {
             "status": "success",
             "provenance": state.provenance,
             "confidence_score": state.confidence_score,
             "rounds_executed": state.current_round,
             "called_tools": state.called_tools,
             "history": state.history,
-            "final_data": state.history[-1]["outputs"] if state.history else []
+            "final_data": state.history[-1]["outputs"] if state.history else [],
+            "sources_used": list(state.sources_used),
+            "books_consulted": list(state.books_consulted),
+            "repeated_result_count": state.repeated_result_count,
+            "errors": state.errors,
+            "web_seen": state.web_seen,
+            "ui_mutation_requested": state.ui_mutation_requested,
         }
+        trace_logger.emit("query_completed", step=state.current_round + 1, payload=final_result)
+        return final_result
 
     def _call_chat_api(self, msgs: list, stream: bool = False, temperature: float | None = None) -> Any:
         """Helper para chamar o Ollama Chat API."""
@@ -507,15 +538,18 @@ class Orchestrator:
         fn_name: str,
         args: dict,
         state: AgentState,
+        trace_logger: TraceLogger,
         book_id: Optional[int] = None,
         ui_mutation_callback: Optional[callable] = None,
     ) -> str:
         """Executa a ferramenta usando métodos robustos e protegidos por política do Orquestrador."""
         from src.core.rag.policy_engine import PolicyEngine
 
+        trace_logger.emit("tool_call_requested", step=state.current_round, tool_name=fn_name, payload=args, round_num=state.current_round)
+
         try:
             if fn_name == "search_web":
-                out = self.execute_search_web(args.get("query", ""), state)
+                out = self.execute_search_web(args.get("query", ""), state, trace_logger)
                 return json.dumps(out.get("data", []), ensure_ascii=False)
 
             elif fn_name == "vector_search":
@@ -524,7 +558,7 @@ class Orchestrator:
                     bid = int(bid) if bid.isdigit() else None
                 elif bid is None:
                     bid = book_id
-                out = self.execute_vector_search(args.get("query", ""), book_id=bid, state=state)
+                out = self.execute_vector_search(args.get("query", ""), book_id=bid, state=state, trace_logger=trace_logger)
                 formatted = [
                     {
                         "title": item["title"],
@@ -566,10 +600,12 @@ class Orchestrator:
                 return json.dumps(formatted, ensure_ascii=False)
 
             elif fn_name == "highlight_book_text":
+                state.ui_mutation_requested = True
                 text_to_find = args.get("text_to_find", "")
                 color = args.get("color", "yellow")
                 
                 allowed = PolicyEngine.is_action_allowed("highlight", state.provenance, {"text_to_find": text_to_find, "color": color})
+                trace_logger.emit("policy_decision", step=state.current_round, tool_name=fn_name, allowed=allowed, provenance=state.provenance, payload={"text_to_find": text_to_find, "color": color}, round_num=state.current_round)
                 if not allowed:
                     return json.dumps({
                         "status": "blocked",
@@ -601,9 +637,11 @@ class Orchestrator:
                     })
 
             elif fn_name == "create_ai_bookmark":
+                state.ui_mutation_requested = True
                 note = args.get("note", "")
                 
                 allowed = PolicyEngine.is_action_allowed("bookmark", state.provenance, {"note": note})
+                trace_logger.emit("policy_decision", step=state.current_round, tool_name=fn_name, allowed=allowed, provenance=state.provenance, payload={"note": note}, round_num=state.current_round)
                 if not allowed:
                     return json.dumps({
                         "status": "blocked",
@@ -630,6 +668,8 @@ class Orchestrator:
 
         except Exception as exc:
             logger.error("Erro na execução da ferramenta '%s': %s", fn_name, exc)
+            state.add_error("ToolExecutionError", str(exc))
+            trace_logger.emit("error", step=state.current_round, error_type="ToolExecutionError", error_message=str(exc), tool_name=fn_name, round_num=state.current_round)
             return json.dumps({"error": f"A ferramenta falhou: {str(exc)}"})
 
     def query_rag(
@@ -640,8 +680,15 @@ class Orchestrator:
         ui_mutation_callback: Optional[callable] = None,
     ) -> Generator[str, None, None]:
         """Pipeline RAG Agentic com streaming de tokens e controle por AgentState + PolicyEngine."""
+        session_id = str(uuid.uuid4())
+        trace_logger = TraceLogger(session_id)
+        trace_logger.emit("query_started", step=0, query=question, book_id=book_id)
+
         if not self.engine.is_ollama_available():
-            raise RuntimeError("Ollama não está disponível. Inicie o daemon com 'ollama serve'.")
+            err_msg = "Ollama não está disponível. Inicie o daemon com 'ollama serve'."
+            trace_logger.emit("error", step=0, error_type="RuntimeError", error_message=err_msg)
+            trace_logger.emit("query_completed", step=1, error_message=err_msg)
+            raise RuntimeError(err_msg)
 
         n = n_context or self.engine._n_context
         
@@ -666,10 +713,10 @@ class Orchestrator:
                 similar = []
 
         if not similar:
-            yield (
-                "Nenhum documento foi encontrado na biblioteca indexada. "
-                "Indexe seus livros primeiro usando o botão 'Reindexar Biblioteca'."
-            )
+            err_msg = "Nenhum documento foi encontrado na biblioteca indexada. Indexe seus livros primeiro usando o botão 'Reindexar Biblioteca'."
+            trace_logger.emit("error", step=1, error_type="EmptyContext", error_message=err_msg)
+            trace_logger.emit("query_completed", step=2, error_message=err_msg)
+            yield err_msg
             return
 
         context_parts = []
@@ -683,6 +730,7 @@ class Orchestrator:
             context_parts.append(f"{header}\n{item['document']}")
 
         context = "\n\n".join(context_parts)
+        trace_logger.emit("context_loaded", step=1, payload={"context_length": len(context), "documents_found": len(similar)})
 
         from src.core.rag_engine import _FIXED_SYSTEM_PROMPT, _TOOLS_DEF
         messages = [
@@ -692,7 +740,7 @@ class Orchestrator:
             {"role": "user", "content": question},
         ]
 
-        state = AgentState(max_rounds=5, max_time_ms=25000)
+        state = AgentState(session_id=session_id, max_rounds=5, max_time_ms=25000)
 
         while state.is_budget_ok():
             state.current_round += 1
@@ -701,7 +749,10 @@ class Orchestrator:
                 with self._call_chat_api(messages, stream=False, temperature=0.1) as resp:
                     data = json.loads(resp.read())
             except Exception as exc:
-                yield f"\n⚠️ Falha ao contactar o assistente: {exc}"
+                err_msg = f"Falha ao contactar o assistente: {exc}"
+                trace_logger.emit("error", step=state.current_round, error_type="LLMError", error_message=err_msg, round_num=state.current_round)
+                trace_logger.emit("query_completed", step=state.current_round + 1, error_message=err_msg)
+                yield f"\n⚠️ {err_msg}"
                 return
 
             message = data.get("message", {})
@@ -709,12 +760,26 @@ class Orchestrator:
             if not message.get("tool_calls"):
                 content = message.get("content", "")
                 if content:
+                    trace_logger.emit("final_answer_started", step=state.current_round, round_num=state.current_round)
                     import time
                     for char in content:
                         if self.engine._cancelled:
+                            trace_logger.emit("early_exit", step=state.current_round, reason="cancelled")
+                            trace_logger.emit("query_completed", step=state.current_round + 1, reason="cancelled")
                             return
                         yield char
                         time.sleep(0.003)
+                    trace_logger.emit("final_answer_completed", step=state.current_round, round_num=state.current_round, payload={"length": len(content)})
+                payload = {
+                    "sources_used": list(state.sources_used),
+                    "books_consulted": list(state.books_consulted),
+                    "repeated_result_count": state.repeated_result_count,
+                    "errors": state.errors,
+                    "web_seen": state.web_seen,
+                    "ui_mutation_requested": state.ui_mutation_requested,
+                    "called_tools": state.called_tools
+                }
+                trace_logger.emit("query_completed", step=state.current_round + 1, payload=payload)
                 return
 
             messages.append(message)
@@ -722,6 +787,8 @@ class Orchestrator:
             
             for tool_call in message["tool_calls"]:
                 if self.engine._cancelled:
+                    trace_logger.emit("early_exit", step=state.current_round, reason="cancelled")
+                    trace_logger.emit("query_completed", step=state.current_round + 1, reason="cancelled")
                     return
 
                 fn = tool_call.get("function", {})
@@ -739,9 +806,11 @@ class Orchestrator:
                     fn_name,
                     args,
                     state,
+                    trace_logger,
                     book_id=book_id,
                     ui_mutation_callback=ui_mutation_callback
                 )
+                trace_logger.emit("tool_call_completed", step=state.current_round, tool_name=fn_name, round_num=state.current_round, payload={"result": tool_result_str})
                 messages.append({"role": "tool", "content": tool_result_str})
 
                 round_outputs.append(create_tool_output(
@@ -751,17 +820,23 @@ class Orchestrator:
                 ))
 
             digest = self.compute_results_digest(round_outputs)
-            if state.last_results_digest and state.last_results_digest == digest:
+            if state.last_result_hash and state.last_result_hash == digest:
+                state.repeated_result_count += 1
                 logger.info("Early-Exit ativado no loop de streaming (rodada %d).", state.current_round)
+                trace_logger.emit("early_exit", step=state.current_round, reason="resultados_identicos", round_num=state.current_round)
                 break
             
-            state.last_results_digest = digest
+            state.last_result_hash = digest
 
         yield "\n[⚠️ Limite de rodadas de ferramentas atingido — gerando resposta final...]\n"
+        trace_logger.emit("early_exit", step=state.current_round, reason="max_rounds_reached", round_num=state.current_round)
+        trace_logger.emit("final_answer_started", step=state.current_round, round_num=state.current_round)
         try:
             with self._call_chat_api(messages, stream=True) as resp:
                 for line in resp:
                     if self.engine._cancelled:
+                        trace_logger.emit("early_exit", step=state.current_round, reason="cancelled")
+                        trace_logger.emit("query_completed", step=state.current_round + 1, reason="cancelled")
                         return
                     if not line:
                         continue
@@ -771,8 +846,13 @@ class Orchestrator:
                         if token:
                             yield token
                         if chunk.get("done", False):
+                            trace_logger.emit("final_answer_completed", step=state.current_round, round_num=state.current_round)
+                            trace_logger.emit("query_completed", step=state.current_round + 1)
                             return
                     except json.JSONDecodeError:
                         continue
         except Exception as exc:
-            yield f"\n⚠️ Falha ao gerar resposta final: {exc}"
+            err_msg = f"Falha ao gerar resposta final: {exc}"
+            trace_logger.emit("error", step=state.current_round, error_type="LLMError", error_message=err_msg)
+            trace_logger.emit("query_completed", step=state.current_round + 1, error_message=err_msg)
+            yield f"\n⚠️ {err_msg}"

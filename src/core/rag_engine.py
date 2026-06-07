@@ -157,25 +157,6 @@ _TOOLS_DEF = [
 ]
 
 
-
-def _chunk_text(text: str, size: int = DEFAULT_CHUNK_SIZE,
-                overlap: int = DEFAULT_CHUNK_OVERLAP) -> list[str]:
-    """Divide texto em chunks com sobreposição."""
-    if not text or not text.strip():
-        return []
-    chunks: list[str] = []
-    start = 0
-    while start < len(text):
-        end = min(start + size, len(text))
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        if end == len(text):
-            break
-        start += size - overlap
-    return chunks
-
-
 class RAGEngine:
     """Motor de Retrieval-Augmented Generation 100% local.
 
@@ -294,118 +275,6 @@ class RAGEngine:
             return self._collection.count()
         except Exception:
             return 0
-
-    # ── Extração de texto ──────────────────────────────────────────────────────
-
-    def _open_db(self) -> sqlite3.Connection:
-        """Abre conexão SQLite somente-leitura."""
-        conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _extract_book_text(self, book_id: int) -> tuple[dict, list[dict]]:
-        """Extrai todo o texto relevante de um livro e suas anotações com mapeamento de páginas.
-
-        Returns:
-            (book_meta, list_of_chunk_dicts)
-            onde cada chunk_dict é: {"text": str, "page_number": int, "chunk_type": str}
-        """
-        conn = self._open_db()
-        try:
-            row = conn.execute(
-                "SELECT id, title, author, description, isbn, publisher, year, file_path "
-                "FROM books WHERE id = ?", (book_id,)
-            ).fetchone()
-            if not row:
-                return {}, []
-
-            book_meta = dict(row)
-            chunks: list[dict] = []
-
-            # Texto principal (metadados): título + autor + descrição
-            main_text = " ".join(filter(None, [
-                book_meta.get("title", ""),
-                book_meta.get("author", ""),
-                book_meta.get("description", ""),
-            ]))
-            if main_text.strip():
-                for c in _chunk_text(main_text, self._chunk_size, self._chunk_overlap):
-                    chunks.append({
-                        "text": c,
-                        "page_number": 0,
-                        "chunk_type": "metadata"
-                    })
-
-            # Anotações do livro
-            ann_rows = conn.execute(
-                "SELECT page_number, content FROM annotations WHERE book_id = ? AND content != ''",
-                (book_id,)
-            ).fetchall()
-            for ann in ann_rows:
-                content = ann["content"].strip()
-                if content:
-                    pg = ann["page_number"] if ann["page_number"] is not None else 0
-                    for c in _chunk_text(content, self._chunk_size, self._chunk_overlap):
-                        chunks.append({
-                            "text": c,
-                            "page_number": pg,
-                            "chunk_type": "note"
-                        })
-
-        finally:
-            conn.close()
-
-        # Extração do conteúdo literal do arquivo do livro
-        file_path = book_meta.get("file_path", "")
-        if file_path:
-            p = Path(file_path)
-            if p.exists():
-                try:
-                    from src.readers.reader_factory import create_reader
-                    reader = create_reader(p)
-                    reader.open()
-                    try:
-                        if hasattr(reader, "get_page_text"):
-                            for i in range(reader.total_pages):
-                                text = reader.get_page_text(i)
-                                if text and text.strip():
-                                    for c in _chunk_text(text, self._chunk_size, self._chunk_overlap):
-                                        chunks.append({
-                                            "text": c,
-                                            "page_number": i,
-                                            "chunk_type": "content"
-                                        })
-                        elif hasattr(reader, "get_chapter_text"):
-                            for i in range(reader.total_pages):
-                                text = reader.get_chapter_text(i)
-                                if text and text.strip():
-                                    for c in _chunk_text(text, self._chunk_size, self._chunk_overlap):
-                                        chunks.append({
-                                            "text": c,
-                                            "page_number": i,
-                                            "chunk_type": "content"
-                                        })
-                        elif hasattr(reader, "get_page"):
-                            from bs4 import BeautifulSoup
-                            for i in range(reader.total_pages):
-                                page = reader.get_page(i)
-                                if page.content_type == "html" and isinstance(page.content, str):
-                                    soup = BeautifulSoup(page.content, "html.parser")
-                                    text = soup.get_text(separator=" ")
-                                    if text and text.strip():
-                                        for c in _chunk_text(text, self._chunk_size, self._chunk_overlap):
-                                            chunks.append({
-                                                "text": c,
-                                                "page_number": i,
-                                                "chunk_type": "content"
-                                            })
-                    finally:
-                        reader.close()
-                except Exception as e:
-                    logger.warning("Falha ao extrair texto do arquivo %s: %s", file_path, e)
-                    print(f"[RAGEngine] Falha ao extrair texto de {file_path}: {e}")
-
-        return book_meta, chunks
 
     # ── Embeddings via Ollama ──────────────────────────────────────────────────
 
@@ -526,222 +395,37 @@ class RAGEngine:
 
     # ── Indexação ──────────────────────────────────────────────────────────────
 
-    def index_book(self, book_id: int) -> int:
-        """Indexa um livro e suas anotações no ChromaDB.
-
-        Args:
-            book_id: ID do livro no SQLite.
-
-        Returns:
-            Número de chunks indexados.
-
-        Raises:
-            RuntimeError: Se o Ollama não estiver disponível ou o modelo de
-                          embedding não puder ser obtido.
-            ValueError: Se o livro não for encontrado.
-        """
-        # --- Idempotência: Pula se já estiver indexado ---
-        if self.has_book_indexed(book_id):
-            print(f"[RAGEngine] Livro {book_id} já está indexado no ChromaDB. Pulando...", flush=True)
-            return 0
-
-        if not self.is_ollama_available():
-            raise RuntimeError(
-                "Ollama não está disponível. Certifique-se de que o daemon "
-                "está rodando (execute 'ollama serve' no terminal)."
-            )
-
-        # ── Validação do modelo de embeddings (Fix #2) ────────────────────────
-        if not self.is_model_available(self._embed_model):
-            logger.info(
-                "Modelo de embedding '%s' não encontrado localmente. Baixando…",
-                self._embed_model,
-            )
-            print(
-                f"[RAGEngine] Modelo '{self._embed_model}' ausente — iniciando pull…",
-                flush=True,
-            )
-            for status in self.pull_model(self._embed_model):
-                logger.debug("Pull embed model: %s", status.get("status", ""))
-            if not self.is_model_available(self._embed_model):
-                raise RuntimeError(
-                    f"Modelo de embedding '{self._embed_model}' não disponível após download. "
-                    "Verifique sua conexão e tente novamente."
-                )
-            logger.info("Modelo '%s' baixado com sucesso.", self._embed_model)
-        # ─────────────────────────────────────────────────────────────────────
-
-        print("1. Extraindo texto do livro...", flush=True)
-        book_meta, chunks = self._extract_book_text(book_id)
-        if not book_meta:
-            raise ValueError(f"Livro com id={book_id} não encontrado no banco.")
-        
-        book_title = book_meta.get("title", "Sem título")
-        print(f"[RAGEngine] Livro: {book_title} | Chunks extraídos pelo Reader: {len(chunks)}", flush=True)
-
-        if not chunks:
-            logger.warning("Nenhum texto extraível para book_id=%d", book_id)
-            return 0
-
-        # Remove chunks anteriores deste livro (re-indexação limpa)
-        self._delete_book_chunks(book_id)
-
-        ids: list[str] = []
-        embeddings: list[list[float]] = []
-        documents: list[str] = []
-        metadatas: list[dict] = []
-
-        print("2. Gerando chunks... concluído. Iniciando geração de embeddings", flush=True)
-        print("3. Solicitando embeddings ao Ollama (tentando em lote)...", flush=True)
-        
-        BATCH_SIZE = 50
-        batch_texts = []
-        batch_indices = []
-        
-        def _process_batch(current_texts, current_indices):
-            try:
-                # Tenta gerar em lote
-                batch_embs = self._get_embeddings_batch(current_texts)
-                for i_idx, emb in zip(current_indices, batch_embs):
-                    ids.append(f"book_{book_id}_chunk_{i_idx}")
-                    embeddings.append(emb)
-                    documents.append(current_texts[current_indices.index(i_idx)])
-                    chunk_data = chunks[i_idx]
-                    metadatas.append({
-                        "book_id": book_id,
-                        "title": book_meta.get("title", ""),
-                        "author": book_meta.get("author", ""),
-                        "chunk_index": i_idx,
-                        "page_number": chunk_data.get("page_number", 0),
-                        "chunk_type": chunk_data.get("chunk_type", "content")
-                    })
-            except NotImplementedError:
-                # Fallback: se o Ollama não suporta batch, faz um por um
-                for idx, text_chunk in zip(current_indices, current_texts):
-                    emb = self._get_embedding(text_chunk)
-                    ids.append(f"book_{book_id}_chunk_{idx}")
-                    embeddings.append(emb)
-                    documents.append(text_chunk)
-                    chunk_data = chunks[idx]
-                    metadatas.append({
-                        "book_id": book_id,
-                        "title": book_meta.get("title", ""),
-                        "author": book_meta.get("author", ""),
-                        "chunk_index": idx,
-                        "page_number": chunk_data.get("page_number", 0),
-                        "chunk_type": chunk_data.get("chunk_type", "content")
-                    })
-
-        import time
-        start_time = time.time()
-        
-        for i, chunk_data in enumerate(chunks):
-            if self._cancelled:
-                break
-            batch_texts.append(chunk_data["text"])
-            batch_indices.append(i)
-            
-            if len(batch_texts) >= BATCH_SIZE:
-                try:
-                    _process_batch(batch_texts, batch_indices)
-                except Exception as e:
-                    print(f"ERRO CRÍTICO NA INDEXAÇÃO NO LOTE (Chunks {batch_indices[0]} até {batch_indices[-1]}): {str(e)}", flush=True)
-                    raise
-                
-                # Cálculo de ETA
-                elapsed = time.time() - start_time
-                chunks_processed = i + 1
-                chunks_per_sec = chunks_processed / elapsed if elapsed > 0 else 0
-                chunks_remaining = len(chunks) - chunks_processed
-                eta_secs = chunks_remaining / chunks_per_sec if chunks_per_sec > 0 else 0
-                eta_mins = int(eta_secs // 60)
-                eta_remainder_secs = int(eta_secs % 60)
-                eta_str = f"Faltam ~{eta_mins}m {eta_remainder_secs}s"
-                
-                print(f"   [{chunks_processed}/{len(chunks)}] embeddings gerados... ({eta_str})", flush=True)
-                
-                batch_texts.clear()
-                batch_indices.clear()
-                
-        # Processa chunks restantes
-        if batch_texts and not self._cancelled:
-            try:
-                _process_batch(batch_texts, batch_indices)
-                print(f"   [{len(chunks)}/{len(chunks)}] embeddings gerados...", flush=True)
-            except Exception as e:
-                print(f"ERRO CRÍTICO NA INDEXAÇÃO NO LOTE FINAL: {str(e)}", flush=True)
-                raise
-
-        if ids:
-            print("4. Salvando no ChromaDB...", flush=True)
-            self._collection.upsert(
-                ids=ids,
-                embeddings=embeddings,
-                documents=documents,
-                metadatas=metadatas,
-            )
-            logger.info("Indexados %d chunks para book_id=%d", len(ids), book_id)
-            try:
-                print(f"OK: Concluído: {len(ids)} chunks indexados para {book_title}", flush=True)
-            except UnicodeEncodeError:
-                safe_title = book_title.encode('ascii', 'ignore').decode('ascii')
-                print(f"OK: Concluido: {len(ids)} chunks indexados para {safe_title}", flush=True)
-
-        return len(ids)
+    def index_book(self, book_id: int, force: bool = False) -> int:
+        """Indexa um livro e suas anotações no ChromaDB (delegado para o DocumentIndexerService)."""
+        from src.core.document_indexer_service import DocumentIndexerService
+        from src.core.database import LibraryDB
+        db = LibraryDB(str(self._db_path))
+        indexer = DocumentIndexerService(db, self)
+        return indexer.index_book(book_id, force=force)
 
     def index_all_books(self) -> dict[int, int]:
-        """Re-indexa todos os livros da biblioteca.
-
-        Returns:
-            Dict {book_id: n_chunks_indexed}
-        """
-        conn = self._open_db()
-        try:
-            rows = conn.execute("SELECT id FROM books").fetchall()
-            book_ids = [r["id"] for r in rows]
-        finally:
-            conn.close()
-
-        results: dict[int, int] = {}
-        self._cancelled = False
-        for book_id in book_ids:
-            if self._cancelled:
-                break
-            try:
-                n = self.index_book(book_id)
-                results[book_id] = n
-            except Exception as exc:
-                logger.error("Erro ao indexar book_id=%d: %s", book_id, exc)
-                results[book_id] = -1
-        return results
-
-    def _delete_book_chunks(self, book_id: int) -> None:
-        """Remove todos os chunks de um livro do ChromaDB."""
-        try:
-            existing = self._collection.get(
-                where={"book_id": book_id}
-            )
-            if existing and existing.get("ids"):
-                self._collection.delete(ids=existing["ids"])
-        except Exception as exc:
-            logger.warning("Não foi possível remover chunks de book_id=%d: %s", book_id, exc)
+        """Re-indexa todos os livros da biblioteca (delegado para o DocumentIndexerService)."""
+        from src.core.document_indexer_service import DocumentIndexerService
+        from src.core.database import LibraryDB
+        db = LibraryDB(str(self._db_path))
+        indexer = DocumentIndexerService(db, self)
+        return indexer.index_all_books()
 
     def delete_book_index(self, book_id: int) -> None:
         """Remove um livro do índice vetorial (chamado ao excluir da biblioteca)."""
-        self._delete_book_chunks(book_id)
+        from src.core.document_indexer_service import DocumentIndexerService
+        from src.core.database import LibraryDB
+        db = LibraryDB(str(self._db_path))
+        indexer = DocumentIndexerService(db, self)
+        indexer.delete_book_index(book_id)
 
     def has_book_indexed(self, book_id: int) -> bool:
         """Verifica se o livro já possui chunks no banco vetorial."""
-        if not self._collection:
-            return False
-        try:
-            existing = self._collection.get(
-                where={"book_id": book_id},
-                limit=1
-            )
-            return bool(existing and existing.get("ids"))
-        except Exception:
-            return False
+        from src.core.document_indexer_service import DocumentIndexerService
+        from src.core.database import LibraryDB
+        db = LibraryDB(str(self._db_path))
+        indexer = DocumentIndexerService(db, self)
+        return indexer.has_book_indexed(book_id)
 
     # ── Busca Vetorial ─────────────────────────────────────────────────────────
 

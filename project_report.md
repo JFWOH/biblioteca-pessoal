@@ -1,162 +1,513 @@
-# Relatório do Projeto: Biblioteca Pessoal Inteligente (Agentic RAG & Acrobat-Style)
+# Relatório do Projeto: Biblioteca Pessoal Inteligente  
+## Local-First Reader + Agentic RAG + Acrobat-Style UI Mutators
 
-Este relatório apresenta a documentação técnica completa do projeto **Biblioteca Pessoal**, detalhando sua arquitetura, tecnologias empregadas, estrutura de arquivos, desafios resolvidos e o roadmap futuro.
+Este relatório apresenta a documentação técnica consolidada do projeto **Biblioteca Pessoal**, detalhando seu escopo, arquitetura, tecnologias, estrutura resumida de arquivos, decisões arquiteturais, desafios resolvidos e roadmap futuro.
 
 ---
 
 ## 1. Visão Geral e Escopo
 
-A **Biblioteca Pessoal** é um ecossistema 100% local projetado para gerenciar, ler e interagir de forma inteligente com acervos digitais de livros (PDF, EPUB, TXT, DOCX). O projeto combina a fidelidade visual e ferramentas de marcação de leitores profissionais (como o Adobe Acrobat Reader) com a autonomia cognitiva de um **Assistente Agentic RAG** side-by-side.
+A **Biblioteca Pessoal** é um ecossistema **100% local-first** para gerenciamento, leitura e interação inteligente com acervos digitais de livros e documentos. O projeto combina:
 
-### Principais Pilares do Ecossistema:
-1. **Leitura Multi-formato Avançada**: Visualizador responsivo com paginação inteligente, modo de página dupla (spread view), sumário dinâmico (TOC), barra de progresso persistente e suporte completo a zooms.
-2. **Marca-Texto Inteligente & Acrobat-Style**: Marcação geométrica translúcida de trechos do PDF, sistema de remoção rápida ("Desmarcar") com o botão direito e atalhos rápidos de IA baseados no texto marcado.
-3. **Agentic RAG Side-by-Side**: Um chat integrado no leitor onde a IA analisa o contexto de leitura e decide, de forma autônoma e iterativa (Function Calling), quais ferramentas usar (busca vetorial, busca textual exata, busca cruzada ou pesquisa externa na web).
-4. **UI Mutators**: A capacidade inovadora de permitir que o próprio modelo de IA altere a interface visual do usuário (como criar marcações coloridas ou adicionar marcadores inteligentes na página aberta) de forma thread-safe.
+- **fidelidade visual e ergonomia de leitores profissionais** (inspiração Acrobat-style),
+- **leitura multi-formato local**,
+- **anotações e destaques não destrutivos**,
+- e um **Assistente Agentic RAG** integrado, capaz de consultar conteúdo local, cruzar referências e executar ações visuais seguras na interface.
+
+A proposta central do sistema é permitir que o usuário **leia, busque, anote e converse com sua biblioteca** sem depender de serviços obrigatórios em nuvem, preservando privacidade, portabilidade e custo operacional zero para o fluxo principal.
+
+### Estado Atual de Maturidade
+
+O projeto encontra-se em um estágio de maturidade significativamente superior ao de um MVP tradicional:
+
+- **Fase 1 concluída**: o caminho canônico do RAG foi consolidado em `src/core/rag/orchestrator.py`, com `src/core/rag_engine.py` mantido como facade compatível.
+- **Fase 2 concluída**: foi implementado o **Structured Agent Trace Logger (ADR-004)**, com persistência local de traces em JSONL sob `data/traces/`.
+- **Fase 3 concluída**: ferramentas operacionais criadas (Housekeeping/Retenção, Trace Inspector CLI e Evaluation Harness base).
+- **Fase 4 concluída**: evolução da qualidade semântica com o novo `AgentState` (ADR-002), tracking avançado de `sources_used`, `repeated_result_count` e avaliação de sessões (redundantes, fallback-heavy, etc).
+- O sistema opera com:
+  - **Policy Engine ativo (ADR-003)**,
+  - **boundary explícito entre GUI e Core AI (ADR-006)**,
+  - **rastreabilidade e retenção estruturadas de execuções agentic**,
+  - **classificação automática e avaliação estrutural (Eval Harness)**,
+  - e **suíte de testes especializada** para os componentes críticos do pipeline RAG.
+
+### Principais Pilares do Ecossistema
+
+1. **Leitura Multi-formato Avançada**  
+   Visualizador local com suporte a PDF, EPUB, DOCX, TXT/Markdown e outros formatos, com paginação, TOC, zoom, progresso persistente e ergonomia de leitura.
+
+2. **Marca-Texto Inteligente & Acrobat-Style**  
+   Sistema de destaques visuais efêmeros e anotações persistidas separadamente, sem alteração destrutiva do arquivo original em disco.
+
+3. **Agentic RAG Side-by-Side**  
+   Painel de assistente integrado ao leitor, capaz de executar busca vetorial, busca textual exata, referência cruzada e pesquisa web complementar, de forma iterativa e controlada.
+
+4. **UI Mutators Seguros**  
+   A IA pode solicitar mutações visuais seguras (como destaque e marcador inteligente), mas toda mutação passa por validação arquitetural e de policy antes de chegar à GUI.
+
+5. **Observabilidade Estruturada**  
+   Toda sessão relevante do pipeline agentic pode gerar **traces locais em JSONL**, permitindo auditoria, debugging e inspeção posterior do comportamento do sistema.
 
 ---
 
 ## 2. Stack Tecnológica
 
-O projeto foi construído priorizando a execução local, a privacidade e a ausência de custos operacionais (zero API keys obrigatórias):
+O projeto prioriza execução local, privacidade, transparência operacional e independência de serviços externos pagos.
 
 | Camada | Tecnologia | Papel no Projeto |
 | --- | --- | --- |
-| **Interface Gráfica** | `Python 3.11` + `PyQt6` | Construção de janelas, painéis laterais, barras de ferramentas e roteamento de sinais. |
-| **Motor de PDF (Leitura)** | `PyMuPDF (fitz)` | Extração de textos, busca literal em páginas, extração de texto geométrico (clip) e renderização rápida de imagens das páginas. |
-| **Web Engine (EPUB/HTML)** | `PyQt6 QWebEngineView` | Renderização nativa e de alta performance de arquivos EPUB estruturados em HTML/CSS. |
-| **Banco de Dados Relacional** | `SQLite3` | Armazenamento de metadados dos livros (título, autor, caminho do arquivo, favoritos, nota) e anotações. |
-| **Banco de Dados Vetorial** | `ChromaDB` | Vector store local para indexação semântica de chunks de livros em formato de embeddings tridimensionais. |
-| **Modelos de Embeddings** | `Ollama` (`nomic-embed-text`) | Geração de embeddings tridimensionais (co-seno) para as representações textuais no ChromaDB. |
-| **Modelo de Linguagem (LLM)** | `Ollama` (`gemma4:e4b` / Gemma 2 9B) | Motor de raciocínio cognitivo, gerador de respostas em chat streaming e resolvedor de chamadas de função (Function Calling). |
-| **Pesquisa Web** | `duckduckgo_search` | Integração em tempo real com a web para dados contemporâneos adicionais caso a biblioteca local não possua a resposta. |
+| **Linguagem / Runtime** | `Python 3.11+` | Base principal do sistema desktop e do pipeline de IA local |
+| **Interface Gráfica** | `PyQt6` | Janelas, painéis, widgets, sinais e roteamento UI |
+| **Web Engine** | `PyQt6 QWebEngineView` | Renderização de conteúdos HTML/EPUB |
+| **Leitura de PDF** | `PyMuPDF (fitz)` | Renderização, busca em página, clipping de texto e manipulação geométrica |
+| **Readers auxiliares** | `EbookLib`, `python-docx`, `markdown`, `BeautifulSoup` | Leitura e parsing de EPUB, DOCX, TXT/Markdown |
+| **Banco Relacional** | `SQLite3` | Metadados, progresso de leitura, anotações, destaques, coleções, tags e índices auxiliares |
+| **Busca Textual** | `SQLite FTS5` | Busca textual local de alta velocidade sobre títulos/autores/descrições e metadados |
+| **Banco Vetorial** | `ChromaDB` | Persistência local de embeddings para busca semântica |
+| **Embeddings** | `Ollama` + `nomic-embed-text` | Geração de embeddings vetoriais de alta dimensionalidade |
+| **LLM Local** | `Ollama` + modelos configuráveis (`gemma4:e4b`, etc.) | Chat RAG, raciocínio iterativo e function calling |
+| **Pesquisa Web** | `duckduckgo_search` | Fonte complementar opcional de conhecimento contemporâneo |
+| **TTS Local** | `pyttsx3` | Leitura em voz offline |
+| **Tracing Estruturado** | `JSONL` + stdlib Python | Auditoria local append-only de sessões agentic (ADR-004) |
+| **Testes** | `pytest`, `pytest-qt`, `pytest-asyncio`, `pytest-cov` | Testes unitários, integração e UI |
 
 ---
 
-## 3. Arquitetura de Software e Fluxo de Dados
+## 3. Arquitetura de Software
 
-A arquitetura do projeto segue o padrão **Model-View-Controller (MVC)** adaptado para interfaces gráficas enriquecidas por threads de IA.
+A arquitetura atual do projeto é melhor descrita como uma **arquitetura em camadas orientada a eventos**, com separação explícita entre:
+
+- **GUI (`src/gui/`)**
+- **Workers assíncronos (`src/gui/workers/`)**
+- **Core de negócio e IA (`src/core/`, `src/core/rag/`)**
+- **Readers (`src/readers/`)**
+- **Dados locais (`SQLite`, `ChromaDB`, `config.json`, `traces`)**
+
+### Direção de Dependências
+
+A direção arquitetural obrigatória é:
+
+```text
+GUI -> Workers -> Core AI/RAG -> Dados locais / serviços locais
+```
+
+Princípios centrais:
+
+- O **Core AI/RAG não importa PyQt6**.
+- A GUI nunca executa diretamente a lógica cognitiva do agente.
+- Toda operação potencialmente pesada ou bloqueante é feita por **QThreads / Workers**.
+- Toda mutação visual solicitada pela IA passa por:
+  1. **Orchestrator**
+  2. **PolicyEngine**
+  3. **Worker**
+  4. **Signal Qt**
+  5. **Thread principal da GUI**
+
+### Fluxo Arquitetural do RAG
 
 ```mermaid
 graph TD
-    A[Usuário] -->|Interação / Pergunta| B[GUI: MainWindow / RAGPanel]
-    B -->|Dispara Thread Segura| C[QThread: RAGWorker]
-    C -->|Invoca pipeline de inferência| D[core: RAGEngine]
-    D -->|REST API - POST| E[Ollama Daemon]
-    E -->|Retorna chamadas de ferramentas| D
-    
-    D -->|vector_search| F[(ChromaDB)]
-    D -->|keyword_search| G[(SQLite3)]
-    D -->|search_web| H[DuckDuckGo Search API]
-    D -->|highlight_book_text / create_ai_bookmark| C
-    
-    C -->|ui_mutation_requested.emit| B
-    B -->|Thread-safe UI Mutators| I[GUI: ReaderView / PDFReader]
-    I -->|Aplica Destaque Visual / Remove Highlight| I
-    D -->|Gera tokens finais| C
-    C -->|token_received.emit| B
-    B -->|Chat Side-by-Side| A
-```
+    A[Usuário] -->|Pergunta / ação| B[GUI: MainWindow / RAGPanel]
+    B -->|Dispara worker| C[RAGWorker]
+    C -->|Invoca pipeline canônico| D[Orchestrator]
+    D --> E[Ollama]
+    E --> D
 
-### O Loop Iterativo do Agentic RAG
-Durante a geração RAG, o LLM local opera em um loop de inferência ativo de até **5 rodadas (`MAX_TOOL_ROUNDS`)**:
-1. O assistente recebe a pergunta do usuário e o contexto da página aberta.
-2. O modelo responde com um comando de chamada de função estruturado em JSON (e.g. `vector_search` ou `highlight_book_text`).
-3. O `RAGEngine` intercepta e executa localmente a ferramenta no ChromaDB, SQLite, Web ou UI Callback.
-4. O resultado é devolvido em formato JSON para o LLM.
-5. O modelo avalia se precisa de mais dados. Se não, gera a resposta textual final diretamente para a interface do usuário.
+    D --> F[PolicyEngine]
+    D --> G[TraceLogger]
+    D --> H[ChromaDB]
+    D --> I[SQLite / FTS5]
+    D --> J[DuckDuckGo Search]
+
+    F -->|Mutações aprovadas| C
+    C -->|signals/callbacks thread-safe| B
+    B --> K[ReaderView / PDFReader]
+    D -->|tokens finais| C
+    C -->|stream de tokens| B
+    B --> A
+```
 
 ---
 
-## 4. Esquema de Arquivos do Projeto
+## 4. Agentic RAG: Caminho Canônico e Ciclo de Execução
 
-Abaixo é apresentado o mapeamento estrutural dos arquivos que formam o núcleo do software:
+O sistema RAG opera hoje com **um único caminho canônico de execução**:
 
+```text
+src/core/rag/orchestrator.py
 ```
+
+O módulo `src/core/rag_engine.py` permanece como **facade compatível**, delegando ao `Orchestrator` para preservar compatibilidade histórica e reduzir risco de regressão.
+
+### Loop Iterativo do Agentic RAG
+
+Durante uma consulta, o pipeline segue um ciclo controlado de múltiplas rodadas:
+
+1. O usuário faz uma pergunta no painel do assistente.
+2. O `RAGWorker` encaminha a consulta ao `Orchestrator`.
+3. O `Orchestrator` monta o contexto inicial:
+   - busca vetorial,
+   - busca textual,
+   - metadados,
+   - contexto do livro/página atual,
+   - histórico relevante da sessão.
+4. O LLM local responde com:
+   - texto final, ou
+   - **chamadas de ferramenta (tool calls)**.
+5. O `Orchestrator` executa a ferramenta adequada, por exemplo:
+   - `vector_search`
+   - `keyword_search`
+   - `cross_reference`
+   - `search_web`
+   - `highlight_book_text`
+   - `create_ai_bookmark`
+6. Se a ação envolver mutação de UI:
+   - ela é validada pelo **PolicyEngine**,
+   - e só então é encaminhada de forma thread-safe para a GUI.
+7. O resultado da ferramenta volta ao modelo como contexto adicional.
+8. O loop continua até:
+   - resposta final,
+   - early-exit,
+   - fallback,
+   - ou limite de rodadas.
+
+### Recursos de Controle
+
+O pipeline agentic utiliza:
+
+- **AgentState** para controlar estado de sessão, rounds, proveniência e sinais operacionais.
+- **PolicyEngine (ADR-003)** para avaliar ações sensíveis de UI.
+- **TraceLogger (ADR-004)** para registrar eventos estruturados.
+- **Fallback chain** para degradar com segurança:
+  - vetorial → textual → local-only
+  - web → local
+- **Early-exit** para evitar loops redundantes.
+
+---
+
+## 5. Observabilidade Estruturada (ADR-004)
+
+A partir da Fase 2, toda execução relevante do pipeline RAG pode ser auditada por meio de **traces estruturados locais**.
+
+### Características
+
+- Persistência local em:
+  ```text
+  data/traces/trace_{session_id}.jsonl
+  ```
+- Formato:
+  - **JSONL**
+  - append-only
+  - parseável linha a linha
+- Implementação:
+  - `src/core/rag/trace_logger.py`
+- Comportamento:
+  - **fail-safe**
+  - falhas de escrita de trace **não derrubam a query**
+- Truncamento:
+  - payloads grandes são truncados/sanitizados para evitar excesso de I/O e vazamento de texto bruto desnecessário
+
+### Eventos rastreados
+
+O sistema pode registrar, entre outros:
+
+- `query_started`
+- `context_loaded`
+- `tool_call_requested`
+- `tool_call_completed`
+- `policy_decision`
+- `fallback_activated`
+- `early_exit`
+- `final_answer_started`
+- `final_answer_completed`
+- `error`
+- `query_completed`
+
+### Benefícios
+
+- auditoria retroativa do comportamento agentic
+- debugging sem depender de modo verboso no terminal
+- rastreamento do impacto do `PolicyEngine`
+- análise posterior de fallbacks, loops e decisões de ferramenta
+
+---
+
+## 6. Estrutura Resumida do Repositório
+
+Abaixo está um mapa resumido dos módulos centrais do projeto. O repositório real contém mais arquivos auxiliares, testes e infraestrutura de governança do que os listados aqui.
+
+```text
+Biblioteca-pessoal/
+├── AGENTS.md
+├── README.md
+├── project_report.md
+├── pyproject.toml
+├── requirements.txt
+│
+├── .agents/
+│   ├── adr/                        # ADRs de arquitetura
+│   ├── rules/                      # Rules do workspace / governança
+│   ├── scripts/                    # Hooks e automações auxiliares
+│   └── skills/                     # Skills de engenharia
+│
 ├── data/
-│   └── chroma_db/                  # Diretório de persistência de vetores locais
-├── resources/                      # Assets estáticos, ícones e fontes
+│   ├── config.json                 # Configuração persistida
+│   ├── library.db                  # Banco principal SQLite
+│   ├── chroma_db/                  # Persistência vetorial local
+│   ├── traces/                     # Traces JSONL do Agentic RAG
+│   └── covers/                     # Capas extraídas
+│
 ├── src/
 │   ├── core/
-│   │   ├── database.py             # Gerenciador do SQLite (tabelas books e annotations)
-│   │   └── rag_engine.py           # Pipeline Agentic RAG, ferramentas e interface do Ollama
+│   │   ├── config.py
+│   │   ├── database.py
+│   │   ├── library.py
+│   │   ├── metadata.py
+│   │   ├── search.py
+│   │   ├── rag_engine.py           # Facade compatível
+│   │   ├── opds_server.py
+│   │   ├── audio/
+│   │   │   ├── audio_reader_service.py
+│   │   │   ├── text_chunker.py
+│   │   │   ├── tts_backend.py
+│   │   │   └── pyttsx3_backend.py
+│   │   └── rag/
+│   │       ├── orchestrator.py     # Caminho canônico do RAG
+│   │       ├── agent_state.py
+│   │       ├── policy_engine.py
+│   │       ├── trace_logger.py
+│   │       └── tools/
+│   │           ├── base.py
+│   │           └── web_search.py
+│   │
+│   ├── tools/                      # Ferramentas CLI e Operacionais
+│   │   ├── trace_inspector.py      # Inspeção de traces no console
+│   │   ├── trace_retention.py      # Housekeeping de traces (ex: top 100)
+│   │   └── rag_eval_harness.py     # Classificação e avaliação semântica dos traces
+│   │
 │   ├── gui/
-│   │   ├── main_window.py          # Janela principal do sistema, conexões centrais de sinais
-│   │   ├── reader_view.py          # Leitor de documentos, controle de menus e coordenadas
-│   │   ├── sidebar.py              # Barra de seções lateral (Biblioteca, Pesquisa Global, etc.)
-│   │   ├── styles.py               # Folhas de estilo globais e CSS do visualizador
+│   │   ├── main_window.py
+│   │   ├── reader_view.py
+│   │   ├── library_view.py
+│   │   ├── book_details.py
+│   │   ├── search_bar.py
+│   │   ├── sidebar.py
+│   │   ├── settings_dialog.py
+│   │   ├── styles.py
 │   │   ├── widgets/
-│   │   │   ├── annotation_panel.py # Visualizador e gerenciador das anotações em lista
-│   │   │   ├── book_details.py     # Detalhes e metadados de obras individuais
-│   │   │   ├── library_grid.py     # Grid visual para navegação no acervo da biblioteca
-│   │   │   ├── rag_panel.py        # Widget do assistente de chat side-by-side
-│   │   │   ├── reading_progress.py # Indicadores de páginas e progresso do leitor
-│   │   │   ├── search_overlay.py   # Barra de busca literal dentro do leitor
-│   │   │   └── toc_widget.py       # Exibição interativa do índice de conteúdo (TOC)
+│   │   │   ├── annotation_panel.py
+│   │   │   ├── rag_panel.py
+│   │   │   ├── reading_progress.py
+│   │   │   ├── search_overlay.py
+│   │   │   └── toc_widget.py
 │   │   └── workers/
-│   │       └── rag_worker.py       # QThread de processamento assíncrono para operações de IA
+│   │       ├── rag_worker.py
+│   │       ├── audio_worker.py
+│   │       ├── metadata_worker.py
+│   │       └── opds_worker.py
+│   │
 │   ├── readers/
-│   │   ├── base_reader.py          # Interfaces e dataclasses básicas dos leitores
-│   │   ├── pdf_reader.py           # Leitor focado em PDF integrando PyMuPDF e marca-texto
-│   │   └── reader_factory.py       # Fábrica dinâmica que escolhe o leitor com base na extensão
-│   └── main.py                     # Inicializador do aplicativo
-├── tests/
-│   └── test_rag_engine.py          # Suíte abrangente de testes unitários mockados e offline
-├── pyproject.toml                  # Configurações de dependências do Python
-└── requirements.txt                # Dependências instaladas no ambiente venv
+│   │   ├── base_reader.py
+│   │   ├── reader_factory.py
+│   │   ├── pdf_reader.py
+│   │   ├── epub_reader.py
+│   │   ├── docx_reader.py
+│   │   ├── txt_reader.py
+│   │   ├── cbz_reader.py
+│   │   └── mobi_reader.py
+│   │
+│   └── main.py
+│
+└── tests/
+    ├── test_rag_engine.py
+    ├── test_rag_orchestrator.py
+    ├── test_rag_policy.py
+    ├── test_rag_trace_logger.py
+    ├── test_audio_reader_service.py
+    ├── test_database.py
+    └── ...                         # Demais testes do projeto
 ```
 
 ---
 
-## 5. Desafios Complexos e Soluções Encontradas
+## 7. Governança e ADRs
 
-### Desafio 1: Manipulação Gráfica Segura a partir de Operações de IA
-> [!CAUTION]
-> **O Problema**: A biblioteca gráfica Qt proíbe terminantemente que threads secundárias (como a QThread usada para processar o chat com o Ollama sem travar a interface) modifiquem widgets ou elementos gráficos diretamente. Tentar desenhar um destaque a partir da thread do chat causava crash fatal (`segfault`) imediato.
-> 
-> **A Solução**: Implementamos uma arquitetura baseada em callbacks thread-safe. Quando o `RAGEngine` roda uma ferramenta que afeta a interface (ex: `highlight_book_text`), ele aciona um callback que passa os dados estruturados para a QThread `RAGWorker`. Este worker, por sua vez, emite o sinal `ui_mutation_requested = pyqtSignal(str, dict)` que o Qt repassa com segurança para a thread principal (`Main Thread`), onde o slot `_handle_ai_highlight` do `MainWindow` executa a alteração gráfica.
+O projeto adota **governança arquitetural explícita** por meio de:
 
-### Desafio 2: Renderização Dinâmica de Destaques em PDF sem Modificar o Arquivo
-> [!NOTE]
-> **O Problema**: O usuário quer aplicar e remover marcações visuais nos livros de forma dinâmica. Desenhar anotações diretamente no arquivo PDF original modificaria o documento do usuário em disco, o que é invasivo, destrutivo e lento.
-> 
-> **A Solução**: Criamos uma renderização efêmera em memória utilizando PyMuPDF. As marcações geométricas são salvas no banco de dados SQLite como coordenadas normalizadas (percentual da largura e altura da página). Quando a página é renderizada em tela, o `PDFReader` carrega as coordenadas do banco, adiciona temporariamente as marcações em memória sobre a página do PyMuPDF, converte a página em uma imagem (`pixmap`), renderiza o painel gráfico e apaga as marcações em memória imediatamente. O arquivo original em disco permanece intacto!
+- `AGENTS.md`
+- `.agents/rules/*.md`
+- `.agents/adr/*.md`
+- scripts auxiliares para validação e automação de sessão
 
-### Desafio 3: Depreciação de Endpoints de Embeddings da API do Ollama
-> [!WARNING]
-> **O Problema**: Versões recentes do daemon Ollama descontinuaram o suporte ao endpoint `/api/embeddings`, fazendo com que ele passasse a retornar valores nulos sem erros explícitos, quebrando o processo de indexação da biblioteca inteira.
-> 
-> **A Solução**: Introduzimos um sistema robusto de fallback inteligente de duas camadas. O sistema tenta requisitar o novo endpoint `/api/embed` com a estrutura de entrada moderna em lote (`input` ao invés de `prompt`). Caso a API retorne erro `404 Not Found` (indicando uma versão mais antiga do Ollama do usuário), o código reverte silenciosa e instantaneamente para a rota legado `/api/embeddings`, garantindo compatibilidade multiplataforma.
+### ADRs mais relevantes já refletidos no estado atual
 
-### Desafio 4: Detecção de Clique em Elementos de Destaque com Altura e Larguras Variáveis
-> [!TIP]
-> **O Problema**: Para remover um destaque ("desmarcar") com o clique do botão direito, o leitor precisa saber exatamente se as coordenadas do cursor de pixel do mouse do usuário interceptaram uma área destacada. Como a interface suporta zooms e janelas redimensionáveis, as coordenadas brutas de pixel mudam o tempo todo.
-> 
-> **A Solução**:
-> 1. Mapeamos as coordenadas brutas do clique na tela relativas ao widget `_image_label`.
-> 2. Normalizamos os pixels subtraindo as margens de deslocamento (`offset`) causadas pelo alinhamento da imagem renderizada.
-> 3. Convertemos o resultado em um percentual de `0.0` a `1.0` do tamanho do `QPixmap` gerado.
-> 4. Comparamos se as coordenadas do ponto `(cx, cy)` do clique caem dentro do retângulo delimitador `[px0, py0, px1, py1]` do destaque cadastrado no SQLite, usando um padding fino de tolerância de `0.01` (1% da tela) para melhorar a ergonomia do mouse.
+#### ADR-003 — Policy Engine for AI Actions
+Toda mutação de UI solicitada pela IA deve passar por um mecanismo explícito de policy antes de ser executada.
+
+#### ADR-004 — Structured Agent Trace Logger
+Toda execução agentic crítica deve poder ser auditada por meio de eventos estruturados persistidos localmente.
+
+#### ADR-006 — GUI / Core AI Boundary
+O Core AI/RAG não pode importar PyQt6 nem módulos GUI. Toda comunicação deve ocorrer por callbacks, interfaces ou signals thread-safe.
 
 ---
 
-## 6. Token Diet e Otimização para Prefix Caching
+## 8. Desafios Técnicos Relevantes e Soluções
 
-Ao rodar modelos de linguagem grandes de forma 100% local, o tempo de latência de processamento de tokens (`Time to First Token`) é crítico. Para combater lentidões, duas técnicas avançadas foram aplicadas:
+### Desafio 1 — Mutações de UI solicitadas por IA sem quebrar o Qt
+**Problema:** o Qt não permite que threads secundárias modifiquem a interface diretamente sem risco de crash.  
 
-1. **Dieta Estrita de Tokens (`_TOOLS_DEF`)**: Todas as especificações JSON de ferramentas foram limpas de descrições extensas e reduzidas a payloads mínimos essenciais (ex: alterando explicações longas de parâmetros para apenas `"Opcional. ID do livro. Nulo = busca global."`), reduzindo o consumo de tokens em mais de 45% em cada ciclo de Function Calling.
-2. **Alinhamento de Cache de Prefixo (Prefix Caching)**: A API do Ollama aceita cache de contexto contanto que o topo do histórico seja rigorosamente idêntico. Reestruturamos o array de mensagens enviado a cada ciclo de chat colocando o `System Prompt` fixo e a definição de ferramentas compactada estritamente no topo. O contexto dinâmico (conteúdo variável da página) e a pergunta são injetados abaixo. Isso permite que a IA detecte que a definição das ferramentas já foi processada, ativando o **Prefix Caching** e acelerando as chamadas internas em até 4 vezes!
+**Solução:** a mutação é solicitada pelo Core, validada pelo `PolicyEngine`, encaminhada ao `RAGWorker` e então emitida via `pyqtSignal` para a thread principal, onde a GUI executa a alteração com segurança.
 
 ---
 
-## 7. Roadmap de Melhorias Futuras
+### Desafio 2 — Destaques visuais em PDF sem modificar o arquivo original
+**Problema:** gravar destaque diretamente no PDF em disco seria invasivo, lento e destrutivo.  
 
-O desenvolvimento da Biblioteca Pessoal Inteligente possui um caminho sólido para evoluções de mercado:
+**Solução:** as marcações são persistidas separadamente (ex.: no SQLite) como coordenadas normalizadas, e renderizadas efemeramente em memória sobre a página no momento da visualização.
+
+---
+
+### Desafio 3 — Evolução dos endpoints de embeddings do Ollama
+**Problema:** mudanças de endpoint ou comportamento entre versões do daemon Ollama podem quebrar o fluxo de embeddings sem erro claro.  
+
+**Solução:** o sistema utiliza estratégia de compatibilidade/fallback para lidar com variações de endpoint entre versões do Ollama.
+
+---
+
+### Desafio 4 — Detecção precisa de clique em destaque com zoom e redimensionamento
+**Problema:** o clique do mouse precisa ser reconciliado com coordenadas geométricas persistidas, independentemente de zoom ou escala.  
+
+**Solução:** o sistema transforma coordenadas visuais em percentuais normalizados do conteúdo renderizado e compara com bounding boxes persistidas.
+
+---
+
+### Desafio 5 — Consolidar o RAG e eliminar duplicidade de caminhos
+**Problema:** o sistema possuía caminhos paralelos de execução para `query_rag`, o que gerava inconsistência arquitetural e risco de bypass de policy.  
+
+**Solução (Fase 1):**
+- consolidação do caminho canônico em `Orchestrator`
+- `RAGEngine` mantido como facade compatível
+- simplificação do `RAGWorker`
+- testes de regressão específicos para ADR-003
+
+---
+
+### Desafio 6 — Falta de rastreabilidade do comportamento agentic
+**Problema:** sem trilha estruturada, fallbacks, decisões de tool calling e bloqueios de policy eram difíceis de auditar.  
+
+**Solução (Fase 2):**
+- implementação do `TraceLogger`
+- persistência local em JSONL
+- `session_id` por execução
+- eventos estruturados para query, tool calls, policy, fallback e finalização
+
+---
+
+### Desafio 7 — Integridade de Indexação e Refatoração da Ingestão
+**Problema:** A lógica pesada de chunking, OCR fallback, e geração de embeddings estava acoplada ao `rag_engine.py`, e falhas de indexação podiam deixar o estado do livro ambíguo entre o SQLite e o ChromaDB.
+
+**Solução (Fase 6):**
+- migração do pipeline de ingestão para um novo `DocumentIndexerService`
+- introdução da tabela `indexing_state` no SQLite (`pending`, `ok`, `failed`)
+- utilitário de verificação e reparo (`index_reconcile`)
+- simplificação do `rag_engine.py` para atuar apenas como facade para busca semântica.
+
+---
+
+### Desafio 8 — Corrupção do SQLite e Condições de Corrida (SQLite Hardening)
+**Problema:** Condições de corrida na escrita concorrente no SQLite (ex: thread de background atualizando progresso e thread principal salvando notas) geravam erro de `DatabaseError: malformed`.
+
+**Solução (Fase 6.1):**
+- adoção de arquitetura *single-writer* com um `threading.Lock()` global para escritas
+- gerenciamento estrito de isolamento de leitura/conexão via `threading.local()`
+- garantia de persistência do *WAL mode* e sincronia segura.
+- bateria massiva de testes para concorrência aprovada.
+
+---
+
+## 9. Otimizações de Performance e Economia de Tokens
+
+Ao operar LLMs locais, especialmente com function calling iterativo, reduzir custo de contexto é essencial.
+
+### 1. Token Diet das ferramentas
+As definições de ferramentas (`_TOOLS_DEF`) foram compactadas para reduzir custo de contexto, mantendo apenas o essencial para a chamada correta.
+
+### 2. Prefix Caching
+O topo do histórico enviado ao modelo foi reestruturado para manter partes estáveis (System Prompt e definição de ferramentas) no prefixo, aproveitando melhor o cache de contexto sempre que suportado pela stack local.
+
+### 3. Degradação controlada
+Quando partes mais caras do pipeline falham (ex.: embeddings, busca web), o sistema degrada com segurança e continua respondendo no melhor modo possível.
+
+---
+
+## 10. Subsistemas Complementares Existentes
+
+Além do núcleo Reader + RAG, o projeto já incorpora ou possui base funcional para:
+
+- **Audio Reader offline**  
+  Leitura em voz local com chunking e backend TTS offline.
+
+- **OPDS Server local**  
+  Exposição local do acervo em formato adequado para integração futura com clientes externos.
+
+- **Infraestrutura de governança para agentes**  
+  Rules, ADRs, scripts e skills em `.agents/`.
+
+- **Teste especializado do pipeline crítico**  
+  Cobertura dedicada para:
+  - RAG facade
+  - Orchestrator
+  - PolicyEngine
+  - TraceLogger
+  - serviços de áudio
+  - banco / busca
+
+- **Persistência de traces para auditoria local**  
+  Sem dependência de serviços externos, APMs ou telemetria remota.
+
+---
+
+## 11. Roadmap de Melhorias Futuras
+
+O projeto possui um caminho claro de evolução técnica e de produto:
 
 ```markdown
-- `[ ]` OCR Nativo Local (via Tesseract ou EasyOCR) para permitir indexação e marca-texto em PDFs digitalizados (escaneados sem camada de texto literal).
-- `[ ]` Integração com Lhamas e Modelos de Multimodalidade locais para possibilitar o entendimento inteligente de diagramas, tabelas e imagens presentes nos livros.
-- `[ ]` Sincronização Local Multi-dispositivo de Anotações baseada em chaves criptográficas descentralizadas (e.g. Syncthing ou WebDAV pessoal).
-- `[ ]` Tradução Instantânea Inteligente Offline integrando pequenos modelos dedicados de tradução (e.g. mBART ou NLLB-200) para suporte a livros em qualquer idioma.
-- `[ ]` Modos de Leitura Gamificados: Geração automática de Flashcards integrados com Anki a partir das anotações e destaques em verde do leitor.
+- [x] OCR local para PDFs escaneados (Tesseract) (concluído na Fase 5)
+- [ ] Melhor suporte multimodal local para diagramas, imagens e tabelas
+- [ ] Sincronização local/multi-dispositivo de anotações
+- [x] Tradução offline de trechos selecionados (Fase 8: NLLB-200, escopo em MVC restrito a blocos curtos <= 2000 chars. **Nota:** Exige internet na primeira execução para o bootstrap/download do modelo; subsequentes 100% offline).
+- [ ] Geração de flashcards / integração com Anki
+- [x] Política de retenção/rotação para `data/traces/` (concluído na Fase 3)
+- [x] Ferramentas locais de inspeção e consulta de traces por `session_id` (concluído na Fase 3 e 4)
+- [x] Evolução do `AgentState` para maior aderência ao ADR-002 e métricas de loop (concluído na Fase 4)
+- [x] Criação de um RAG Evaluation Harness para inspecionar qualidade semântica e operacional de traces
+- [ ] Refinamento da UI do leitor com base no plano de redesign já documentado
 ```
+
+---
+
+## 12. Resumo Executivo Final
+
+A **Biblioteca Pessoal Inteligente** já não é apenas um leitor de documentos com chat acoplado.  
+Ela evoluiu para um **ecossistema local-first de leitura, anotação, recuperação semântica e interação agentic segura**, com:
+
+- **reader multi-formato funcional**
+- **RAG agentic consolidado em caminho canônico**
+- **Policy Engine protegendo mutações de UI**
+- **boundary GUI/Core governado por ADR**
+- **trace logger estruturado para auditoria**
+- **testes especializados para os componentes críticos**
+
+Esse conjunto posiciona o projeto como uma base sólida para evoluções futuras em:
+- IA local aplicada à leitura,
+- assistentes cognitivos privados,
+- ferramentas de estudo e anotação inteligentes,
+- e sistemas agentic desktop com governança forte.
+
+Em resumo, o projeto já apresenta características típicas de um sistema **engineering-driven**, com foco em:
+- rastreabilidade,
+- segurança,
+- modularidade,
+- performance local,
+- e maturidade arquitetural progressiva.

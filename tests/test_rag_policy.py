@@ -7,7 +7,7 @@ from src.core.rag.orchestrator import Orchestrator
 class TestRAGPolicyEngine:
     def test_highlight_blocked_if_web_provenance(self):
         """ADR-003: Bloqueia highlight se proveniência for web."""
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         state.update_provenance("web")
         
         mock_engine = MagicMock()
@@ -16,7 +16,7 @@ class TestRAGPolicyEngine:
         args = {"text_to_find": "teste", "color": "yellow"}
         
         result_json = orchestrator._execute_tool_orchestrated(
-            "highlight_book_text", args, state, book_id=1, ui_mutation_callback=MagicMock()
+            "highlight_book_text", args, state, MagicMock(), book_id=1, ui_mutation_callback=MagicMock()
         )
         
         assert "blocked" in result_json
@@ -24,7 +24,7 @@ class TestRAGPolicyEngine:
 
     def test_highlight_allowed_if_local_provenance(self):
         """ADR-003: Permite highlight se proveniência for local."""
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         state.update_provenance("local")
         
         mock_engine = MagicMock()
@@ -34,7 +34,7 @@ class TestRAGPolicyEngine:
         ui_callback = MagicMock()
         
         result_json = orchestrator._execute_tool_orchestrated(
-            "highlight_book_text", args, state, book_id=1, ui_mutation_callback=ui_callback
+            "highlight_book_text", args, state, MagicMock(), book_id=1, ui_mutation_callback=ui_callback
         )
         
         assert "success" in result_json
@@ -42,7 +42,7 @@ class TestRAGPolicyEngine:
 
     def test_bookmark_blocked_if_web_provenance(self):
         """ADR-003: Bloqueia bookmark se proveniência for web."""
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         state.update_provenance("web")
         
         mock_engine = MagicMock()
@@ -51,7 +51,7 @@ class TestRAGPolicyEngine:
         args = {"note": "nota perigosa"}
         
         result_json = orchestrator._execute_tool_orchestrated(
-            "create_ai_bookmark", args, state, book_id=1, ui_mutation_callback=MagicMock()
+            "create_ai_bookmark", args, state, MagicMock(), book_id=1, ui_mutation_callback=MagicMock()
         )
         
         assert "blocked" in result_json
@@ -59,7 +59,7 @@ class TestRAGPolicyEngine:
 
     def test_bookmark_allowed_if_local_provenance(self):
         """ADR-003: Permite bookmark se proveniência for local."""
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         state.update_provenance("local")
         
         mock_engine = MagicMock()
@@ -69,7 +69,7 @@ class TestRAGPolicyEngine:
         ui_callback = MagicMock()
         
         result_json = orchestrator._execute_tool_orchestrated(
-            "create_ai_bookmark", args, state, book_id=1, ui_mutation_callback=ui_callback
+            "create_ai_bookmark", args, state, MagicMock(), book_id=1, ui_mutation_callback=ui_callback
         )
         
         assert "success" in result_json

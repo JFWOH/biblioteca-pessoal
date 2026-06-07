@@ -817,7 +817,31 @@ class MainWindow(QMainWindow):
     def _on_ai_action_requested(self, action_type: str, text: str) -> None:
         """Processa requisições de IA vindas do menu de contexto de leitura."""
         if action_type == "translate":
-            question = f"Traduza o seguinte trecho com precisão literária: '{text}'"
+            self._statusbar.showMessage("🌐 Iniciando tradução offline...", 5000)
+            from src.core.translation_service import TranslationService
+            
+            def on_success(result):
+                self._statusbar.clearMessage()
+                from PyQt6.QtWidgets import QMessageBox
+                from PyQt6.QtCore import Qt
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Tradução Offline (NLLB-200)")
+                msg.setText(result)
+                msg.setModal(False)
+                msg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+                msg.show()
+                self._translation_msg = msg  # Evitar coleta de lixo prematura
+
+            def on_error(err):
+                self._statusbar.showMessage(f"⚠️ Erro na tradução offline: {err}", 5000)
+
+            TranslationService.get_instance().translate_async(
+                text=text,
+                on_success=on_success,
+                on_error=on_error
+            )
+            return
+
         elif action_type == "explain":
             question = f"Explique o contexto e o significado deste trecho detalhadamente: '{text}'"
         elif action_type == "search":

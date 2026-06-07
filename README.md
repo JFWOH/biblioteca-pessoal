@@ -38,6 +38,16 @@ Gerenciador de biblioteca pessoal e leitor multi-formato sofisticado, desenvolvi
 - Painel de estatísticas com dashboard visual
 - Diálogos ricos para importação e configurações
 
+### 🤖 Agentic RAG & Governança
+- Assistente local com inteligência contextual capaz de buscas vetoriais, pesquisas na web e referências cruzadas.
+- **UI Mutators Seguros**: A IA interage com a GUI (marcadores automáticos, texto destacado) validada estritamente pelo **Policy Engine** (ADR-003).
+- **Trace Logger**: Log estruturado das sessões do RAG persistido localmente em JSONL (ADR-004).
+
+### 🌐 Tradução Offline Local-First
+- Tradução de trechos selecionados (em PDFs escaneados com OCR ou EPUBs) suportada pelo modelo **NLLB-200** (`facebook/nllb-200-distilled-600M`).
+- **Limites e Hardware**: Operação em GPU/CPU otimizada (~1.2GB VRAM). Texto limitado a blocos curtos (máximo 2000 caracteres por disparo) para prevenir travamentos (Graceful Fallback incluído). Processamento ocorre 100% fora da Main Thread da UI.
+- **Ressalva Offline**: A operação é offline, porém **exige obrigatoriamente conexão à internet na primeira execução** para efetuar o download/bootstrap dos pesos do modelo para a cache local. Em seguida, roda 100% localmente sem qualquer envio de dados do usuário.
+
 ## 🚀 Instalação
 
 ```bash
@@ -70,6 +80,9 @@ python -m src.main
 | BeautifulSoup4 | Parsing de HTML |
 | Pillow | Processamento de imagens |
 | natsort | Ordenação natural |
+| torch | Inferência local (Tradução Offline) |
+| transformers | Pipeline NLLB-200 (Tradução Offline) |
+| sentencepiece | Tokenizador (exigido pelo NLLB-200) |
 
 ## ⌨️ Atalhos de Teclado
 
@@ -118,8 +131,32 @@ src/
 │       └── toc_widget.py
 ├── utils/          # Utilitários
 └── main.py         # Entry point
-tests/              # 99 testes automatizados
+tests/              # Testes automatizados (pytest)
 ```
+
+## 🛠️ Utilitários de Operabilidade (CLI)
+
+O projeto conta com ferramentas dedicadas via linha de comando para governança e inspeção do Agentic RAG:
+
+- **Housekeeping de Traces (Limpeza)**:
+  Mantém o disco limpo restringindo a pasta `data/traces/` aos últimos 100 arquivos criados.
+  ```bash
+  python -m src.core.rag.trace_retention --max 100
+  ```
+
+- **Trace Inspector (Inspeção e Debug)**:
+  Explore sessões armazenadas do assistente de forma legível.
+  ```bash
+  python -m src.tools.trace_inspector --list
+  python -m src.tools.trace_inspector --session <session_id>
+  python -m src.tools.trace_inspector --errors
+  ```
+
+- **Evaluation Harness (Testes Estruturais)**:
+  Analisa os traces buscando falhas lógicas no pipeline, quebras de policy ou sessões anômalas.
+  ```bash
+  python -m src.tools.rag_eval_harness
+  ```
 
 ## 🧪 Testes
 

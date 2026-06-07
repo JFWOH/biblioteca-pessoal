@@ -14,7 +14,7 @@ class TestAgentState:
     """Testes unitários para o gerenciador de orçamento e estado AgentState."""
 
     def test_agent_state_initial_values(self):
-        state = AgentState(max_rounds=3, max_time_ms=5000)
+        state = AgentState(session_id="test_session", max_rounds=3, max_time_ms=5000)
         assert state.max_rounds == 3
         assert state.max_time_ms == 5000
         assert state.current_round == 0
@@ -25,7 +25,7 @@ class TestAgentState:
         assert state.last_results_digest == ""
 
     def test_update_provenance_to_web(self):
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         assert state.provenance == "local"
         state.update_provenance("local")
         assert state.provenance == "local"
@@ -35,17 +35,17 @@ class TestAgentState:
         assert state.provenance == "web"
 
     def test_is_budget_ok_within_limits(self):
-        state = AgentState(max_rounds=5, max_time_ms=1000)
+        state = AgentState(session_id="test_session", max_rounds=5, max_time_ms=1000)
         state.current_round = 3
         assert state.is_budget_ok() is True
 
     def test_is_budget_ok_rounds_exceeded(self):
-        state = AgentState(max_rounds=5, max_time_ms=1000)
+        state = AgentState(session_id="test_session", max_rounds=5, max_time_ms=1000)
         state.current_round = 5
         assert state.is_budget_ok() is False
 
     def test_is_budget_ok_time_exceeded(self):
-        state = AgentState(max_rounds=5, max_time_ms=10)
+        state = AgentState(session_id="test_session", max_rounds=5, max_time_ms=10)
         time.sleep(0.02)  # Dorme 20ms (> 10ms do orçamento)
         assert state.is_budget_ok() is False
 
@@ -107,7 +107,7 @@ class TestOrchestrator:
             }
         ]
         
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         orchestrator = Orchestrator(mock_engine)
         
         output = orchestrator.execute_vector_search("busca", book_id=10, state=state)
@@ -136,7 +136,7 @@ class TestOrchestrator:
             }
         ]
         
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         orchestrator = Orchestrator(mock_engine)
         
         output = orchestrator.execute_vector_search("busca", book_id=11, state=state)
@@ -155,7 +155,7 @@ class TestOrchestrator:
     def test_execute_search_web_success(self):
         mock_engine = MagicMock()
         orchestrator = Orchestrator(mock_engine)
-        state = AgentState()
+        state = AgentState(session_id="test_session")
 
         mock_results = [{"body": "Resultado da web", "title": "Titulo Web", "href": "http://web.com"}]
         
@@ -180,7 +180,7 @@ class TestOrchestrator:
             }
         ]
         
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         orchestrator = Orchestrator(mock_engine)
         
         # Simula falha na busca web externa (ex: falta de conexão)
@@ -256,7 +256,7 @@ class TestOrchestrator:
             else:
                 return [{"body": f"Resultado para {q}", "title": "Sucesso", "href": "http://sucesso.com"}]
 
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         with patch("src.core.rag.tools.web_search.search_duckduckgo", side_effect=fake_text_search):
             output = orchestrator.execute_search_web(query, state=state)
             
@@ -310,7 +310,7 @@ class TestOrchestrator:
             {"title": "Google Books", "link": "http://books.google.com", "description": "Conteudo C"}
         ]
         
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         with patch("src.core.rag.tools.web_search.search_duckduckgo", return_value=mock_results):
             output = orchestrator.execute_search_web("Cardano jogos de azar", state=state)
             
@@ -331,7 +331,7 @@ class TestOrchestrator:
             {"title": "Resultado Invalido"}  # Sem link/corpo válido, deve ser descartado
         ]
         
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         with patch("src.core.rag.tools.web_search.search_duckduckgo", return_value=mock_results):
             output = orchestrator.execute_search_web("Cardano jogos de azar", state=state)
             
@@ -349,7 +349,7 @@ class TestOrchestrator:
         query = "Cardano foi um dos primeiros a perceber que tais jogos podiam ser analisados matematicamente"
         mock_results = [{"title": "Girolamo Cardano", "link": "http://britannica.com", "snippet": "Cardano publicou o Liber de ludo aleae."}]
         
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         with patch("src.core.rag.tools.web_search.search_duckduckgo", return_value=mock_results):
             output = orchestrator.execute_search_web(query, state=state)
             
