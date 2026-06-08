@@ -3,6 +3,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 class ProactiveFooterWidget(QWidget):
     closed = pyqtSignal()
+    flashcard_requested = pyqtSignal(str)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -54,8 +55,17 @@ class ProactiveFooterWidget(QWidget):
         close_btn.clicked.connect(self.hide)
         close_btn.clicked.connect(self.closed.emit)
         
+        # Botão Flashcard
+        self.flashcard_btn = QPushButton("🃏 Criar Flashcard")
+        self.flashcard_btn.setStyleSheet("""
+            QPushButton { background-color: #2563eb; color: white; padding: 4px 8px; border-radius: 4px; border: none; font-size: 11px; }
+            QPushButton:hover { background-color: #1d4ed8; }
+        """)
+        self.flashcard_btn.clicked.connect(lambda: self.flashcard_requested.emit(self.body_label.text()))
+        
         btn_layout = QVBoxLayout()
         btn_layout.addWidget(close_btn)
+        btn_layout.addWidget(self.flashcard_btn)
         btn_layout.addStretch()
         main_layout.addLayout(btn_layout)
         

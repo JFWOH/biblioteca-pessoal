@@ -261,6 +261,8 @@ class ReaderView(QWidget):
         # Conteúdo: Splitter com TOC + Visualização
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(1)
+        from PyQt6.QtWidgets import QSizePolicy
+        splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
 
         # Painel TOC
         self._toc_widget = TOCWidget()
@@ -322,6 +324,9 @@ class ReaderView(QWidget):
 
         # Proactive Footer Widget (starts hidden)
         self._proactive_footer = ProactiveFooterWidget()
+        self._proactive_footer.flashcard_requested.connect(
+            lambda text: self.ai_action_requested.emit("flashcard", text)
+        )
         left_layout.addWidget(self._proactive_footer)
 
         # Barra de progresso inferior
@@ -367,16 +372,7 @@ class ReaderView(QWidget):
             super().wheelEvent(event)
 
     def mousePressEvent(self, event) -> None:
-        """Manipulador de clique nas zonas de margem para paginação."""
-        if event.button() == Qt.MouseButton.LeftButton:
-            width = self.width()
-            x = event.position().x()
-            if x < width * 0.15:
-                self._go_prev()
-                return
-            elif x > width * 0.85:
-                self._go_next()
-                return
+        """Manipulador de clique na visualização do leitor."""
         super().mousePressEvent(event)
 
     def eventFilter(self, obj, event):
@@ -389,7 +385,7 @@ class ReaderView(QWidget):
                 return True
         elif event.type() == QEvent.Type.MouseButtonPress:
             if event.button() == Qt.MouseButton.LeftButton:
-                width = self.width()
+                width = obj.width()
                 if hasattr(event, "scenePosition"):
                     x = event.scenePosition().x()
                 else:
@@ -964,10 +960,14 @@ class ReaderView(QWidget):
         action_save = QAction("📝 Salvar Anotação Auto.", self)
         action_save.triggered.connect(lambda: self.ai_action_requested.emit("save_note", text))
         
+        action_flashcard = QAction("🃏 Criar Flashcard", self)
+        action_flashcard.triggered.connect(lambda: self.ai_action_requested.emit("flashcard", text))
+        
         menu.addAction(action_translate)
         menu.addAction(action_explain)
         menu.addAction(action_search)
         menu.addAction(action_save)
+        menu.addAction(action_flashcard)
 
     def _on_epub_context_menu(self, pos: QPoint):
         """Extrai texto selecionado via JS no EPUB e mostra menu."""

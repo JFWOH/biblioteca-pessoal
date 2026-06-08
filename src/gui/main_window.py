@@ -846,6 +846,9 @@ class MainWindow(QMainWindow):
             question = f"Busque na web informações complementares sobre: '{text}' e resuma os achados."
         elif action_type == "save_note":
             question = f"Gere uma anotação sucinta, clara e em formato Markdown para o seguinte trecho (não precisa usar ferramentas, apenas responda com o texto da anotação): '{text}'"
+        elif action_type == "flashcard":
+            self._open_anki_export_dialog(front=text, back="")
+            return
         else:
             return
             
@@ -858,6 +861,38 @@ class MainWindow(QMainWindow):
         # Preenche o input e envia automaticamente
         self._rag_panel._question_input.setText(question)
         self._rag_panel._on_send()
+
+    def _open_anki_export_dialog(self, front: str, back: str):
+        """Abre o diálogo de exportação para o Anki."""
+        from src.core.anki_service import AnkiService
+        from src.gui.widgets.anki_export_dialog import AnkiExportDialog
+        from src.gui.workers.anki_worker import AnkiAddNoteWorker
+        from PyQt6.QtWidgets import QMessageBox
+
+        service = AnkiService()
+        dialog = AnkiExportDialog(service=service, initial_front=front, initial_back=back, parent=self)
+        if dialog.exec() == AnkiExportDialog.DialogCode.Accepted and dialog.saved:
+            self._statusbar.showMessage("⏳ Enviando card para o Anki...", 3000)
+            
+            self._anki_worker = AnkiAddNoteWorker(
+                service=service,
+                deck_name=dialog.result_deck,
+                front=dialog.result_front,
+                back=dialog.result_back
+            )
+            
+            def on_finished(note_id):
+                if note_id is not None:
+                    self._statusbar.showMessage("✅ Flashcard salvo no Anki com sucesso!", 5000)
+                else:
+                    self._statusbar.showMessage("⚠️ Anki fechado. Flashcard salvo na fila local de fallback.", 5000)
+            
+            def on_error(err):
+                QMessageBox.warning(self, "Erro no Anki", f"Falha ao salvar flashcard:\n{err}")
+                
+            self._anki_worker.finished.connect(on_finished)
+            self._anki_worker.error.connect(on_error)
+            self._anki_worker.start()
 
     def _on_rag_index_all(self) -> None:
         """Reindexação completa da biblioteca em background."""
