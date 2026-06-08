@@ -150,6 +150,30 @@ class RAGPanel(QWidget):
         self._response_area.setMinimumHeight(200)
         chat_layout.addWidget(self._response_area, stretch=1)
 
+        # Container para botões de ação na resposta
+        action_btns_layout = QHBoxLayout()
+        action_btns_layout.addStretch()
+
+        # Botão de Flashcard
+        self._flashcard_btn = QPushButton("🃏 Criar Flashcard")
+        self._flashcard_btn.setVisible(False)
+        self._flashcard_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(37, 99, 235, 0.15);
+                color: #3b82f6;
+                border: 1px solid #2563eb;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: rgba(37, 99, 235, 0.25);
+            }
+        """)
+        self._flashcard_btn.clicked.connect(self._on_flashcard_clicked)
+        action_btns_layout.addWidget(self._flashcard_btn)
+
         # Botão de Salvar Anotação Manual (Human-in-the-Loop)
         self._save_note_btn = QPushButton("💾 Salvar como Anotação")
         self._save_note_btn.setVisible(False)
@@ -173,7 +197,9 @@ class RAGPanel(QWidget):
             }
         """)
         self._save_note_btn.clicked.connect(self._on_save_note_clicked)
-        chat_layout.addWidget(self._save_note_btn, alignment=Qt.AlignmentFlag.AlignRight)
+        action_btns_layout.addWidget(self._save_note_btn)
+        
+        chat_layout.addLayout(action_btns_layout)
 
         # Progress bar (visível durante geração/indexação)
         self._progress_bar = QProgressBar()
@@ -300,6 +326,7 @@ class RAGPanel(QWidget):
 
         # Catálogo de modelos
         self._MODEL_CATALOG = [
+            ("gemma4:12b", "Gemma 4 (12B)", "~12 GB", "🔥 Poderoso"),
             ("gemma4:e4b", "Gemma 4 E4B",   "~9.6 GB", "⭐ Recomendado"),
             ("gemma3:4b",  "Gemma 3 (4B)",  "~3.3 GB", "Alternativo"),
             ("llama3",     "Llama 3 (8B)",  "~4.7 GB", "Atual"),
@@ -666,6 +693,29 @@ class RAGPanel(QWidget):
             self._save_note_btn.setText("💾 Salvar como Anotação")
             self._save_note_btn.setEnabled(True)
             self._save_note_btn.setVisible(True)
+            self._flashcard_btn.setVisible(True)
+        elif full_answer.strip():
+            # Mesmo fora do contexto, deixa criar flashcard livre
+            self._flashcard_btn.setVisible(True)
+
+    def _on_flashcard_clicked(self) -> None:
+        """Abre o dialog para criar um flashcard a partir da resposta e do contexto."""
+        if not self._full_answer.strip():
+            return
+            
+        front = self._reading_context.get("text", "Nova Pergunta") if self._reading_context else "Nova Pergunta"
+        back = self._full_answer.strip()
+        
+        # O _rag_panel reporta para a MainWindow, precisamos enviar um sinal.
+        # Mas para simplificar, usaremos o MainWindow parent ou um custom event.
+        # Vamos achar a main_window recursivamente ou adicionar um signal:
+        from PyQt6.QtWidgets import QWidget
+        parent = self.parent()
+        while parent:
+            if hasattr(parent, "_open_anki_export_dialog"):
+                parent._open_anki_export_dialog(front, back)
+                return
+            parent = parent.parent()
 
     def _on_save_note_clicked(self) -> None:
         """Chamado quando o usuário clica para salvar a resposta como anotação."""
@@ -758,7 +808,10 @@ class RAGPanel(QWidget):
         self._progress_bar.setVisible(active)
         self._gen_status.setVisible(active)
         self._question_input.setEnabled(not active)
-        if not active:
+        if active:
+            self._save_note_btn.setVisible(False)
+            self._flashcard_btn.setVisible(False)
+        else:
             self._gen_status.setText("")
 
     def _set_indexing(self, active: bool) -> None:

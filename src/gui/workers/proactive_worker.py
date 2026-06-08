@@ -41,8 +41,7 @@ class ProactiveWorker(QThread):
             "model": self.model,
             "messages": messages,
             "stream": False,
-            "format": "json",
-            "options": {"temperature": 0.2, "num_predict": 300}
+            "options": {"temperature": 0.2, "num_predict": 4096}
         }
 
         payload = json.dumps(payload_dict).encode("utf-8")
@@ -56,10 +55,34 @@ class ProactiveWorker(QThread):
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=45) as resp:
-                data = json.loads(resp.read())
+                raw_resp = resp.read()
+                data = json.loads(raw_resp)
             
             content = data.get("message", {}).get("content", "").strip()
             
+            # DEBUG
+            if not content:
+                logger.error(f"Ollama Raw Response: {raw_resp.decode('utf-8', errors='ignore')}")
+            
+            # Limpa formatação markdown se o modelo ignorou a restrição
+            if content.startswith("```json"):
+                content = content[7:]
+            elif content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            
+            if not content:
+                raise ValueError("Resposta vazia da IA (conteúdo em branco)")
+            
+            import re
+            # Se ainda houver lixo antes/depois, tenta achar o primeiro '{' e último '}'
+            start_idx = content.find('{')
+            end_idx = content.rfind('}')
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                content = content[start_idx:end_idx+1]
+                
             obs = json.loads(content)
             
             if "tipo" not in obs or "confianca" not in obs or "texto" not in obs:
