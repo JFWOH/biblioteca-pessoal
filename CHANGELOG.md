@@ -5,10 +5,32 @@ Todas as mudanças notáveis no projeto **Biblioteca Pessoal Inteligente** serã
 O formato é estruturado para humanos, orientado ao impacto e baseado no padrão [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 ## [Unreleased]
-- **Recursos Futuros**: Agente Proativo de Leitura, Multimodalidade e Integração com Anki (Flashcards).
+- **Recursos Futuros**: Multimodalidade.
 
-## [Fase 10] - Anti-Truncation e Robustez de Saída
+## [Fase 12] - Ferramentas de Estudo (Flashcards) + Integração com Anki
 ### Added
+- **`AnkiService` Local**: Serviço core desacoplado para comunicação via HTTP com a API local do **AnkiConnect** (`127.0.0.1:8765`).
+- **`AnkiExportDialog`**: Diálogo de UI para revisão de Frente e Verso (Basic Model) do flashcard antes da inserção, incluindo seleção de *Deck*.
+- **Ações de Contexto no ReaderView**: Adicionada opção `"🃏 Criar Flashcard"` ao selecionar trechos de texto em EPUB e PDF.
+- **Ações de Contexto no Assistente (RAG / Proativo)**: Um novo botão no `ProactiveFooterWidget` e na resposta do `RAGPanel` permite capturar o texto e as observações diretas da IA para geração instantânea de flashcards.
+- **Worker Assíncrono (`AnkiWorker`)**: Proteção do *Event Loop* garantindo que requisições HTTP para o AnkiConnect ocorram em thread separada.
+- **Fallback Tolerante a Falhas**: Caso o usuário solicite salvar um flashcard mas o Anki Desktop não esteja aberto (ou sem o AnkiConnect), o sistema salva graciosamente em `data/flashcards_fallback.jsonl`, permitindo exportação futura sem perder a nota de estudo.
+
+## [Fase 11] - Agente Proativo de Leitura (MVP)
+### Added
+- **Painel Proativo (`ProactiveFooterWidget`)**: Adicionado um rodapé dinâmico ao ReaderView para exibir observações automáticas (Contexto, Hipótese ou Observação de Texto) baseadas na página lida, de forma discreta e animada.
+- **`ProactiveTriggerEngine`**: Motor heurístico desenvolvido para calcular o momento exato de acionar o agente com base na taxa de leitura (WPM) e na intensidade textual.
+- **Worker Assíncrono (`ProactiveWorker`)**: Integrado à API do Ollama sem bloquear a interface de usuário. Inclui parser JSON tolerante a falhas que purifica formatações corrompidas (markdown ou texto residual) e suporte nativo a modelos baseados em raciocínio (Reasoning Models) ajustando o `num_predict` para 4096.
+- **Hardware Capability Service**: Sistema de fallback que seleciona inteligentemente o modelo adequado ("gemma4:e4b" para TIER_4, fallback em memória para sistemas sem suporte pesado), evitando gargalos térmicos e de VRAM.
+- **Botão de Alternância ("💡 Proativo: ON/OFF")**: Injetado na toolbar de leitura, garantindo que a geração em background seja sempre opcional e sob controle do leitor.
+- **Expansão do Catálogo de Modelos (UI)**: Adicionado suporte nativo ao `gemma4:12b` (Gemma 4 12B) direto no painel de seleção RAG, classificado como "🔥 Poderoso".
+
+### Fixed
+- **Bug do Layout Maximizado**: Solucionado um erro no `ReaderView` que empurrava a barra de progresso verde para fora da tela ao maximizar a janela. Um `QSizePolicy.Ignored` foi atrelado ao WebEngineView para respeitar os limites de tela rigorosamente.
+- **Crash de Parseamento (Ollama)**: Removida a trava rígida de formato (`format: json`) da API do Ollama para permitir o fluxo natural de modelos R1-like ou com output enriquecido, extraindo o JSON pelo worker seguro.
+
+### Note
+- **Requisitos**: Modelos Proativos necessitam das flags ideais na resposta. Limite agressivo de tokens durante o pensamento do modelo foi remediado pelo novo limite de output.
 - **Configuração Estrita de Limites**: Parâmetros `num_predict` e `num_ctx` injetados dinamicamente no payload de chamadas da Ollama API, evitando interrupções curtas.
 - **Continuação Transparente e Segura**: Identificação proativa de `done_reason="length"` para forçar a continuação do output do assistente sem reiniciar as cadeias lógicas (limitado para prevenir looping).
 ### Fixed
