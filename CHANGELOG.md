@@ -7,6 +7,16 @@ O formato é estruturado para humanos, orientado ao impacto e baseado no padrão
 ## [Unreleased]
 - **Recursos Futuros**: Multimodalidade.
 
+## [Fase 13] - Audio Reader 2.0 / Narração Expressiva & [Fase 13A] - Otimização do Pipeline de Narração
+### Added
+- **`TTSRouter` Multitier**: Roteador unificado de TTS que gerencia a seleção de vozes por perfil e executa o fallback automático baseado em tiers (Tier B: Kokoro, Tier C: Piper).
+- **Warmup de Modelo Persistente**: Carregamento assíncrono e inicialização em background do modelo Kokoro-82M na subida da aplicação, mantendo a instância quente e evitando re-inicializações entre execuções de Play.
+- **Vetorização com NumPy**: Otimização crítica do tempo de formatação de áudio (float32 para PCM de 16 bits) no KokoroProvider com operações vetorizadas do NumPy, reduzindo latência de segundos para menos de 0.2ms.
+- **Streaming de Áudio por Segmento**: Síntese incremental e reprodução via gerador, permitindo que a reprodução do primeiro segmento comece antes da frase inteira ser concluída.
+- **Player de Áudio Contínuo Vectorizado**: Atualização do `ContinuousAudioPlayer` para aceitar `np.ndarray` nativos diretamente de float32 e int16, evitando conversões intermediárias WAV e aplicando reamostragem dinâmica de sample rate em tempo real (via sounddevice).
+- **Confinamento do pyttsx3**: Engine legada pyttsx3 restrita a execução síncrona manual, isolada do fluxo de fallback automático moderno.
+- **Fallback Automático por Violabilidade de SLO**: Chaveamento transparente e automático para o Piper (Tier C) caso o tempo até o primeiro segmento do Kokoro atinja o limiar limite de 3.0 segundos em CPU.
+
 ## [Fase 12] - Ferramentas de Estudo (Flashcards) + Integração com Anki
 ### Added
 - **`AnkiService` Local**: Serviço core desacoplado para comunicação via HTTP com a API local do **AnkiConnect** (`127.0.0.1:8765`).

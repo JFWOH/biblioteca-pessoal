@@ -47,6 +47,13 @@ class MainWindow(QMainWindow):
         self._library = LibraryManager(self._db, self._config)
         self._search_engine = SearchEngine(self._db)
 
+        # Inicializa TTS router persistente
+        from src.core.tts.tts_router import TTSRouter
+        from src.core.tts.text_preprocessor import TTSTextPreprocessor
+        self._tts_router = TTSRouter(TTSTextPreprocessor())
+        self._tts_router.auto_register_providers()
+        self._tts_router.initialize()
+
         # Inicializa RAG engine (graceful — não trava se Ollama offline)
         self._rag_engine = None
         self._rag_worker = None
@@ -219,7 +226,7 @@ class MainWindow(QMainWindow):
         self._main_stack.addWidget(library_page)  # index 0
 
         # ── Página do Leitor ──
-        self._reader_view = ReaderView()
+        self._reader_view = ReaderView(parent=self, tts_router=self._tts_router)
         self._reader_view.closed.connect(self._close_reader)
         self._reader_view.progress_changed.connect(self._on_progress)
         self._reader_view.annotation_added.connect(self._on_annotation_added)
@@ -510,9 +517,10 @@ class MainWindow(QMainWindow):
             )
             self._load_library()
 
-    def _show_settings(self):
+    def _show_settings(self, initial_tab: int = 0):
         """Abre o diálogo de configurações."""
-        dialog = SettingsDialog(self._config, self)
+        from src.gui.settings_dialog import SettingsDialog
+        dialog = SettingsDialog(self._config, self, initial_tab=initial_tab)
         dialog.theme_changed.connect(self._set_theme)
         dialog.settings_changed.connect(lambda: self._apply_theme())
         dialog.exec()

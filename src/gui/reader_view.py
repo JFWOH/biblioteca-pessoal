@@ -31,8 +31,9 @@ class ReaderView(QWidget):
     reading_context_updated = pyqtSignal(int, str, int, str) # book_id, title, page_number, page_text
     ai_action_requested = pyqtSignal(str, str)      # action_type, text
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, tts_router=None):
         super().__init__(parent)
+        self._tts_router = tts_router
         self._reader: BaseReader | None = None
         self._book_id: int = 0
         self._theme = "dark"
@@ -235,6 +236,18 @@ class ReaderView(QWidget):
         """)
         self._audio_btn.clicked.connect(self._toggle_audio)
         tb_layout.addWidget(self._audio_btn)
+
+        # Botão de Configuração de TTS (atalho Phase 13)
+        self._tts_settings_btn = QPushButton("⚙️ TTS")
+        self._tts_settings_btn.setFixedSize(65, 32)
+        self._tts_settings_btn.setToolTip("Configurar Vozes e Engines de Narração")
+        self._tts_settings_btn.setStyleSheet("""
+            QPushButton { background: transparent; border: 1px solid #2d333f;
+                          border-radius: 6px; font-size: 13px; color: #94a3b8; }
+            QPushButton:hover { background: #2d333f; }
+        """)
+        self._tts_settings_btn.clicked.connect(self._on_tts_settings_clicked)
+        tb_layout.addWidget(self._tts_settings_btn)
 
         # Proactive Agent Toggle
         self._proactive_combo = QComboBox()
@@ -1110,7 +1123,10 @@ class ReaderView(QWidget):
         self._rubber_band.hide()
 
     def _toggle_audio(self):
-        """Alterna a leitura de áudio (TTS) da página atual."""
+        """Alterna a leitura de áudio (TTS) da página atual.
+        
+        Phase 13: Uses TTSRouter with voice profiles for book narration.
+        """
         if hasattr(self, "_audio_worker") and self._audio_worker and self._audio_worker.isRunning():
             self._stop_audio_if_running()
             return
@@ -1130,12 +1146,20 @@ class ReaderView(QWidget):
             return
 
         from src.gui.workers.audio_worker import AudioWorker
-        self._audio_worker = AudioWorker(page_text, parent=self)
+        from src.core.tts.voice_profile import NarrationRole
+
+        self._audio_worker = AudioWorker(
+            page_text,
+            role=NarrationRole.BOOK_NARRATOR,
+            router=self._tts_router,
+            parent=self,
+        )
         
         self._audio_worker.playback_started.connect(self._on_audio_started)
         self._audio_worker.playback_finished.connect(self._on_audio_finished)
         self._audio_worker.error_occurred.connect(self._on_audio_error)
         self._audio_worker.finished.connect(self._on_audio_worker_finished)
+        self._audio_worker.provider_changed.connect(self._on_audio_provider_changed)
         
         self._audio_worker.start()
 
@@ -1166,6 +1190,91 @@ class ReaderView(QWidget):
             self._audio_worker.wait(2000)
             self._audio_worker = None
         self._audio_btn.setText("🔊 Play")
+
+    def _on_audio_provider_changed(self, provider_name: str):
+        """Phase 13: Updates UI to show which TTS engine is active."""
+        self._audio_btn.setToolTip(f"Parar Leitura (via {provider_name})")
+
+    def _on_tts_settings_clicked(self):
+        """Abre o menu rápido de configurações TTS."""
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtGui import QAction
+        from PyQt6.QtCore import QPoint
+        
+        parent_window = self.window()
+        config = getattr(parent_window, "_config", None)
+        if not config:
+            if parent_window and hasattr(parent_window, "_show_settings"):
+                parent_window._show_settings(initial_tab=3)
+            return
+
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu { background: #1e2227; border: 1px solid #3f3f46; color: #e4e4e7; border-radius: 4px; padding: 4px; }
+            QMenu::item { padding: 6px 24px; border-radius: 4px; }
+            QMenu::item:selected { background: #3f3f46; }
+        """)
+        
+        # 1. Ajuste rápido de Velocidade
+        speed_menu = menu.addMenu("⚡ Velocidade da Leitura")
+        current_rate = config.get("tts.book_narrator.rate", 1.0)
+        
+        rates = [
+            ("🐢 Lenta (0.8x)", 0.8),
+            ("🟢 Normal (1.0x)", 1.0),
+            ("⚡ Rápida (1.2x)", 1.2),
+            ("🚀 Muito Rápida (1.5x)", 1.5),
+        ]
+        
+        for name, value in rates:
+            action = QAction(name, speed_menu, checkable=True)
+            action.setChecked(abs(current_rate - value) < 0.05)
+            # Use default arguments in lambda to capture value correctly
+            action.triggered.connect(lambda checked, val=value: config.set("tts.book_narrator.rate", val))
+            speed_menu.addAction(action)
+
+        # 2. Seleção de Motor (Provider)
+        provider_menu = menu.addMenu("🔊 Motor de Voz (Engine)")
+        current_provider = config.get("tts.book_narrator.preferred_provider", "kokoro")
+        
+        providers = [
+            ("pyttsx3 (Legado Local)", "pyttsx3"),
+            ("Kokoro (Neural Local)", "kokoro"),
+            ("Piper (Neural Rápido)", "piper"),
+        ]
+        
+        for name, key in providers:
+            action = QAction(name, provider_menu, checkable=True)
+            action.setChecked(current_provider == key)
+            action.triggered.connect(lambda checked, k=key: config.set("tts.book_narrator.preferred_provider", k))
+            provider_menu.addAction(action)
+
+        # 3. Seleção de Estilo / Voz
+        style_menu = menu.addMenu("🗣️ Voz / Estilo")
+        current_style = config.get("tts.book_narrator.style", "serene")
+        
+        styles = [
+            ("🌿 Leitura Serena (Feminina)", "serene"),
+            ("📐 Leitura Técnica (Masculina)", "technical"),
+            ("🎭 Leitura Expressiva (Masculina)", "expressive"),
+        ]
+        
+        for name, key in styles:
+            action = QAction(name, style_menu, checkable=True)
+            action.setChecked(current_style == key)
+            action.triggered.connect(lambda checked, k=key: config.set("tts.book_narrator.style", k))
+            style_menu.addAction(action)
+            
+        menu.addSeparator()
+        
+        # 3. Atalho de configurações completas
+        settings_action = QAction("⚙️ Configurações Completas...", menu)
+        settings_action.triggered.connect(
+            lambda: parent_window._show_settings(initial_tab=3) if hasattr(parent_window, "_show_settings") else None
+        )
+        menu.addAction(settings_action)
+        
+        menu.exec(self._tts_settings_btn.mapToGlobal(QPoint(0, self._tts_settings_btn.height() + 2)))
 
     def _on_proactive_observation(self, obs: dict):
         """Exibe a observação proativa recebida."""

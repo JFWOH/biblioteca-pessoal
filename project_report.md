@@ -24,6 +24,9 @@ O projeto encontra-se em um estágio de maturidade significativamente superior a
 - **Fase 2 concluída**: foi implementado o **Structured Agent Trace Logger (ADR-004)**, com persistência local de traces em JSONL sob `data/traces/`.
 - **Fase 3 concluída**: ferramentas operacionais criadas (Housekeeping/Retenção, Trace Inspector CLI e Evaluation Harness base).
 - **Fase 4 concluída**: evolução da qualidade semântica com o novo `AgentState` (ADR-002), tracking avançado de `sources_used`, `repeated_result_count` e avaliação de sessões (redundantes, fallback-heavy, etc).
+- **Fase 11 concluída**: Agente Proativo de Leitura (MVP) com o `ProactiveTriggerEngine` e `ProactiveWorker` assíncrono integrado ao Ollama sem travar a UI.
+- **Fase 12 concluída**: Ferramentas de Estudo (Flashcards) e integração local baseada em HTTP com o AnkiConnect local.
+- **Fase 13 concluída (com 13A)**: Audio Reader 2.0 com `TTSRouter` multitier, suporte nativo a streaming de áudio segmentado para minimizar a latência inicial (TTFB), e vetorização NumPy para a conversão de formato de áudio (redução de segundos para sub-milissegundos).
 - O sistema opera com:
   - **Policy Engine ativo (ADR-003)**,
   - **boundary explícito entre GUI e Core AI (ADR-006)**,
@@ -479,23 +482,11 @@ Manter o projeto **local-first**, com evolução por valor prático, risco contr
 - **Fase 1–8**: Núcleo do leitor, OCR local, RAG local, tradução offline, hardening técnico e documentação.
 - **Fase 9**: Reader UI Refresh / Design System Dark-First.
 - **Fase 10**: Robustez de Saída do Agente / Anti-Truncation.
+- **Fase 11**: Agente Proativo de Leitura (MVP) com `ProactiveTriggerEngine` e worker do Ollama em background.
+- **Fase 12**: Ferramentas de Estudo (Flashcards) + Integração local via HTTP com o AnkiConnect local.
+- **Fase 13**: Audio Reader 2.0 / Narração Expressiva & Fase 13A Otimizações de latência (Kokoro + Piper fallback por SLO de latência, player NumPy nativo).
 
 ### Próximas Fases (Ordem de Implementação Recomendada)
-
-#### Fase 11 — Agente Proativo de Leitura (MVP)
-**Objetivo:** Permitir que o sistema gere observações assistivas discretas e opcionais a partir da página/trecho atual (ex: nota de rodapé interativa).
-- Uso local-first, com toggle liga/desliga e intensidades variadas.
-- Fallback seguro entre Gemma 4 E4B (padrão) e 12B (modo avançado quando suportado por hardware).
-- Labels estritos de confiança, tipo de nota e regras fortes anti-spoiler.
-
-#### Fase 12 — Ferramentas de Estudo (Flashcards) + Integração Local com Anki
-**Objetivo:** Transformar trechos, bookmarks e explicações do agente em flashcards reutilizáveis.
-- Integração estritamente local usando AnkiConnect.
-
-#### Fase 13 — Audio Reader 2.0 / Narração Expressiva
-**Objetivo:** Elevar significativamente a qualidade do TTS local para conforto em leitura longa.
-- Avaliação de motores avançados locais (ex: Qwen3-TTS, Kokoro, Piper).
-- Perfis separados para "narrador do livro" e "narrador do assistente".
 
 #### Fase 14 — Suporte Multimodal Avançado
 **Objetivo:** Ampliar a capacidade do sistema para ler diagramas, tabelas, imagens e layouts complexos.

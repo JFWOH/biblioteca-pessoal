@@ -42,6 +42,11 @@ class Pyttsx3Backend(TTSBackend):
             self._active_engine = engine  # Torna a engine ativa para permitir stop() concorrente
             
             logger.info("AUDIO: speaking text block of size %d", len(text))
+            
+            # WORKAROUND: Se o stop() foi chamado de outra thread, o pyttsx3 pode não limpar a flag _inLoop
+            if hasattr(engine, '_inLoop'):
+                engine._inLoop = False
+                
             engine.say(text)
             engine.runAndWait()
         except Exception as e:
