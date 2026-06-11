@@ -13,6 +13,19 @@ from src.core.tts.piper_provider import PiperProvider
 from src.core.audio.continuous_player import ContinuousAudioPlayer
 from src.core.tts.voice_profile import VoiceProfile, NarrationRole
 
+try:
+    import kokoro
+    HAS_KOKORO = True
+except ImportError:
+    HAS_KOKORO = False
+
+try:
+    import piper
+    HAS_PIPER = True
+except ImportError:
+    HAS_PIPER = False
+
+
 
 class TestTTSIntegrationOptimizations:
 
@@ -49,6 +62,7 @@ class TestTTSIntegrationOptimizations:
             assert isinstance(pcm_enqueued, np.ndarray)
             assert sr_enqueued == player._sample_rate
 
+    @pytest.mark.skipif(not HAS_PIPER, reason="piper library not installed")
     def test_piper_model_cache_reused(self):
         """Test that PiperProvider caches and reuses the loaded voice model."""
         provider = PiperProvider()
@@ -69,6 +83,7 @@ class TestTTSIntegrationOptimizations:
             provider._synthesize_python("Olá novamente", voice_id="pt_BR-faber-medium", rate=1.0, volume=1.0)
             assert mock_load.call_count == 1
 
+    @pytest.mark.skipif(not (HAS_KOKORO and HAS_PIPER), reason="kokoro and/or piper library not installed")
     def test_provider_format_metadata(self):
         """Test that Kokoro and Piper providers expose format properties correctly."""
         kokoro = KokoroProvider()
@@ -82,6 +97,7 @@ class TestTTSIntegrationOptimizations:
         assert piper.dtype == 'int16'
         assert piper.channels == 1
 
+    @pytest.mark.skipif(not HAS_KOKORO, reason="kokoro library not installed")
     def test_kokoro_streaming_generator(self):
         """Test that KokoroProvider's synthesize_stream yields segments correctly."""
         provider = KokoroProvider()
