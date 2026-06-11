@@ -70,7 +70,7 @@ O projeto prioriza execução local, privacidade, transparência operacional e i
 | **Embeddings** | `Ollama` + `nomic-embed-text` | Geração de embeddings vetoriais de alta dimensionalidade |
 | **LLM Local** | `Ollama` + modelos configuráveis (`gemma4:e4b`, etc.) | Chat RAG, raciocínio iterativo e function calling |
 | **Pesquisa Web** | `duckduckgo_search` | Fonte complementar opcional de conhecimento contemporâneo |
-| **TTS Local** | `pyttsx3` | Leitura em voz offline |
+| **TTS Local** | `Kokoro-82M` + `Piper` + `pyttsx3` | Leitura offline de alta qualidade (Kokoro), fallback rápido (Piper) e engine legado (pyttsx3) |
 | **Tracing Estruturado** | `JSONL` + stdlib Python | Auditoria local append-only de sessões agentic (ADR-004) |
 | **Testes** | `pytest`, `pytest-qt`, `pytest-asyncio`, `pytest-cov` | Testes unitários, integração e UI |
 
@@ -273,7 +273,17 @@ Biblioteca-pessoal/
 │   │   │   ├── audio_reader_service.py
 │   │   │   ├── text_chunker.py
 │   │   │   ├── tts_backend.py
-│   │   │   └── pyttsx3_backend.py
+│   │   │   ├── pyttsx3_backend.py
+│   │   │   └── continuous_player.py # Player de áudio contínuo e gapless
+│   │   ├── tts/                    # Camada de TTS local multitier (Phase 13)
+│   │   │   ├── base_tts_provider.py
+│   │   │   ├── kokoro_provider.py
+│   │   │   ├── piper_provider.py
+│   │   │   ├── pyttsx3_provider.py
+│   │   │   ├── qwen3_tts_provider.py
+│   │   │   ├── sherpa_onnx_provider.py
+│   │   │   ├── text_preprocessor.py
+│   │   │   └── tts_router.py
 │   │   └── rag/
 │   │       ├── orchestrator.py     # Caminho canônico do RAG
 │   │       ├── agent_state.py
@@ -426,6 +436,16 @@ O Core AI/RAG não pode importar PyQt6 nem módulos GUI. Toda comunicação deve
 - gerenciamento estrito de isolamento de leitura/conexão via `threading.local()`
 - garantia de persistência do *WAL mode* e sincronia segura.
 - bateria massiva de testes para concorrência aprovada.
+
+---
+
+### Desafio 9 — Latência Inicial Elevada e Falha de Cache em CPU no Pipeline TTS
+**Problema:** A execução de voz (TTS) com o Kokoro em CPU sofria com segundos de atraso (TTFB > 6s) decorrentes de recriações contínuas do pipeline do modelo a cada clique de Play, além de ineficiência no laço de conversão float32-PCM em Python puro e checagens lentas na inicialização do Hugging Face.
+
+**Solução (Fase 13 e 13A):**
+- **Warmup Assíncrono e Persistência do Router:** Instanciação única do `TTSRouter` no ciclo de vida da aplicação e warmup em thread paralela em background na inicialização do app, mantendo o modelo carregado em cache.
+- **Vetorização NumPy:** Eliminação total do gargalo de formatação float32 para PCM 16-bit utilizando operações vetorizadas em NumPy, reduzindo o custo de CPU de segundos para menos de 0.2ms.
+- **Player Contínuo e Streaming de Segmentos:** Síntese em chunks entregando `np.ndarray` diretamente ao `ContinuousAudioPlayer`, com monitoramento de SLO de latência (limiar de 3s) para chaveamento automático e transparente para o Piper fallback.
 
 ---
 
