@@ -212,6 +212,18 @@ class ReaderView(QWidget):
         self._highlight_mode_btn.clicked.connect(self._toggle_highlight_mode)
         # Movido para o menu de overflow ("⋯"): mantido como state-holder.
 
+        # Botão Estudar (ações do agente sobre a página atual)
+        self._study_btn = QPushButton("🎓")
+        self._study_btn.setFixedSize(32, 32)
+        self._study_btn.setToolTip("Estudar a página: explicar · resumir · flashcards · glossário")
+        self._study_btn.setStyleSheet("""
+            QPushButton { background: transparent; border: 1px solid #2d333f;
+                          border-radius: 6px; font-size: 14px; }
+            QPushButton:hover { background: #2d333f; }
+        """)
+        self._study_btn.clicked.connect(self._open_study_menu)
+        tb_layout.addWidget(self._study_btn)
+
         # Botão Painel IA
         self._ai_panel_btn = QPushButton("🤖")
         self._ai_panel_btn.setFixedSize(32, 32)
@@ -836,6 +848,16 @@ class ReaderView(QWidget):
             }}
             QPushButton:hover {{ background: {btn_hover_bg}; }}
         """)
+        if hasattr(self, "_study_btn"):
+            self._study_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: 1px solid {btn_bg};
+                    border-radius: 6px;
+                    font-size: 14px;
+                }}
+                QPushButton:hover {{ background: {btn_hover_bg}; }}
+            """)
         self._highlight_mode_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
@@ -1053,6 +1075,36 @@ class ReaderView(QWidget):
         menu.addAction(action_search)
         menu.addAction(action_save)
         menu.addAction(action_flashcard)
+
+    def _current_page_text(self) -> str:
+        """Retorna o texto da página/capítulo atual do leitor."""
+        if not self._reader:
+            return ""
+        page = self._reader.current_page
+        if hasattr(self._reader, "get_page_text"):
+            return self._reader.get_page_text(page) or ""
+        if hasattr(self._reader, "get_chapter_text"):
+            return self._reader.get_chapter_text(page) or ""
+        return ""
+
+    def _open_study_menu(self) -> None:
+        """Menu de ações de estudo do agente sobre a página/capítulo atual."""
+        text = self._current_page_text().strip()
+        menu = self._create_ai_menu()
+        actions = [
+            ("🧠 Explicar esta página", "explain_page"),
+            ("📄 Resumir", "summarize"),
+            ("🃏 Flashcards do trecho", "flashcards"),
+            ("📚 Glossário", "glossary"),
+        ]
+        for label, key in actions:
+            act = QAction(label, self)
+            act.setEnabled(bool(text))
+            act.triggered.connect(
+                lambda _checked=False, k=key, t=text: self.ai_action_requested.emit(k, t)
+            )
+            menu.addAction(act)
+        menu.exec(self._study_btn.mapToGlobal(QPoint(0, self._study_btn.height() + 2)))
 
     def _on_epub_context_menu(self, pos: QPoint):
         """Extrai texto selecionado via JS no EPUB e mostra menu."""

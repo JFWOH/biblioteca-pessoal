@@ -857,6 +857,12 @@ class MainWindow(QMainWindow):
         elif action_type == "flashcard":
             self._open_anki_export_dialog(front=text, back="")
             return
+        elif action_type in ("explain_page", "summarize", "glossary", "flashcards"):
+            from src.core.study_prompts import build_study_prompt
+            question = build_study_prompt(action_type, text)
+            if not question:
+                self._statusbar.showMessage("⚠️ Nenhum texto na página para estudar.", 3000)
+                return
         else:
             return
             
