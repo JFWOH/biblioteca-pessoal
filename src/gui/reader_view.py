@@ -3,6 +3,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QSplitter, QStackedWidget, QMenu, QRubberBand,
+    QToolButton,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize, QEvent
 from PyQt6.QtGui import QPixmap, QKeySequence, QShortcut, QAction, QIcon
@@ -16,6 +17,7 @@ from src.gui.widgets.annotation_panel import AnnotationPanel
 from src.gui.widgets.search_overlay import DocumentSearchBar
 from src.gui.styles import get_reader_css
 from src.gui.widgets.proactive_footer import ProactiveFooterWidget
+from src.gui.widgets.selection_popover import SelectionActionPopover
 from src.gui.proactive_reader_service import ProactiveReaderService
 from PyQt6.QtWidgets import QComboBox
 
@@ -187,7 +189,7 @@ class ReaderView(QWidget):
                                   border-color: #10b981; color: #10b981; }
         """)
         self._double_page_btn.clicked.connect(self._toggle_double_page)
-        tb_layout.addWidget(self._double_page_btn)
+        # Movido para o menu de overflow ("⋯"): mantido como state-holder.
 
         # Botão Marca-Texto (modo de destaque)
         self._highlight_mode_btn = QPushButton("🖍️")
@@ -208,7 +210,7 @@ class ReaderView(QWidget):
                                   border-color: #fbbf24; }
         """)
         self._highlight_mode_btn.clicked.connect(self._toggle_highlight_mode)
-        tb_layout.addWidget(self._highlight_mode_btn)
+        # Movido para o menu de overflow ("⋯"): mantido como state-holder.
 
         # Botão Painel IA
         self._ai_panel_btn = QPushButton("🤖")
@@ -247,7 +249,7 @@ class ReaderView(QWidget):
             QPushButton:hover { background: #2d333f; }
         """)
         self._tts_settings_btn.clicked.connect(self._on_tts_settings_clicked)
-        tb_layout.addWidget(self._tts_settings_btn)
+        # Movido para o menu de overflow ("⋯"): mantido como state-holder.
 
         # Proactive Agent Toggle
         self._proactive_combo = QComboBox()
@@ -260,6 +262,38 @@ class ReaderView(QWidget):
         """)
         self._proactive_combo.currentTextChanged.connect(self._proactive_service.set_intensity)
         tb_layout.addWidget(self._proactive_combo)
+
+        # Menu de overflow ("⋯") — agrupa controles secundários para desafogar a toolbar.
+        self._overflow_btn = QToolButton()
+        self._overflow_btn.setText("⋯")
+        self._overflow_btn.setFixedSize(32, 32)
+        self._overflow_btn.setToolTip("Mais opções")
+        self._overflow_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._overflow_btn.setStyleSheet("""
+            QToolButton { background: transparent; border: 1px solid #2d333f;
+                          border-radius: 6px; font-size: 16px; color: #94a3b8; }
+            QToolButton:hover { background: #2d333f; }
+            QToolButton::menu-indicator { image: none; }
+        """)
+        self._overflow_menu = QMenu(self._overflow_btn)
+        self._overflow_menu.setStyleSheet("""
+            QMenu { background: #1e2227; border: 1px solid #3f3f46; color: #e4e4e7; border-radius: 4px; padding: 4px; }
+            QMenu::item { padding: 6px 24px; border-radius: 4px; }
+            QMenu::item:selected { background: #3f3f46; }
+        """)
+        self._act_double_page = QAction("📖 Página Dupla", self, checkable=True)
+        self._act_double_page.triggered.connect(self._menu_toggle_double_page)
+        self._act_highlight = QAction("🖍️ Modo Marca-Texto", self, checkable=True)
+        self._act_highlight.triggered.connect(self._menu_toggle_highlight)
+        self._act_tts = QAction("⚙️ Voz / Narração (TTS)", self)
+        self._act_tts.triggered.connect(self._on_tts_settings_clicked)
+        self._overflow_menu.addAction(self._act_double_page)
+        self._overflow_menu.addAction(self._act_highlight)
+        self._overflow_menu.addSeparator()
+        self._overflow_menu.addAction(self._act_tts)
+        self._overflow_menu.aboutToShow.connect(self._sync_overflow_menu)
+        self._overflow_btn.setMenu(self._overflow_menu)
+        tb_layout.addWidget(self._overflow_btn)
 
         self._toolbar = toolbar
         left_layout.addWidget(toolbar)
@@ -356,9 +390,13 @@ class ReaderView(QWidget):
 
         # Adiciona o painel esquerdo ao splitter principal
         self._main_splitter.addWidget(self._left_pane)
-        
+
         # O painel direito (IA) será injetado depois
         self._ai_panel_container = None
+
+        # Popover de ações sobre a seleção (PDF) — alternativa rápida ao clique direito.
+        self._selection_popover = SelectionActionPopover(self)
+        self._selection_popover.action_requested.connect(self._on_selection_popover_action)
 
     def _setup_shortcuts(self):
         s_next = QShortcut(QKeySequence(Qt.Key.Key_Right), self, self._go_next)
@@ -420,6 +458,8 @@ class ReaderView(QWidget):
                 self._rubber_band.show()
                 self._is_selecting = True
                 self._last_selection_coords = None  # Reseta coords ao iniciar
+                if hasattr(self, "_selection_popover"):
+                    self._selection_popover.hide()
                 return True
             elif event.type() == QEvent.Type.MouseMove and self._is_selecting:
                 self._rubber_band.setGeometry(QRect(self._origin, event.position().toPoint()).normalized())
@@ -443,6 +483,7 @@ class ReaderView(QWidget):
                     py1 = min(1.0, y1 / pixmap.height())
                     if (px1 - px0) > 0.005 and (py1 - py0) > 0.005:  # Seleção mínima 0.5%
                         self._last_selection_coords = (px0, py0, px1, py1)
+                        self._show_selection_popover(rect)
                 # Mantém rubber band visível para clique direito
                 return True
 
@@ -522,6 +563,8 @@ class ReaderView(QWidget):
 
     def _go_to_page(self, page: int):
         self._stop_audio_if_running()
+        if hasattr(self, "_selection_popover"):
+            self._selection_popover.hide()
         if self._reader:
             content = self._reader.go_to_page(page)
             if content:
@@ -599,6 +642,21 @@ class ReaderView(QWidget):
         if self._reader and hasattr(self._reader, 'set_double_page'):
             self._reader.set_double_page(self._double_page_btn.isChecked())
             self._go_to_page(self._reader.current_page)
+
+    def _menu_toggle_double_page(self, checked: bool) -> None:
+        """Aciona o modo página dupla a partir do menu de overflow ('⋯')."""
+        self._double_page_btn.setChecked(checked)
+        self._toggle_double_page()
+
+    def _menu_toggle_highlight(self, checked: bool) -> None:
+        """Aciona o modo marca-texto a partir do menu de overflow ('⋯')."""
+        self._highlight_mode_btn.setChecked(checked)
+        self._toggle_highlight_mode()
+
+    def _sync_overflow_menu(self) -> None:
+        """Sincroniza os checkmarks do menu de overflow com o estado real dos botões."""
+        self._act_double_page.setChecked(self._double_page_btn.isChecked())
+        self._act_highlight.setChecked(self._highlight_mode_btn.isChecked())
 
     def _zoom_in(self):
         if self._reader and hasattr(self._reader, 'zoom'):
@@ -798,6 +856,17 @@ class ReaderView(QWidget):
             border-top: 1px solid {border_progress};
         """)
 
+        # Overflow ("⋯") e popover de seleção acompanham o tema
+        if hasattr(self, "_overflow_btn"):
+            self._overflow_btn.setStyleSheet(f"""
+                QToolButton {{ background: transparent; border: 1px solid {btn_bg};
+                              border-radius: 6px; font-size: 16px; color: {btn_color}; }}
+                QToolButton:hover {{ background: {btn_hover_bg}; }}
+                QToolButton::menu-indicator {{ image: none; }}
+            """)
+        if hasattr(self, "_selection_popover"):
+            self._selection_popover.set_theme(theme)
+
         if self._reader and self._reader.is_open:
             self._go_to_page(self._reader.current_page)
 
@@ -862,7 +931,10 @@ class ReaderView(QWidget):
             self._fullscreen_btn.setText("⛶")
 
     def _on_escape(self):
-        """Escape: fecha busca → limpa rubber band → sai do fullscreen → fecha leitor."""
+        """Escape: fecha popover → busca → limpa rubber band → sai do fullscreen → fecha leitor."""
+        if hasattr(self, "_selection_popover") and self._selection_popover.isVisible():
+            self._selection_popover.hide()
+            return
         if self._search_bar.isVisible():
             self._search_bar.close_bar()
         elif self._rubber_band.isVisible():
@@ -1118,8 +1190,38 @@ class ReaderView(QWidget):
             "position_data": position_data
         }
         self.annotation_added.emit(self._book_id, data)
-        
+
         # Esconde a rubber band após destacar
+        self._rubber_band.hide()
+
+    def _show_selection_popover(self, rect) -> None:
+        """Exibe o popover de ações logo abaixo da seleção (PDF)."""
+        if not hasattr(self, "_selection_popover"):
+            return
+        self._selection_popover.set_actions(
+            ["highlight", "explain", "translate", "search", "save_note", "flashcard"]
+        )
+        # rect está em coordenadas do _image_label (pai da rubber band); mapeia p/ ReaderView.
+        anchor_local = QPoint(rect.left(), rect.bottom() + 6)
+        anchor = self._image_label.mapTo(self, anchor_local)
+        self._selection_popover.show_at(anchor)
+
+    def _on_selection_popover_action(self, action: str) -> None:
+        """Executa a ação escolhida no popover de seleção (PDF)."""
+        coords = self._last_selection_coords
+        if coords is None:
+            return
+        text = ""
+        if self._reader and hasattr(self._reader, "get_text_from_rect"):
+            try:
+                text = (self._reader.get_text_from_rect(self._reader.current_page, coords) or "").strip()
+            except Exception:
+                text = ""
+        if action == "highlight":
+            self._highlight_selection(coords, text)
+        elif text:
+            self.ai_action_requested.emit(action, text)
+        self._last_selection_coords = None
         self._rubber_band.hide()
 
     def _toggle_audio(self):
@@ -1274,7 +1376,8 @@ class ReaderView(QWidget):
         )
         menu.addAction(settings_action)
         
-        menu.exec(self._tts_settings_btn.mapToGlobal(QPoint(0, self._tts_settings_btn.height() + 2)))
+        anchor = getattr(self, "_overflow_btn", None) or self._tts_settings_btn
+        menu.exec(anchor.mapToGlobal(QPoint(0, anchor.height() + 2)))
 
     def _on_proactive_observation(self, obs: dict):
         """Exibe a observação proativa recebida."""
