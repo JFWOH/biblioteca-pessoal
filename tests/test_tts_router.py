@@ -95,6 +95,23 @@ class TestProviderRegistration:
         router.register_provider(FakeProvider("Charlie", "C"))
         assert len(router.get_available_providers()) == 3
 
+    def test_auto_register_tolerates_broken_optional_provider(self):
+        """ADR-005: um provider opcional cuja dependência está quebrada
+        (ex.: torch com DLL inválida → OSError no construtor) NÃO pode
+        derrubar o registro nem o startup do aplicativo."""
+        router = TTSRouter(TTSTextPreprocessor())
+
+        class _BrokenProvider:
+            def __init__(self, *args, **kwargs):
+                raise OSError("[WinError 193] %1 não é um aplicativo Win32 válido")
+
+        # Sem o fix, o OSError (não-ImportError) propagaria e abortaria o startup.
+        with patch("src.core.tts.qwen3_tts_provider.Qwen3TTSProvider", _BrokenProvider):
+            router.auto_register_providers()  # não deve levantar exceção
+
+        # O provider quebrado foi ignorado graciosamente.
+        assert "qwen3-tts" not in router._providers
+
 
 # ── Tiered Fallback ──────────────────────────────────────────────────
 

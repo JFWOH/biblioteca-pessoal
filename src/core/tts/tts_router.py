@@ -107,28 +107,28 @@ class TTSRouter:
         try:
             from src.core.tts.kokoro_provider import KokoroProvider
             self.register_provider(KokoroProvider())
-        except (ImportError, TTSProviderUnavailable) as e:
+        except Exception as e:
             logger.info("TTS_ROUTER: Kokoro not available: %s", e)
 
         # Tier C — Piper (fallback)
         try:
             from src.core.tts.piper_provider import PiperProvider
             self.register_provider(PiperProvider())
-        except (ImportError, TTSProviderUnavailable) as e:
+        except Exception as e:
             logger.info("TTS_ROUTER: Piper not available: %s", e)
 
         # Tier A — Qwen3-TTS (advanced optional)
         try:
             from src.core.tts.qwen3_tts_provider import Qwen3TTSProvider
             self.register_provider(Qwen3TTSProvider())
-        except (ImportError, TTSProviderUnavailable) as e:
+        except Exception as e:
             logger.info("TTS_ROUTER: Qwen3-TTS not available: %s", e)
 
         # Tier D — Sherpa-ONNX (runtime)
         try:
             from src.core.tts.sherpa_onnx_provider import SherpaOnnxProvider
             self.register_provider(SherpaOnnxProvider())
-        except (ImportError, TTSProviderUnavailable) as e:
+        except Exception as e:
             logger.info("TTS_ROUTER: Sherpa-ONNX not available: %s", e)
 
         # Legacy pyttsx3 is explicitly NOT registered automatically for this chunked/gapless pipeline.

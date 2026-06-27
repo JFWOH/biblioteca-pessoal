@@ -42,12 +42,14 @@ class Qwen3TTSProvider(BaseTTSProvider):
         self._available = False
         self._default_voice_id: Optional[str] = None
 
-        # Check dependencies
+        # Check dependencies. Captura Exception (não só ImportError) porque um
+        # torch instalado mas quebrado/incompatível lança OSError (ex.: WinError 193
+        # ao carregar DLLs CUDA). ADR-005: degradar graciosamente, nunca derrubar o app.
         try:
             import torch  # noqa: F401
             import transformers  # noqa: F401
             self._available = True
-        except ImportError as e:
+        except Exception as e:
             logger.info("QWEN3_TTS: Dependencies not available: %s", e)
             self._available = False
 
