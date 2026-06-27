@@ -98,7 +98,23 @@ class RAGPanel(QWidget):
             padding: 4px 12px; font-size: 11px; font-weight: 600;
         """)
         h_layout.addWidget(self._status_badge)
-        
+
+        # Botão recolher/expandir a barra lateral (fontes, modelo, indexação) —
+        # recolhido, a resposta do assistente ocupa toda a largura do painel.
+        self._sidebar_toggle_btn = QPushButton("⟩")
+        self._sidebar_toggle_btn.setFixedSize(28, 28)
+        self._sidebar_toggle_btn.setCheckable(True)
+        self._sidebar_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._sidebar_toggle_btn.setToolTip("Recolher/expandir o painel lateral (fontes, modelo)")
+        self._sidebar_toggle_btn.setStyleSheet("""
+            QPushButton { background: transparent; color: #a1a1aa; border: none;
+                          border-radius: 4px; font-size: 15px; font-weight: bold; }
+            QPushButton:hover { background: #3f3f46; color: white; }
+            QPushButton:checked { color: #10b981; }
+        """)
+        self._sidebar_toggle_btn.clicked.connect(self._toggle_sidebar)
+        h_layout.addWidget(self._sidebar_toggle_btn)
+
         # Botão Fechar (Escape Hatch)
         self._close_btn = QPushButton("✕")
         self._close_btn.setFixedSize(28, 28)
@@ -279,7 +295,7 @@ class RAGPanel(QWidget):
 
         # ── Painel direito: fontes e controles ─────────────────────────────────
         self._sidebar_widget = QWidget()
-        self._sidebar_widget.setFixedWidth(280)
+        self._sidebar_widget.setFixedWidth(230)
         sb_layout = QVBoxLayout(self._sidebar_widget)
         sb_layout.setContentsMargins(16, 20, 16, 20)
         sb_layout.setSpacing(16)
@@ -650,6 +666,16 @@ class RAGPanel(QWidget):
         self._is_standalone = is_standalone
         self._back_btn.setVisible(is_standalone)
         self._close_btn.setVisible(not is_standalone)
+
+    def _toggle_sidebar(self) -> None:
+        """Recolhe/expande a barra lateral (fontes, modelo, indexação).
+
+        Recolhida, a área de resposta ocupa toda a largura do painel — útil no
+        dock do leitor, onde o espaço é mais estreito.
+        """
+        collapse = self._sidebar_toggle_btn.isChecked()
+        self._sidebar_widget.setVisible(not collapse)
+        self._sidebar_toggle_btn.setText("⟨" if collapse else "⟩")
 
     def set_indexed_count(self, count: int) -> None:
         """Atualiza o contador de chunks indexados."""

@@ -3,7 +3,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QSplitter, QStackedWidget, QMenu, QRubberBand,
-    QToolButton,
+    QToolButton, QSizePolicy,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize, QEvent
 from PyQt6.QtGui import QPixmap, QKeySequence, QShortcut, QAction, QIcon
@@ -87,6 +87,10 @@ class ReaderView(QWidget):
             "color: #e5e7eb; font-size: 13px; font-weight: 600;"
         )
         self._title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Deixa o título encolher livremente para nunca empurrar/cortar os botões
+        # da direita (ex.: o "⋯" com Página Dupla) quando o espaço fica curto.
+        self._title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._title_label.setMinimumWidth(0)
         tb_layout.addWidget(self._title_label, stretch=1)
 
         # Navegação de páginas
@@ -274,7 +278,7 @@ class ReaderView(QWidget):
             QComboBox::drop-down { border: none; }
         """)
         self._proactive_combo.currentTextChanged.connect(self._proactive_service.set_intensity)
-        tb_layout.addWidget(self._proactive_combo)
+        # Movido para o submenu do overflow ("⋯"): mantido como state-holder de intensidade.
 
         # Menu de overflow ("⋯") — agrupa controles secundários para desafogar a toolbar.
         self._overflow_btn = QToolButton()
@@ -303,6 +307,15 @@ class ReaderView(QWidget):
         self._overflow_menu.addAction(self._act_double_page)
         self._overflow_menu.addAction(self._act_highlight)
         self._overflow_menu.addSeparator()
+        # Submenu do Agente Proativo (antes era um combo sempre visível na toolbar)
+        self._proactive_acts = {}
+        proactive_menu = self._overflow_menu.addMenu("🧠 Agente Proativo")
+        for level in ["Desligado", "Leve", "Moderado", "Estudo"]:
+            p_act = QAction(level, self, checkable=True)
+            p_act.triggered.connect(lambda _c=False, lv=level: self._set_proactive_intensity(lv))
+            proactive_menu.addAction(p_act)
+            self._proactive_acts[level] = p_act
+        self._overflow_menu.addSeparator()
         self._overflow_menu.addAction(self._act_tts)
         self._overflow_menu.aboutToShow.connect(self._sync_overflow_menu)
         self._overflow_btn.setMenu(self._overflow_menu)
@@ -321,7 +334,6 @@ class ReaderView(QWidget):
         # Conteúdo: Splitter com TOC + Visualização
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(1)
-        from PyQt6.QtWidgets import QSizePolicy
         splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
 
         # Painel TOC
@@ -674,9 +686,17 @@ class ReaderView(QWidget):
         self._toggle_highlight_mode()
 
     def _sync_overflow_menu(self) -> None:
-        """Sincroniza os checkmarks do menu de overflow com o estado real dos botões."""
+        """Sincroniza os checkmarks do menu de overflow com o estado real."""
         self._act_double_page.setChecked(self._double_page_btn.isChecked())
         self._act_highlight.setChecked(self._highlight_mode_btn.isChecked())
+        current = self._proactive_combo.currentText()
+        for level, act in getattr(self, "_proactive_acts", {}).items():
+            act.setChecked(level == current)
+
+    def _set_proactive_intensity(self, level: str) -> None:
+        """Ajusta a intensidade do agente proativo a partir do submenu de overflow."""
+        # setCurrentText dispara currentTextChanged → ProactiveReaderService.set_intensity
+        self._proactive_combo.setCurrentText(level)
 
     def _zoom_in(self):
         if self._reader and hasattr(self._reader, 'zoom'):
@@ -1037,7 +1057,7 @@ class ReaderView(QWidget):
         self._dock.show_tab(key)
         self._dock.show()
         w = self.width()
-        self._main_splitter.setSizes([int(w * 0.66), int(w * 0.34)])
+        self._main_splitter.setSizes([int(w * 0.58), int(w * 0.42)])
         self._sync_dock_buttons()
 
     def hide_dock(self) -> None:
