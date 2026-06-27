@@ -12,17 +12,24 @@ class ProactiveWorker(QThread):
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
 
-    def __init__(self, model: str, page_text: str, ollama_url: str = "http://localhost:11434"):
-        super().__init__()
+    def __init__(self, model: str, page_text: str, ollama_url: str = "http://localhost:11434", parent=None):
+        super().__init__(parent)
         self.model = model
         self.page_text = page_text
         self.ollama_url = ollama_url
+        self._is_cancelled = False
 
-    def run(self):
-        if not self.model:
-            self.error.emit("Nenhum modelo suportado pelo hardware.")
-            return
+    def cancel(self):
+        """Cancelamento cooperativo: o resultado em andamento será descartado.
 
+        Não interrompe a requisição HTTP em curso (que termina por conta própria
+        ou por timeout), mas garante que nenhum sinal seja emitido após o
+        cancelamento — evitando o uso inseguro de QThread.terminate().
+        """
+        self._is_cancelled = True
+
+    def _build_payload(self) -> dict:
+        """Monta o payload do /api/chat. Isolado para ser testável."""
         prompt = (
             "Você é um Assistente Proativo de Leitura discreto e útil. "
             "Sua tarefa é analisar o trecho fornecido e gerar UMA ÚNICA observação curta (1 a 4 frases). "
@@ -35,18 +42,26 @@ class ProactiveWorker(QThread):
             f"Trecho para análise:\n{self.page_text}"
         )
 
-        messages = [{"role": "user", "content": prompt}]
-        
-        payload_dict = {
+        return {
             "model": self.model,
-            "messages": messages,
+            "messages": [{"role": "user", "content": prompt}],
             "stream": False,
-            "options": {"temperature": 0.2, "num_predict": 4096}
+            # Structured output do Ollama: garante JSON válido na resposta,
+            # tornando o parsing robusto sem depender de limpeza de markdown.
+            "format": "json",
+            # A observação é curta (1-4 frases); 256 tokens é folgado e evita
+            # reservar 4096 tokens à toa (geração mais rápida, libera o modelo).
+            "options": {"temperature": 0.2, "num_predict": 256},
         }
 
-        payload = json.dumps(payload_dict).encode("utf-8")
+    def run(self):
+        if not self.model:
+            self.error.emit("Nenhum modelo suportado pelo hardware.")
+            return
+
+        payload = json.dumps(self._build_payload()).encode("utf-8")
         endpoint = f"{self.ollama_url.rstrip('/')}/api/chat"
-        
+
         try:
             req = urllib.request.Request(
                 endpoint,
@@ -57,14 +72,15 @@ class ProactiveWorker(QThread):
             with urllib.request.urlopen(req, timeout=45) as resp:
                 raw_resp = resp.read()
                 data = json.loads(raw_resp)
-            
+
             content = data.get("message", {}).get("content", "").strip()
-            
+
             # DEBUG
             if not content:
                 logger.error(f"Ollama Raw Response: {raw_resp.decode('utf-8', errors='ignore')}")
-            
-            # Limpa formatação markdown se o modelo ignorou a restrição
+
+            # Rede de segurança: limpa formatação markdown caso o modelo a inclua
+            # mesmo com format=json.
             if content.startswith("```json"):
                 content = content[7:]
             elif content.startswith("```"):
@@ -72,24 +88,28 @@ class ProactiveWorker(QThread):
             if content.endswith("```"):
                 content = content[:-3]
             content = content.strip()
-            
+
             if not content:
                 raise ValueError("Resposta vazia da IA (conteúdo em branco)")
-            
-            import re
+
             # Se ainda houver lixo antes/depois, tenta achar o primeiro '{' e último '}'
             start_idx = content.find('{')
             end_idx = content.rfind('}')
             if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                content = content[start_idx:end_idx+1]
-                
+                content = content[start_idx:end_idx + 1]
+
             obs = json.loads(content)
-            
+
             if "tipo" not in obs or "confianca" not in obs or "texto" not in obs:
                 raise ValueError("JSON incompleto")
-                
+
+            if self._is_cancelled:
+                return  # usuário avançou de página/cancelou: descarta o resultado
+
             self.finished.emit(obs)
-            
+
         except Exception as exc:
             logger.error(f"Erro no ProactiveWorker: {exc}")
+            if self._is_cancelled:
+                return
             self.error.emit(str(exc))

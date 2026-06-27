@@ -16,7 +16,7 @@ from src.gui.widgets.annotation_panel import AnnotationPanel
 from src.gui.widgets.search_overlay import DocumentSearchBar
 from src.gui.styles import get_reader_css
 from src.gui.widgets.proactive_footer import ProactiveFooterWidget
-from src.core.proactive_reader_service import ProactiveReaderService
+from src.gui.proactive_reader_service import ProactiveReaderService
 from PyQt6.QtWidgets import QComboBox
 
 
