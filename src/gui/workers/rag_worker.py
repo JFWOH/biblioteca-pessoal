@@ -120,6 +120,7 @@ class RAGWorker(QThread):
 
     def _run_index_book(self) -> None:
         """Indexa um único livro com tratamento robusto de erros."""
+        self._engine.reset_cancel()
         if self._book_id is None:
             self.error_occurred.emit("book_id não fornecido para indexação.")
             return
@@ -143,6 +144,7 @@ class RAGWorker(QThread):
 
     def _run_index_all(self) -> None:
         """Reindexação completa da biblioteca com progresso e contagem de skips."""
+        self._engine.reset_cancel()
         import sqlite3
         conn = sqlite3.connect(str(self._engine._db_path))
         try:

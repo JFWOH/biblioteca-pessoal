@@ -405,6 +405,7 @@ class RAGEngine:
 
     def index_all_books(self) -> dict[int, int]:
         """Re-indexa todos os livros da biblioteca (delegado para o DocumentIndexerService)."""
+        self.reset_cancel()
         from src.core.document_indexer_service import DocumentIndexerService
         from src.core.database import LibraryDB
         db = LibraryDB(str(self._db_path))
@@ -665,4 +666,14 @@ class RAGEngine:
     def cancel(self) -> None:
         """Sinaliza cancelamento da operação em andamento."""
         self._cancelled = True
+
+    def reset_cancel(self) -> None:
+        """Limpa o sinal de cancelamento antes de iniciar uma nova operação.
+
+        O engine é um singleton compartilhado pelo MainWindow. Sem este reset,
+        um único cancelamento (Stop) deixaria ``_cancelled=True`` para sempre,
+        abortando toda query e indexação seguintes até reiniciar o aplicativo.
+        Deve ser chamado no início de cada operação iniciada pelo usuário.
+        """
+        self._cancelled = False
 

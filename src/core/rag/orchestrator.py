@@ -685,6 +685,10 @@ class Orchestrator:
         ui_mutation_callback: Optional[callable] = None,
     ) -> Generator[str, None, None]:
         """Pipeline RAG Agentic com streaming de tokens e controle por AgentState + PolicyEngine."""
+        # Limpa qualquer sinal de cancelamento remanescente de uma operação anterior.
+        # O engine é singleton; sem este reset, um único "Stop" deixaria toda query
+        # seguinte abortando imediatamente até reiniciar o aplicativo.
+        self.engine.reset_cancel()
         session_id = str(uuid.uuid4())
         trace_logger = TraceLogger(session_id)
         trace_logger.emit("query_started", step=0, query=question, book_id=book_id)
@@ -749,10 +753,44 @@ class Orchestrator:
 
         while state.is_budget_ok():
             state.current_round += 1
-            
+
+            # Streaming real: consome a resposta do Ollama token a token. Conteúdo
+            # textual é repassado imediatamente (TTFT real, sem atraso artificial);
+            # eventuais tool_calls são acumulados ao longo da stream.
+            content_parts: list[str] = []
+            tool_calls: list = []
+            done_reason = ""
+            answer_streaming_started = False
             try:
-                with self._call_chat_api(messages, stream=False, temperature=0.1) as resp:
-                    data = json.loads(resp.read())
+                with self._call_chat_api(messages, stream=True, temperature=0.1) as resp:
+                    for line in resp:
+                        if self.engine._cancelled:
+                            trace_logger.emit("early_exit", step=state.current_round, reason="cancelled")
+                            trace_logger.emit("query_completed", step=state.current_round + 1, reason="cancelled")
+                            return
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line.decode("utf-8"))
+                        except (json.JSONDecodeError, AttributeError, UnicodeDecodeError):
+                            continue
+
+                        msg = chunk.get("message", {}) or {}
+                        if msg.get("tool_calls"):
+                            tool_calls.extend(msg["tool_calls"])
+
+                        token = msg.get("content", "")
+                        # Só transmite conteúdo enquanto a rodada não for de ferramenta.
+                        if token and not tool_calls:
+                            if not answer_streaming_started:
+                                trace_logger.emit("final_answer_started", step=state.current_round, round_num=state.current_round)
+                                answer_streaming_started = True
+                            content_parts.append(token)
+                            yield token
+
+                        if chunk.get("done"):
+                            done_reason = chunk.get("done_reason", "")
+                            break
             except Exception as exc:
                 err_msg = f"Falha ao contactar o assistente: {exc}"
                 trace_logger.emit("error", step=state.current_round, error_type="LLMError", error_message=err_msg, round_num=state.current_round)
@@ -760,30 +798,20 @@ class Orchestrator:
                 yield f"\n⚠️ {err_msg}"
                 return
 
-            message = data.get("message", {})
+            content = "".join(content_parts)
 
-            if not message.get("tool_calls"):
-                content = message.get("content", "")
-                done_reason = data.get("done_reason", "")
-                if content:
-                    trace_logger.emit("final_answer_started", step=state.current_round, round_num=state.current_round)
-                    import time
-                    for char in content:
-                        if self.engine._cancelled:
-                            trace_logger.emit("early_exit", step=state.current_round, reason="cancelled")
-                            trace_logger.emit("query_completed", step=state.current_round + 1, reason="cancelled")
-                            return
-                        yield char
-                        time.sleep(0.003)
+            # Caso 1: resposta final (sem chamadas de ferramenta) — já foi transmitida.
+            if not tool_calls:
+                if answer_streaming_started:
                     trace_logger.emit("final_answer_completed", step=state.current_round, round_num=state.current_round, payload={"length": len(content)})
-                
-                # Tratamento de continuação
+
+                # Tratamento de continuação (resposta truncada por limite de tokens)
                 if done_reason == "length" and getattr(state, "continuation_count", 0) < 1:
                     state.continuation_count = getattr(state, "continuation_count", 0) + 1
-                    messages.append(message)
+                    messages.append({"role": "assistant", "content": content})
                     messages.append({"role": "user", "content": "Continue exatamente de onde parou."})
                     logger.info("Continuação transparente acionada no round %d", state.current_round)
-                    continue  # Continua no loop while budget_ok, fará nova chamada sem tool_calls
+                    continue  # Nova chamada no loop while budget_ok
 
                 payload = {
                     "sources_used": list(state.sources_used),
@@ -797,10 +825,11 @@ class Orchestrator:
                 trace_logger.emit("query_completed", step=state.current_round + 1, payload=payload)
                 return
 
-            messages.append(message)
+            # Caso 2: o modelo solicitou ferramentas nesta rodada.
+            messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
             round_outputs = []
-            
-            for tool_call in message["tool_calls"]:
+
+            for tool_call in tool_calls:
                 if self.engine._cancelled:
                     trace_logger.emit("early_exit", step=state.current_round, reason="cancelled")
                     trace_logger.emit("query_completed", step=state.current_round + 1, reason="cancelled")
@@ -816,7 +845,7 @@ class Orchestrator:
                         args = {}
 
                 yield f"\n[⚙️ {fn_name}(...)…]\n"
-                
+
                 tool_result_str = self._execute_tool_orchestrated(
                     fn_name,
                     args,
@@ -840,7 +869,7 @@ class Orchestrator:
                 logger.info("Early-Exit ativado no loop de streaming (rodada %d).", state.current_round)
                 trace_logger.emit("early_exit", step=state.current_round, reason="resultados_identicos", round_num=state.current_round)
                 break
-            
+
             state.last_result_hash = digest
 
         yield "\n[⚠️ Limite de rodadas de ferramentas atingido — gerando resposta final...]\n"

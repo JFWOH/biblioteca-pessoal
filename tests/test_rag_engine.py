@@ -286,6 +286,25 @@ class TestRAGEngineIndexing:
         assert call_count == 1
         assert call_count == 1
 
+    def test_index_all_resets_cancel_flag(self, mock_engine):
+        """Regressão (Item 1): após um cancelamento anterior, uma nova reindexação
+        completa deve rodar do início — index_all_books reseta _cancelled."""
+        mock_engine._cancelled = True  # cancelamento pendente de uma operação anterior
+        call_count = 0
+
+        def fake_index(book_id, force=False):
+            nonlocal call_count
+            call_count += 1
+            return 1
+
+        with patch.object(mock_engine, "is_ollama_available", return_value=True):
+            with patch("src.core.document_indexer_service.DocumentIndexerService.index_book", side_effect=fake_index):
+                mock_engine.index_all_books()
+
+        # Sem o reset, o loop abortaria de imediato (call_count == 0).
+        assert mock_engine._cancelled is False
+        assert call_count == 3  # todos os 3 livros do banco de teste foram indexados
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TestRAGEngineSearch
@@ -360,16 +379,17 @@ class TestRAGEngineRAG:
         assert "indexados" in tokens[0].lower() or "índice" in tokens[0].lower() or "index" in tokens[0].lower()
 
     def test_query_rag_yields_streaming_tokens(self, mock_engine):
-        """Com documentos e Ollama mockado, deve yield tokens."""
+        """Com documentos e Ollama mockado, deve yield tokens via streaming real."""
+        # Stream NDJSON estilo Ollama: cada linha é um chunk; a última traz done=True.
+        stream_lines = [
+            json.dumps({"message": {"role": "assistant", "content": "Dom "}}).encode("utf-8"),
+            json.dumps({"message": {"content": "Casmurro "}}).encode("utf-8"),
+            json.dumps({"message": {"content": "é um clássico."}, "done": True, "done_reason": "stop"}).encode("utf-8"),
+        ]
         mock_resp = MagicMock()
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_resp.read.return_value = json.dumps({
-            "message": {
-                "role": "assistant",
-                "content": "Dom Casmurro é um clássico."
-            }
-        }).encode("utf-8")
+        mock_resp.__iter__ = lambda s: iter(stream_lines)
 
         with patch.object(mock_engine, "is_ollama_available", return_value=True):
             mock_engine.index_book(1)
@@ -379,6 +399,8 @@ class TestRAGEngineRAG:
         result_text = "".join(tokens)
         assert "Dom" in result_text
         assert "Casmurro" in result_text
+        # Streaming real: o conteúdo chega em múltiplos tokens, não num bloco único.
+        assert len([t for t in tokens if t.strip()]) >= 2
 
     def test_query_rag_prompt_contains_context_and_question(self, mock_engine):
         """Valida que o prompt enviado ao Ollama contém contexto e pergunta."""
@@ -418,16 +440,18 @@ class TestRAGEngineRAG:
         assert "Quem escreveu Dom Casmurro?" in messages[3]["content"]
 
     def test_query_rag_cancel_stops_streaming(self, mock_engine):
-        """Cancelamento deve interromper o streaming."""
+        """Cancelamento deve interromper o streaming token a token."""
+        stream_lines = [
+            json.dumps({"message": {"content": f"token{i} "}}).encode("utf-8")
+            for i in range(7)
+        ]
+        stream_lines.append(
+            json.dumps({"message": {"content": ""}, "done": True, "done_reason": "stop"}).encode("utf-8")
+        )
         mock_resp = MagicMock()
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_resp.read.return_value = json.dumps({
-            "message": {
-                "role": "assistant",
-                "content": "token0 token1 token2 token3 token4 token5 token6"
-            }
-        }).encode("utf-8")
+        mock_resp.__iter__ = lambda s: iter(stream_lines)
 
         with patch.object(mock_engine, "is_ollama_available", return_value=True):
             mock_engine.index_book(1)
@@ -440,6 +464,29 @@ class TestRAGEngineRAG:
                         mock_engine.cancel()
 
         assert len(tokens) <= 3  # Para logo após o cancelamento
+
+    def test_query_rag_resets_cancel_flag_between_queries(self, mock_engine):
+        """Regressão (Item 1): o engine é singleton; um cancelamento anterior não
+        pode bloquear queries seguintes. query_rag deve resetar _cancelled no início."""
+        stream_lines = [
+            json.dumps({"message": {"content": "resposta ok"}, "done": True, "done_reason": "stop"}).encode("utf-8"),
+        ]
+
+        def make_resp(*args, **kwargs):
+            r = MagicMock()
+            r.__enter__ = lambda s: s
+            r.__exit__ = MagicMock(return_value=False)
+            r.__iter__ = lambda s: iter(stream_lines)
+            return r
+
+        with patch.object(mock_engine, "is_ollama_available", return_value=True):
+            mock_engine.index_book(1)
+            mock_engine._cancelled = True  # simula um cancelamento pendente anterior
+            with patch("urllib.request.urlopen", side_effect=make_resp):
+                tokens = list(mock_engine.query_rag("Pergunta nova após cancelar"))
+
+        assert mock_engine._cancelled is False  # foi resetado no início da nova query
+        assert "resposta ok" in "".join(tokens)  # e a resposta foi de fato gerada
 
 
 # ══════════════════════════════════════════════════════════════════════════════
