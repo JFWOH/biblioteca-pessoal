@@ -358,3 +358,51 @@ class TestOrchestrator:
             assert len(output["data"]) == 1
             assert output["data"][0]["title"] == "Girolamo Cardano"
             assert output["metadata"]["normalized_result_count"] == 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TestConfidenceFromDistances (Item 5)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestConfidenceFromDistances:
+    """Confiança derivada das distâncias reais do Chroma (não mais hardcoded)."""
+
+    def test_identical_distance_zero_gives_full_confidence(self):
+        assert Orchestrator._confidence_from_distances([0.0, 0.0]) == 1.0
+
+    def test_opposite_distance_one_gives_zero_confidence(self):
+        assert Orchestrator._confidence_from_distances([1.0, 1.0]) == 0.0
+
+    def test_mixed_distances_average_similarity(self):
+        # sim = 1-0.2 = 0.8 e 1-0.4 = 0.6 → média 0.7
+        assert Orchestrator._confidence_from_distances([0.2, 0.4]) == 0.7
+
+    def test_distance_above_one_clamped_to_zero(self):
+        # distância 1.5 → sim -0.5 → clamp 0.0; com 0.0 (sim 1.0) → média 0.5
+        assert Orchestrator._confidence_from_distances([0.0, 1.5]) == 0.5
+
+    def test_empty_or_none_falls_back_to_one(self):
+        assert Orchestrator._confidence_from_distances([]) == 1.0
+        assert Orchestrator._confidence_from_distances([None, None]) == 1.0
+        assert Orchestrator._confidence_from_distances([True, False]) == 1.0
+
+    def test_vector_search_confidence_reflects_distance(self):
+        mock_engine = MagicMock()
+        mock_engine.search_similar.return_value = [
+            {"document": "a", "metadata": {"title": "T", "author": "A", "page_number": 0, "book_id": 1}, "distance": 0.1},
+            {"document": "b", "metadata": {"title": "T", "author": "A", "page_number": 1, "book_id": 1}, "distance": 0.3},
+        ]
+        orch = Orchestrator(mock_engine)
+        out = orch.execute_vector_search("q", book_id=1)
+        # sim 0.9 e 0.7 → média 0.8 (antes era hardcoded 1.0)
+        assert out["status"] == "success"
+        assert out["confidence_score"] == 0.8
+
+    def test_vector_search_without_distance_defaults_full(self):
+        mock_engine = MagicMock()
+        mock_engine.search_similar.return_value = [
+            {"document": "a", "metadata": {"title": "T", "author": "A", "page_number": 0, "book_id": 1}},
+        ]
+        orch = Orchestrator(mock_engine)
+        out = orch.execute_vector_search("q", book_id=1)
+        assert out["confidence_score"] == 1.0

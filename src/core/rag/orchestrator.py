@@ -147,11 +147,12 @@ class Orchestrator:
                 }
                 for h in hits
             ]
+            confidence = self._confidence_from_distances([h.get("distance") for h in hits])
             return create_tool_output(
                 status="success",
                 data=data,
                 provenance="local",
-                confidence=1.0
+                confidence=confidence
             )
         except Exception as exc:
             logger.warning("vector_search falhou, iniciando fallback para keyword_search: %s", exc)
@@ -381,6 +382,7 @@ class Orchestrator:
                 formatted = []
                 docs = (res.get("documents") or [[]])[0]
                 metas = (res.get("metadatas") or [[]])[0]
+                dists = (res.get("distances") or [[]])[0]
                 for doc, meta in zip(docs, metas):
                     formatted.append({
                         "text": doc,
@@ -393,10 +395,14 @@ class Orchestrator:
                     status="success",
                     data=formatted,
                     provenance="local",
-                    confidence=1.0
+                    confidence=self._confidence_from_distances(list(dists))
                 )
             else:
                 hits = self.engine.search_similar(topic, n_results=5)
+                filtered_hits = [
+                    h for h in hits
+                    if h["metadata"].get("book_id") != current_book_id
+                ]
                 formatted = [
                     {
                         "text": h["document"],
@@ -405,14 +411,13 @@ class Orchestrator:
                         "author": h["metadata"].get("author", ""),
                         "book_id": h["metadata"].get("book_id"),
                     }
-                    for h in hits
-                    if h["metadata"].get("book_id") != current_book_id
+                    for h in filtered_hits
                 ]
                 return create_tool_output(
                     status="success",
                     data=formatted,
                     provenance="local",
-                    confidence=0.8
+                    confidence=self._confidence_from_distances([h.get("distance") for h in filtered_hits])
                 )
         except Exception as exc:
             logger.error("cross_reference falhou: %s", exc)
@@ -425,6 +430,24 @@ class Orchestrator:
                 error_message=str(exc),
                 confidence=0.0
             )
+
+    @staticmethod
+    def _confidence_from_distances(distances: List[Any]) -> float:
+        """Deriva um score de confiança [0,1] das distâncias de cosseno do Chroma.
+
+        Distância de cosseno: 0 = idêntico, ~2 = oposto → similaridade = 1 - d
+        (limitada a [0,1]). A confiança é a média das similaridades dos hits
+        retornados. Sem distâncias válidas (ex.: provedor sem esse campo),
+        retorna 1.0 para preservar o comportamento anterior.
+        """
+        sims = [
+            max(0.0, min(1.0, 1.0 - d))
+            for d in distances
+            if isinstance(d, (int, float)) and not isinstance(d, bool)
+        ]
+        if not sims:
+            return 1.0
+        return round(sum(sims) / len(sims), 3)
 
     def compute_results_digest(self, outputs: List[ToolOutput]) -> str:
         """Computa um hash MD5 determinista sobre os dados das ferramentas.
