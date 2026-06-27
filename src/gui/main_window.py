@@ -772,10 +772,12 @@ class MainWindow(QMainWindow):
 
     def _show_rag_panel(self) -> None:
         """Navega para o painel do Assistente IA (visão cheia)."""
-        # Se estiver ancorado no leitor, devolve para a stack principal
+        # Se estiver ancorado no dock do leitor, devolve para a stack principal
         if self._rag_panel.parentWidget() != self._main_stack:
-            self._main_stack.insertWidget(3, self._rag_panel)
+            if hasattr(self._reader_view, "_dock") and self._reader_view._dock.has_tab("assistant"):
+                self._reader_view._dock.remove_tab("assistant")
             self._reader_view._ai_panel_container = None
+            self._main_stack.insertWidget(3, self._rag_panel)
             self._reader_view._ai_panel_btn.setChecked(False)
 
         self._sidebar.show()

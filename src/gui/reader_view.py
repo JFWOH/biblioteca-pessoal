@@ -18,6 +18,7 @@ from src.gui.widgets.search_overlay import DocumentSearchBar
 from src.gui.styles import get_reader_css
 from src.gui.widgets.proactive_footer import ProactiveFooterWidget
 from src.gui.widgets.selection_popover import SelectionActionPopover
+from src.gui.widgets.reader_dock import ReaderDock
 from src.gui.proactive_reader_service import ProactiveReaderService
 from PyQt6.QtWidgets import QComboBox
 
@@ -366,18 +367,16 @@ class ReaderView(QWidget):
         self._web_view.customContextMenuRequested.connect(self._on_epub_context_menu)
 
         splitter.addWidget(self._content_stack)
+        splitter.setStretchFactor(1, 1)  # área de leitura expande; TOC fica no seu max
 
-        # Painel de anotações (inicialmente oculto)
+        # Painel de anotações — agora vive no dock à direita (não mais inline),
+        # liberando largura para a leitura.
         self._annotation_panel = AnnotationPanel()
-        self._annotation_panel.hide()
         self._annotation_panel.annotation_added.connect(self._on_annotation_added)
         self._annotation_panel.annotation_deleted.connect(
             lambda ann_id: self.annotation_deleted.emit(ann_id)
         )
         self._annotation_panel.goto_page.connect(self._go_to_page)
-        splitter.addWidget(self._annotation_panel)
-
-        splitter.setStretchFactor(2, 0)  # Anotações fixo
 
         left_layout.addWidget(splitter, stretch=1)
 
@@ -403,7 +402,16 @@ class ReaderView(QWidget):
         # Adiciona o painel esquerdo ao splitter principal
         self._main_splitter.addWidget(self._left_pane)
 
-        # O painel direito (IA) será injetado depois
+        # Dock único à direita: abas recolhíveis (Anotações / Assistente),
+        # exibindo um painel por vez para maximizar o espaço de leitura.
+        self._dock = ReaderDock()
+        self._dock.add_tab("annotations", "📝 Anotações", self._annotation_panel)
+        self._dock.closed.connect(self.hide_dock)
+        self._dock.tab_changed.connect(lambda _k: self._sync_dock_buttons())
+        self._main_splitter.addWidget(self._dock)
+        self._dock.hide()
+
+        # O painel do Assistente (RAGPanel) é injetado no dock depois (set_ai_panel).
         self._ai_panel_container = None
 
         # Popover de ações sobre a seleção (PDF) — alternativa rápida ao clique direito.
@@ -697,6 +705,8 @@ class ReaderView(QWidget):
         # Apply theme to TOC and AnnotationPanel
         self._toc_widget.set_theme(theme)
         self._annotation_panel.set_theme(theme)
+        if hasattr(self, '_dock'):
+            self._dock.set_theme(theme)
         if hasattr(self, '_search_bar') and hasattr(self._search_bar, 'set_theme'):
             self._search_bar.set_theme(theme)
         if hasattr(self, '_proactive_footer') and hasattr(self._proactive_footer, 'set_theme'):
@@ -893,9 +903,11 @@ class ReaderView(QWidget):
             self._go_to_page(self._reader.current_page)
 
     def _toggle_annotations(self):
-        """Mostra/oculta o painel de anotações."""
-        visible = self._annotation_panel.isVisible()
-        self._annotation_panel.setVisible(not visible)
+        """Mostra/oculta a aba de Anotações no dock à direita."""
+        if (not self._dock.isHidden()) and self._dock.current_key() == "annotations":
+            self.hide_dock()
+        else:
+            self._show_dock_tab("annotations")
 
     def _on_annotation_added(self, data: dict):
         """Emite sinal quando uma anotação é adicionada."""
@@ -999,45 +1011,64 @@ class ReaderView(QWidget):
     # ── Integração RAG Lado a Lado ───────────────────────────────────────────
 
     def set_ai_panel(self, ai_panel: QWidget) -> None:
-        """Injeta o RAGPanel no layout do leitor."""
-        if self._ai_panel_container is not None:
-            return  # Já foi injetado
-            
+        """Injeta o RAGPanel como aba 'Assistente' no dock do leitor."""
+        if self._dock.has_tab("assistant"):
+            return  # Já injetado
+
         self._ai_panel_container = ai_panel
-        self._main_splitter.addWidget(self._ai_panel_container)
-        self._ai_panel_container.hide()
-        
-        # Conecta o sinal de fechar do painel
-        if hasattr(self._ai_panel_container, 'close_requested'):
-            self._ai_panel_container.close_requested.connect(self.hide_ai_panel)
-            
-        if hasattr(self._ai_panel_container, 'set_standalone_mode'):
-            self._ai_panel_container.set_standalone_mode(False)
+        self._dock.add_tab("assistant", "💬 Assistente", ai_panel)
+        # Mantém Anotações como aba padrão ao injetar (não rouba foco).
+        if self._dock.has_tab("annotations"):
+            self._dock.show_tab("annotations")
+
+        # Conecta o sinal de fechar do painel (evita conexão duplicada).
+        if hasattr(ai_panel, 'close_requested'):
+            try:
+                ai_panel.close_requested.disconnect(self.hide_dock)
+            except (TypeError, RuntimeError):
+                pass
+            ai_panel.close_requested.connect(self.hide_dock)
+
+        if hasattr(ai_panel, 'set_standalone_mode'):
+            ai_panel.set_standalone_mode(False)
+
+    def _show_dock_tab(self, key: str) -> None:
+        """Exibe o dock e seleciona a aba indicada."""
+        self._dock.show_tab(key)
+        self._dock.show()
+        w = self.width()
+        self._main_splitter.setSizes([int(w * 0.66), int(w * 0.34)])
+        self._sync_dock_buttons()
+
+    def hide_dock(self) -> None:
+        """Recolhe o dock à direita."""
+        self._dock.hide()
+        self._sync_dock_buttons()
+
+    def _sync_dock_buttons(self) -> None:
+        """Sincroniza os toggles da toolbar (Anotações/Assistente) com o dock."""
+        visible = (not self._dock.isHidden())
+        key = self._dock.current_key() if visible else None
+        self._annotations_btn.setChecked(bool(visible and key == "annotations"))
+        self._ai_panel_btn.setChecked(bool(visible and key == "assistant"))
 
     def _toggle_ai_panel(self) -> None:
-        """Abre ou fecha o painel do assistente via botão da toolbar."""
-        if self._ai_panel_container is None:
+        """Abre/fecha a aba do assistente no dock via botão da toolbar."""
+        if self._ai_panel_container is None or not self._dock.has_tab("assistant"):
             return
-            
-        if self._ai_panel_btn.isChecked():
-            self.show_ai_panel()
+        if (not self._dock.isHidden()) and self._dock.current_key() == "assistant":
+            self.hide_dock()
         else:
-            self.hide_ai_panel()
+            self.show_ai_panel()
 
     def show_ai_panel(self) -> None:
-        """Expande o painel do assistente no QSplitter."""
-        if self._ai_panel_container:
-            self._ai_panel_container.show()
-            self._ai_panel_btn.setChecked(True)
-            # Dá 30% da largura pro RAG Panel
-            w = self.width()
-            self._main_splitter.setSizes([int(w * 0.7), int(w * 0.3)])
+        """Exibe o dock na aba do assistente."""
+        if self._ai_panel_container and self._dock.has_tab("assistant"):
+            self._show_dock_tab("assistant")
 
     def hide_ai_panel(self) -> None:
-        """Oculta o painel do assistente no QSplitter."""
-        if self._ai_panel_container:
-            self._ai_panel_container.hide()
-            self._ai_panel_btn.setChecked(False)
+        """Compat.: recolhe o dock (usado ao fechar o leitor / iniciar livro)."""
+        self.hide_dock()
 
     # ── Controle ───────────────────────────────────────────────────────────────
     
