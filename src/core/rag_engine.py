@@ -13,9 +13,34 @@ from typing import Generator, Iterator
 
 logger = logging.getLogger(__name__)
 
+# ── Retry de embeddings (resiliência a esgotamento de portas no Windows) ────────
+_EMBED_MAX_ATTEMPTS = 4
+_TRANSIENT_NET_MARKERS = (
+    "only one usage of each socket address",  # WinError 10048 (portas efêmeras)
+    "health resp",
+    "dial tcp",
+    "10048",
+    "connection reset",
+    "actively refused",
+    "forcibly closed",
+)
+
+
+def _is_transient_net_error(text: str) -> bool:
+    """Heurística para erros de rede transitórios.
+
+    Em reindexações grandes no Windows, a rajada de conexões HTTP curtas ao Ollama
+    pode esgotar as portas efêmeras (WinError 10048), e o próprio Ollama falha ao
+    "discar" para seu runner interno (retornando HTTP 400 com 'health resp'). São
+    erros passageiros que se resolvem com um curto backoff + retry.
+    """
+    t = (text or "").lower()
+    return any(m in t for m in _TRANSIENT_NET_MARKERS)
+
+
 # ── Constantes de configuração ─────────────────────────────────────────────────
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
-DEFAULT_EMBED_MODEL = "nomic-embed-text"
+DEFAULT_EMBED_MODEL = "bge-m3"
 DEFAULT_LLM_MODEL = "gemma4:e4b"
 DEFAULT_CHROMA_PATH = "data/chroma_db"
 DEFAULT_CHUNK_SIZE = 1000
@@ -221,7 +246,7 @@ class RAGEngine:
             )
             self._collection = self._chroma_client.get_or_create_collection(
                 name=_COLLECTION_NAME,
-                metadata={"hnsw:space": "cosine"},
+                metadata={"hnsw:space": "cosine", "embed_model": self._embed_model},
             )
             logger.info("ChromaDB inicializado em: %s", self._chroma_path)
         except Exception as exc:
@@ -278,6 +303,50 @@ class RAGEngine:
             return self._collection.count()
         except Exception:
             return 0
+
+    # ── Migração de modelo de embeddings ───────────────────────────────────────
+
+    def _stored_embed_model(self) -> str | None:
+        """Modelo de embeddings com que a collection atual foi construída (metadata)."""
+        if self._collection is None:
+            return None
+        try:
+            return (self._collection.metadata or {}).get("embed_model")
+        except Exception:
+            return None
+
+    def needs_reindex(self) -> bool:
+        """True se o índice vetorial foi construído com outro modelo de embeddings.
+
+        Trocar o modelo muda a dimensão dos vetores (ex.: nomic=768 → bge-m3=1024),
+        tornando a collection existente incompatível. Enquanto não reindexar, as
+        buscas vetoriais devem ser bloqueadas com mensagem clara (nunca crashar com
+        erro bruto de dimensão do Chroma).
+        """
+        if self._collection is None:
+            return False
+        if self.get_indexed_count() == 0:
+            return False
+        return self._stored_embed_model() != self._embed_model
+
+    def reset_collection(self) -> None:
+        """Apaga e recria a collection vetorial (usado ao trocar o modelo de embeddings).
+
+        A dimensão de uma collection Chroma é fixada no primeiro vetor inserido; por
+        isso, ao mudar de modelo, é preciso recriar a collection do zero (não basta
+        esvaziar). O `embed_model` é gravado na metadata para detecção futura.
+        """
+        if self._chroma_client is None:
+            return
+        try:
+            self._chroma_client.delete_collection(_COLLECTION_NAME)
+        except Exception as exc:
+            logger.warning("Falha ao apagar collection para reindex: %s", exc)
+        self._collection = self._chroma_client.get_or_create_collection(
+            name=_COLLECTION_NAME,
+            metadata={"hnsw:space": "cosine", "embed_model": self._embed_model},
+        )
+        logger.info("Collection vetorial recriada para o modelo '%s'.", self._embed_model)
 
     # ── Embeddings via Ollama ──────────────────────────────────────────────────
 
@@ -354,11 +423,17 @@ class RAGEngine:
         )
 
     def _get_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
-        """Gera múltiplos embeddings em uma única requisição."""
+        """Gera múltiplos embeddings em uma única requisição.
+
+        Resiliente a erros de rede transitórios (ex.: esgotamento de portas
+        efêmeras no Windows durante reindexações grandes): tenta novamente com
+        backoff exponencial curto antes de desistir.
+        """
         import json
         import urllib.request
         import urllib.error
         import socket
+        import time
 
         if ":" not in self._embed_model:
             exact_embed = self.get_exact_model_name(self._embed_model)
@@ -369,30 +444,48 @@ class RAGEngine:
             "model": self._embed_model,
             "input": texts,
         }).encode()
-        
-        req = urllib.request.Request(
-            f"{self._ollama_url}/api/embed",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        
-        try:
-            # Tempo limite maior para lotes (e.g. 50 chunks)
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                data = json.loads(resp.read())
-            embeddings = data.get("embeddings")
-            if embeddings and len(embeddings) == len(texts):
-                return embeddings
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                # O Ollama antigo não tem /api/embed, apenas /api/embeddings que não aceita lotes de forma trivial.
-                raise NotImplementedError("Batching não é suportado nesta versão do Ollama (requer endpoint /api/embed).")
-            else:
-                error_body = e.read().decode('utf-8')
+
+        for attempt in range(1, _EMBED_MAX_ATTEMPTS + 1):
+            req = urllib.request.Request(
+                f"{self._ollama_url}/api/embed",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                # Tempo limite maior para lotes (e.g. 50 chunks)
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    data = json.loads(resp.read())
+                embeddings = data.get("embeddings")
+                if embeddings and len(embeddings) == len(texts):
+                    return embeddings
+                raise ValueError("Ollama não retornou embeddings para o lote inteiro.")
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    # O Ollama antigo não tem /api/embed, apenas /api/embeddings que não aceita lotes de forma trivial.
+                    raise NotImplementedError("Batching não é suportado nesta versão do Ollama (requer endpoint /api/embed).")
+                error_body = ""
+                try:
+                    error_body = e.read().decode("utf-8")
+                except Exception:
+                    pass
+                if _is_transient_net_error(error_body) and attempt < _EMBED_MAX_ATTEMPTS:
+                    logger.warning(
+                        "Embedding em lote: erro transitório do Ollama (tentativa %d/%d), aguardando…: %s",
+                        attempt, _EMBED_MAX_ATTEMPTS, error_body[:120],
+                    )
+                    time.sleep(min(2 ** attempt, 10))
+                    continue
                 raise RuntimeError(f"Ollama retornou erro HTTP {e.code} ao gerar lote de embeddings: {error_body}") from e
-        except (TimeoutError, urllib.error.URLError, socket.timeout, ConnectionError) as e:
-            raise TimeoutError(f"Ollama não respondeu em 120s ao gerar lote de embeddings. {str(e)}")
+            except (TimeoutError, urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
+                if attempt < _EMBED_MAX_ATTEMPTS:
+                    logger.warning(
+                        "Embedding em lote: conexão transitória (tentativa %d/%d), aguardando…: %s",
+                        attempt, _EMBED_MAX_ATTEMPTS, str(e)[:120],
+                    )
+                    time.sleep(min(2 ** attempt, 10))
+                    continue
+                raise TimeoutError(f"Ollama não respondeu ao gerar lote de embeddings após {attempt} tentativas. {str(e)}")
 
         raise ValueError("Ollama não retornou embeddings para o lote inteiro.")
 
@@ -446,6 +539,12 @@ class RAGEngine:
         """
         if not self.is_ollama_available():
             raise RuntimeError("Ollama não está disponível para gerar embeddings.")
+
+        if self.needs_reindex():
+            raise RuntimeError(
+                f"Índice vetorial desatualizado: foi construído com outro modelo de "
+                f"embeddings. Reindexe a biblioteca para usar '{self._embed_model}'."
+            )
 
         if self._collection.count() == 0:
             return []
@@ -519,7 +618,7 @@ class RAGEngine:
 
         # 2. SQLite: busca nas anotações
         try:
-            conn = self._open_db()
+            conn = sqlite3.connect(str(self._db_path))
             try:
                 if book_id:
                     rows = conn.execute(

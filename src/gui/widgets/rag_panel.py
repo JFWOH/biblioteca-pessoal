@@ -414,7 +414,7 @@ class RAGPanel(QWidget):
         self._tips_text = QLabel(
             "• Indexe sua biblioteca antes de perguntar\n"
             "• Funciona com Ollama rodando localmente\n"
-            "• Modelos: nomic-embed-text + gemma4:e4b"
+            "• Modelos: bge-m3 + gemma4:e4b"
         )
         self._tips_text.setWordWrap(True)
         tips_layout.addWidget(self._tips_text)

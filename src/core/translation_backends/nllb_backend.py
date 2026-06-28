@@ -29,6 +29,29 @@ class NLLBBackend:
     def is_loaded(self) -> bool:
         return self._is_loaded
 
+    @staticmethod
+    def _select_device(torch) -> str:
+        """Escolhe 'cuda' apenas se a GPU for suportada por esta build do torch.
+
+        GPUs novas (ex.: Blackwell/sm_120) são detectadas por
+        torch.cuda.is_available(), mas não têm kernels compilados nesta build,
+        o que quebra a inferência em runtime. Nesse caso caímos para CPU
+        (degradação graciosa, ADR-005).
+        """
+        if not torch.cuda.is_available():
+            return "cpu"
+        try:
+            major, minor = torch.cuda.get_device_capability()
+            sm = f"sm_{major}{minor}"
+            if sm not in torch.cuda.get_arch_list():
+                logger.warning(
+                    f"GPU {sm} não suportada por esta build do torch; usando CPU."
+                )
+                return "cpu"
+        except Exception:
+            return "cpu"
+        return "cuda"
+
     def _load_model_lazy(self):
         """Carrega o modelo apenas quando a primeira tradução for solicitada."""
         if self._is_loaded:
@@ -49,13 +72,9 @@ class NLLBBackend:
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
 
             logger.info(f"Carregando modelo {self.model_id}...")
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            device = self._select_device(torch)
 
-            self._model = AutoModelForSeq2SeqLM.from_pretrained(
-                self.model_id,
-                dtype=torch.float32,
-                low_cpu_mem_usage=True
-            ).to(device)
+            self._model = AutoModelForSeq2SeqLM.from_pretrained(self.model_id).to(device)
 
             self._device = device
             self._is_loaded = True

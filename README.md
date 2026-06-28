@@ -55,18 +55,68 @@ Gerenciador de biblioteca pessoal e leitor multi-formato sofisticado, desenvolvi
 git clone <repo-url>
 cd Biblioteca-pessoal
 
-# Crie o ambiente virtual
-python -m venv venv
-
-# Ative o ambiente (Windows)
-venv\Scripts\activate
+# Crie o ambiente virtual (use o Python 3.11 do sistema)
+C:\Users\jefer\AppData\Local\Programs\Python\Python311\python.exe -m venv venv
 
 # Instale as dependências
-pip install -r requirements.txt
+venv\Scripts\python.exe -m pip install -r requirements.txt
+```
 
-# Execute a aplicação
+### ⚡ Aceleração por GPU (NVIDIA)
+
+Por padrão o `torch` do PyPI roda em CPU. Para ativar a aceleração CUDA — incluindo
+GPUs Blackwell / RTX série 50 (`sm_120`, ex.: RTX 5060 Ti) — instale a build CUDA 12.8
+**a partir do índice oficial do PyTorch** (substitui o torch de CPU):
+
+```powershell
+venv\Scripts\python.exe -m pip install torch==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+```
+
+> O download é grande (~2.75 GB, com as bibliotecas CUDA embarcadas). O código detecta a
+> GPU automaticamente (`get_arch_list()`): se a GPU for suportada, tradução (NLLB) e TTS
+> (Kokoro) usam CUDA; caso contrário caem para CPU sem travar (ADR-005). Não é preciso
+> mudar nenhuma configuração.
+>
+> Para reproduzir exatamente a stack GPU validada, use o freeze:
+> `reports/phase_13b3_gpu_lab_requirements.txt`. O conjunto baseado em `cu128` foi
+> homologado com a suíte completa de testes. Alternativa mais à prova de futuro: `cu130`
+> (CUDA 13.0), já que o `cu128` será deprecado a partir do PyTorch 2.12.
+
+## ▶️ Inicialização
+
+A forma mais simples é usar o script de inicialização na raiz do projeto:
+
+```
+iniciar.bat
+```
+
+Ou manualmente no PowerShell:
+
+```powershell
+cd "G:\PROGRAMAS PYTHON\Biblioteca-pessoal"
+.\venv\Scripts\Activate.ps1
 python -m src.main
 ```
+
+> **Importante — múltiplos interpretadores no sistema**
+>
+> Esta máquina tem 5 instalações de Python no PATH:
+>
+> | # | Caminho | Status |
+> |---|---------|--------|
+> | 1 | `G:\PROGRAMAS PYTHON\Biblioteca-pessoal\venv\Scripts\python.exe` | ✅ correto — venv do projeto |
+> | 2 | `H:\PYTHON\assistente-virtual\venv\Scripts\python.exe` | ❌ torch corrompido (WinError 193) |
+> | 3 | `C:\Users\jefer\AppData\Local\Programs\Python\Python311\python.exe` | base do sistema |
+> | 4 | `H:\ANACONDA\python.exe` | Anaconda |
+> | 5 | `C:\Users\jefer\AppData\Local\Microsoft\WindowsApps\python.exe` | stub da Store |
+>
+> **Nunca** rodar `python -m src.main` sem ativar o venv do projeto primeiro — o intérprete de `H:\PYTHON\assistente-virtual\venv` aparece em 2º no PATH global e travará o app com erro de DLL ao importar `torch`.
+>
+> Para verificar qual intérprete está ativo:
+> ```powershell
+> python -c "import sys; print(sys.executable)"
+> # deve retornar: G:\PROGRAMAS PYTHON\Biblioteca-pessoal\venv\Scripts\python.exe
+> ```
 
 ## 📦 Dependências Principais
 

@@ -113,3 +113,76 @@ class AnkiService:
         }
         with open(self.fallback_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(fallback_data, ensure_ascii=False) + "\n")
+
+    def count_pending_fallback(self) -> int:
+        """Número de notas aguardando reenvio na fila de fallback local."""
+        if not os.path.exists(self.fallback_file):
+            return 0
+        try:
+            with open(self.fallback_file, "r", encoding="utf-8") as f:
+                return sum(1 for line in f if line.strip())
+        except OSError:
+            return 0
+
+    def flush_fallback_to_anki(self) -> Dict[str, int]:
+        """Reenvia ao Anki as notas pendentes na fila de fallback (JSONL).
+
+        Notas enviadas com sucesso — ou já existentes no Anki (duplicadas) — saem
+        da fila. Notas vazias/inválidas são descartadas. As que falharem por
+        conexão permanecem na fila para uma próxima tentativa.
+
+        Returns:
+            Dict com contagens: sent, duplicates, dropped, kept, total
+            (sent + duplicates + dropped + kept == total).
+
+        Raises:
+            ConnectionError: Se o AnkiConnect estiver indisponível (fila intocada).
+        """
+        summary = {"sent": 0, "duplicates": 0, "dropped": 0, "kept": 0, "total": 0}
+        if not os.path.exists(self.fallback_file):
+            return summary
+        if not self.is_available():
+            raise ConnectionError("AnkiConnect indisponível — não é possível reenviar a fila.")
+
+        entries: List[dict] = []
+        with open(self.fallback_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    logger.warning("Linha inválida ignorada na fila de fallback do Anki.")
+        summary["total"] = len(entries)
+
+        kept: List[dict] = []
+        for entry in entries:
+            note = {
+                "deckName": entry.get("deckName", "Default"),
+                "modelName": entry.get("modelName", "Basic"),
+                "fields": {"Front": entry.get("front", ""), "Back": entry.get("back", "")},
+                "tags": entry.get("tags") or ["biblioteca-pessoal"],
+            }
+            try:
+                self._invoke("addNote", note=note)
+                summary["sent"] += 1
+            except ConnectionError:
+                # Conexão caiu durante o flush — preserva para retry.
+                kept.append(entry)
+            except Exception as exc:
+                msg = str(exc).lower()
+                if "duplicate" in msg:
+                    summary["duplicates"] += 1  # já existe no Anki → remove da fila
+                elif "empty" in msg:
+                    summary["dropped"] += 1  # nota inválida/vazia → descarta
+                else:
+                    logger.warning("Falha ao reenviar nota da fila do Anki: %s", exc)
+                    kept.append(entry)
+
+        summary["kept"] = len(kept)
+        # Reescreve a fila apenas com o que sobrou (ou esvazia se tudo foi processado).
+        with open(self.fallback_file, "w", encoding="utf-8") as f:
+            for entry in kept:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        return summary

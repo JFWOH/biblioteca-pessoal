@@ -157,6 +157,16 @@ class RAGWorker(QThread):
             self.progress_updated.emit(0, 0, "Nenhum livro para indexar.")
             return
 
+        # Migração de modelo de embeddings: se a collection foi construída com outro
+        # modelo, a dimensão dos vetores mudou — recria a collection antes do loop.
+        # Depois disso, index_book(force=False) reindexa tudo (has_book_indexed=False).
+        try:
+            if self._engine.needs_reindex():
+                self.progress_updated.emit(0, total, "Modelo de embeddings atualizado — recriando índice…")
+                self._engine.reset_collection()
+        except Exception as exc:
+            print(f"[RAGWorker] Falha ao recriar collection na migração: {exc}", flush=True)
+
         total_chunks = 0
         skipped: list[int] = []
 

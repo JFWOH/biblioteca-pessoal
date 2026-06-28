@@ -12,7 +12,7 @@ class TestTranslationWorkerIntegration:
     """Testa se o pipeline worker → callback funciona end-to-end (sem modelo real)."""
 
     def test_successful_translation_emits_result(self, qtbot):
-        from src.core.translation_service import TranslationService
+        from src.gui.translation_service import TranslationService
 
         TranslationService._instance = None
         service = TranslationService.get_instance()
@@ -34,7 +34,7 @@ class TestTranslationWorkerIntegration:
         TranslationService._instance = None
 
     def test_error_in_backend_emits_error_callback(self, qtbot):
-        from src.core.translation_service import TranslationService
+        from src.gui.translation_service import TranslationService
 
         TranslationService._instance = None
         service = TranslationService.get_instance()
@@ -60,7 +60,7 @@ class TestTranslationWorkerIntegration:
 
     def test_worker_cleanup_after_completion(self, qtbot):
         """Verifica que o worker é removido da lista de ativos após terminar."""
-        from src.core.translation_service import TranslationService
+        from src.gui.translation_service import TranslationService
 
         TranslationService._instance = None
         service = TranslationService.get_instance()

@@ -132,6 +132,29 @@ class TestTieredFallback:
         assert len(kokoro.spoken_texts) > 0
         assert len(piper.spoken_texts) == 0
 
+    def test_speak_language_override_reaches_voice_resolution(self):
+        """O override de idioma em speak() deve chegar ao _resolve_voice.
+
+        Garante que narrar texto em inglês resolva uma voz em inglês, em vez de
+        usar sempre o idioma do perfil (pt-BR).
+        """
+        router = TTSRouter()
+        piper = FakeProvider("Piper", "C")
+        router.register_provider(piper)
+        router.set_book_profile(
+            VoiceProfile(role=NarrationRole.BOOK_NARRATOR, preferred_provider="piper")
+        )
+        captured = {}
+        original = router._resolve_voice
+
+        def spy(provider, language, style):
+            captured["language"] = language
+            return original(provider, language, style)
+
+        router._resolve_voice = spy
+        router.speak("texto qualquer", language="en-US")
+        assert captured.get("language") == "en-US"
+
     def test_falls_back_when_preferred_unhealthy(self):
         router = TTSRouter()
         kokoro = FakeProvider("Kokoro", "B", healthy=False)

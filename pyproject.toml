@@ -54,5 +54,13 @@ markers = [
     "slow: marks tests as slow",
     "integration: marks integration tests",
     "requires_ollama: marks tests that require Ollama running",
-    "requires_chromadb: marks tests that require ChromaDB persistence"
+    "requires_chromadb: marks tests that require ChromaDB persistence",
+]
+filterwarnings = [
+    # Fase 13B.1: Supressão de warnings externos (302 ocorrências).
+    # Filtros restritos por módulo — não mascaram warnings internos do projeto.
+    # chromadb/types.py: Pydantic V2.11 model_fields deprecation (301x)
+    "ignore:Accessing the 'model_fields' attribute on the instance is deprecated:DeprecationWarning:chromadb",
+    # opentelemetry: SelectableGroups dict interface deprecation (1x)
+    "ignore:SelectableGroups dict interface is deprecated:DeprecationWarning:opentelemetry",
 ]

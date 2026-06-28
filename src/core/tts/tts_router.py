@@ -205,7 +205,8 @@ class TTSRouter:
 
     def speak(self, text: str,
               role: NarrationRole = NarrationRole.BOOK_NARRATOR,
-              preprocess: bool = True) -> int:
+              preprocess: bool = True,
+              language: Optional[str] = None) -> int:
         """Synthesize and play text with the appropriate voice profile.
 
         This is the main entry point for the GUI/AudioWorker layer.
@@ -214,6 +215,9 @@ class TTSRouter:
             text: Raw text to narrate.
             role: Whether this is book narration or assistant output.
             preprocess: Whether to apply text preprocessing.
+            language: Optional language override (e.g. 'en-US') for voice
+                resolution. When None, uses the profile's language. Lets the
+                caller narrate English text with an English voice.
 
         Returns:
             Number of chunks successfully spoken.
@@ -226,6 +230,9 @@ class TTSRouter:
         profile = (self._book_profile
                    if role == NarrationRole.BOOK_NARRATOR
                    else self._assistant_profile)
+
+        # Idioma efetivo: override do chamador (ex.: texto em inglês) ou o do perfil.
+        effective_language = language or profile.language
 
         # Apply text preprocessing
         if preprocess:
@@ -285,7 +292,7 @@ class TTSRouter:
         # Resolve voice ID dynamically if not explicitly specified or if fallback occurred
         voice_id = profile.voice_id
         if not voice_id or was_fallback:
-            voice_id = self._resolve_voice(provider, profile.language, profile.style)
+            voice_id = self._resolve_voice(provider, effective_language, profile.style)
 
         # Chunk the text for interruptible playback
         from src.core.audio.text_chunker import split_text_for_tts
@@ -382,7 +389,7 @@ class TTSRouter:
                                             logger.info("TTS_ROUTER_FALLBACK_TO_PIPER: Falling back from Kokoro to Piper due to TTFB SLO violation (%.2fs)", ttfb)
                                         state["provider"] = fallback
                                         self._active_provider = fallback
-                                        state["voice_id"] = self._resolve_voice(fallback, profile.language, profile.style)
+                                        state["voice_id"] = self._resolve_voice(fallback, effective_language, profile.style)
                                         raise TTSProviderError("SLO violated, trigger fallback")
                                 state["first_chunk"] = False
                                 
@@ -424,7 +431,7 @@ class TTSRouter:
                                     logger.info("TTS_ROUTER_FALLBACK_TO_PIPER: Falling back from Kokoro to Piper due to TTFB SLO violation (%.2fs)", ttfb)
                                 state["provider"] = fallback
                                 self._active_provider = fallback
-                                state["voice_id"] = self._resolve_voice(fallback, profile.language, profile.style)
+                                state["voice_id"] = self._resolve_voice(fallback, effective_language, profile.style)
                                 logger.info("TTS_ROUTER: Switched to '%s' for next chunks", fallback.name)
                                 raise TTSProviderError("SLO violated, trigger fallback")
  
@@ -450,8 +457,8 @@ class TTSRouter:
                         logger.info("TTS_ROUTER: Switching to fallback '%s' mid-stream", fallback.name)
                         state["provider"] = fallback
                         self._active_provider = fallback
-                        state["voice_id"] = self._resolve_voice(fallback, profile.language, profile.style)
-                        
+                        state["voice_id"] = self._resolve_voice(fallback, effective_language, profile.style)
+
                         if fallback.name.lower() == "pyttsx3":
                             try:
                                 player.wait_until_done()

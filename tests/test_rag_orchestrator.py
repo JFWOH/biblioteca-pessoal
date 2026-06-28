@@ -215,29 +215,33 @@ class TestOrchestrator:
         assert result["rounds_executed"] == 2
         assert len(result["history"]) == 1  # O primeiro round rodou, o segundo causou early-exit antes de comitar a história
 
-    def test_query_reformulation_cardano_offline(self):
-        """1 & 2. Testa _reformulate_query para Cardano com Ollama indisponível (offline)."""
+    def test_query_reformulation_offline_heuristic(self):
+        """_reformulate_query offline (sem Ollama) usa a heurística determinística:
+        filtragem de stopwords + a query original como último recurso.
+
+        (Regressão: antes havia um caso especial hardcoded para 'Cardano' — resíduo
+        de debug — que foi removido; o comportamento agora é genérico.)
+        """
         mock_engine = MagicMock()
         mock_engine.is_ollama_available.return_value = False
-        
+
         orchestrator = Orchestrator(mock_engine)
         query = "Cardano foi um dos primeiros a perceber que tais jogos podiam ser analisados matematicamente"
-        
+
         alternatives = orchestrator._reformulate_query(query)
-        
-        # Confirma que há múltiplas queries reformuladas geradas pela heurística offline
+
+        # Gera ao menos a alternativa heurística + a query original
         assert len(alternatives) > 1
-        
-        # Confirma que as alternativas contêm os termos obrigatórios (Liber, probability, etc)
-        has_cardano = any("cardano" in a.lower() for a in alternatives)
-        has_liber = any("liber de ludo aleae" in a.lower() or "book on games of chance" in a.lower() for a in alternatives)
-        has_prob = any("probability" in a.lower() or "probabilidade" in a.lower() for a in alternatives)
-        has_games = any("games of chance" in a.lower() or "jogos de azar" in a.lower() for a in alternatives)
-        
-        assert has_cardano is True
-        assert has_liber is True
-        assert has_prob is True
-        assert has_games is True
+        # A query original é sempre mantida como último recurso
+        assert query in alternatives
+
+        # Há ao menos uma alternativa derivada (palavras-chave sem stopwords)
+        generic = [a for a in alternatives if a != query]
+        assert generic, "deve haver ao menos uma alternativa heurística além da query original"
+        first = generic[0].lower().split()
+        # Palavras de conteúdo preservadas; stopwords curtas removidas
+        assert "cardano" in first
+        assert "um" not in first and "dos" not in first and "que" not in first
 
     def test_execute_search_web_retry_on_empty_and_metadata(self):
         """3 & 4. Simula primeira query vazia e segunda com resultado, confirmando sucesso e metadata.attempted_queries."""
@@ -263,13 +267,18 @@ class TestOrchestrator:
             assert output["status"] == "success"
             assert output["provenance"] == "web"
             assert len(output["data"]) == 1
-            assert "Cardano Book on Games of Chance probability" in output["data"][0]["text"]
-            
-            # Confirma que attempted_queries e successful_query foram gravados corretamente em metadata
+
+            # Confirma que attempted_queries e successful_query foram gravados em metadata
             assert "attempted_queries" in output["metadata"]
             assert "successful_query" in output["metadata"]
-            assert len(output["metadata"]["attempted_queries"]) > 1
-            assert output["metadata"]["successful_query"] == "Cardano Book on Games of Chance probability"
+            attempted = output["metadata"]["attempted_queries"]
+            assert len(attempted) > 1
+
+            # A 1ª tentativa retornou vazio; a 2ª teve sucesso → successful = 2ª tentativa,
+            # e o resultado retornado corresponde a essa query (independe da reformulação exata).
+            successful = output["metadata"]["successful_query"]
+            assert successful == attempted[1]
+            assert successful in output["data"][0]["text"]
 
     def test_normalize_web_result_accepts_href_body(self):
         """Requisito 2 & 3: Valida que normalize_web_result aceita e extrai o formato com href e body."""

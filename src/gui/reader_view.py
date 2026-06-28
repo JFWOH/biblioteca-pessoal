@@ -1151,8 +1151,12 @@ class ReaderView(QWidget):
         
         action_flashcard = QAction("🃏 Criar Flashcard", self)
         action_flashcard.triggered.connect(lambda: self.ai_action_requested.emit("flashcard", text))
-        
+
+        action_translate_audio = QAction("🔊 Ouvir Tradução", self)
+        action_translate_audio.triggered.connect(lambda: self.ai_action_requested.emit("translate_audio", text))
+
         menu.addAction(action_translate)
+        menu.addAction(action_translate_audio)
         menu.addAction(action_explain)
         menu.addAction(action_search)
         menu.addAction(action_save)
@@ -1381,23 +1385,38 @@ class ReaderView(QWidget):
         if not page_text:
             return
 
+        self._launch_audio_worker(page_text)
+
+    def _launch_audio_worker(self, text: str) -> None:
+        """Cria, conecta e inicia o AudioWorker para o texto dado (TTS)."""
         from src.gui.workers.audio_worker import AudioWorker
         from src.core.tts.voice_profile import NarrationRole
 
         self._audio_worker = AudioWorker(
-            page_text,
+            text,
             role=NarrationRole.BOOK_NARRATOR,
             router=self._tts_router,
             parent=self,
         )
-        
+
         self._audio_worker.playback_started.connect(self._on_audio_started)
         self._audio_worker.playback_finished.connect(self._on_audio_finished)
         self._audio_worker.error_occurred.connect(self._on_audio_error)
         self._audio_worker.finished.connect(self._on_audio_worker_finished)
         self._audio_worker.provider_changed.connect(self._on_audio_provider_changed)
-        
+
         self._audio_worker.start()
+
+    def narrate_text(self, text: str) -> None:
+        """Narra um texto arbitrário (ex.: uma tradução) via TTS.
+
+        O idioma é autodetectado pelo AudioWorker: uma tradução em português é lida
+        com voz em português; um trecho em inglês, com voz em inglês.
+        """
+        if not text or not text.strip():
+            return
+        self._stop_audio_if_running()
+        self._launch_audio_worker(text.strip())
 
     def _on_audio_started(self):
         self._audio_btn.setText("⏹️ Stop")

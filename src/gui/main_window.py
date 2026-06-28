@@ -31,7 +31,7 @@ from src.gui.widgets.stats_panel import StatsPanel
 from src.gui.widgets.rag_panel import RAGPanel
 from src.utils.constants import FILE_FILTER, DATA_DIR
 from src.utils.export import export_annotations_markdown
-from src.core.watcher import DirectoryWatcher
+from src.gui.watcher import DirectoryWatcher
 
 
 class MainWindow(QMainWindow):
@@ -729,7 +729,7 @@ class MainWindow(QMainWindow):
                 db_path=db_path,
                 chroma_path=chroma_path,
                 ollama_url=self._config.get("rag.ollama_url", "http://localhost:11434"),
-                embed_model=self._config.get("rag.embed_model", "nomic-embed-text"),
+                embed_model=self._config.get("rag.embed_model", "bge-m3"),
                 llm_model=self._config.get("rag.llm_model", "gemma4:e4b"),
             )
         except Exception as exc:
@@ -842,7 +842,7 @@ class MainWindow(QMainWindow):
         """Processa requisições de IA vindas do menu de contexto de leitura."""
         if action_type == "translate":
             self._statusbar.showMessage("🌐 Iniciando tradução offline...", 5000)
-            from src.core.translation_service import TranslationService
+            from src.gui.translation_service import TranslationService
             
             def on_success(result):
                 self._statusbar.clearMessage()
@@ -863,6 +863,24 @@ class MainWindow(QMainWindow):
                 text=text,
                 on_success=on_success,
                 on_error=on_error
+            )
+            return
+
+        elif action_type == "translate_audio":
+            self._statusbar.showMessage("🌐 Traduzindo para narrar...", 5000)
+            from src.gui.translation_service import TranslationService
+
+            def on_audio_success(result):
+                self._statusbar.clearMessage()
+                self._reader_view.narrate_text(result)
+
+            def on_audio_error(err):
+                self._statusbar.showMessage(f"⚠️ Erro na tradução: {err}", 5000)
+
+            TranslationService.get_instance().translate_async(
+                text=text,
+                on_success=on_audio_success,
+                on_error=on_audio_error,
             )
             return
 

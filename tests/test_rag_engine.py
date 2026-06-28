@@ -71,10 +71,18 @@ def fake_embedding() -> list[float]:
 
 @pytest.fixture
 def mock_engine(test_db, chroma_path, fake_embedding):
-    """RAGEngine com ChromaDB real em memória e Ollama mockado."""
+    """RAGEngine com ChromaDB real em memória e Ollama mockado.
+
+    Mocka tanto o embedding único (query) quanto o em lote (indexação) com a mesma
+    dimensão sintética — caso contrário a indexação bateria no Ollama real e poderia
+    gerar vetores de dimensão diferente da query (ex.: bge-m3=1024 vs query mockada),
+    causando mismatch no Chroma. Mantém os testes herméticos e independentes do modelo.
+    """
     from src.core.rag_engine import RAGEngine
 
-    with patch.object(RAGEngine, "_get_embedding", return_value=fake_embedding):
+    with patch.object(RAGEngine, "_get_embedding", return_value=fake_embedding), \
+         patch.object(RAGEngine, "_get_embeddings_batch",
+                      side_effect=lambda texts: [fake_embedding for _ in texts]):
         engine = RAGEngine(
             db_path=test_db,
             chroma_path=chroma_path,
@@ -344,6 +352,18 @@ class TestRAGEngineSearch:
             assert isinstance(r["document"], str)
             assert isinstance(r["metadata"], dict)
             assert isinstance(r["distance"], float)
+
+    def test_keyword_search_finds_annotations_via_sqlite(self, mock_engine):
+        """Regressão: o ramo SQLite de keyword_search_db (anotações) deve funcionar.
+
+        Antes quebrava com AttributeError em self._open_db() (método inexistente),
+        capturado como warning — a tool keyword_search nunca achava anotações.
+        """
+        results = mock_engine.keyword_search_db("ressaca")
+        sources = [r["source"] for r in results]
+        assert "annotation" in sources, "ramo SQLite de keyword_search não retornou anotações"
+        ann = next(r for r in results if r["source"] == "annotation")
+        assert "ressaca" in ann["text"].lower()
 
     def test_get_sources_returns_list_on_success(self, mock_engine):
         with patch.object(mock_engine, "is_ollama_available", return_value=True):

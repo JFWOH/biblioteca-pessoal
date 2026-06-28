@@ -50,3 +50,67 @@ def test_add_basic_note_fallback(mock_urlopen, anki_service):
         data = json.loads(lines[0])
         assert data["front"] == "Fallback front"
         assert data["back"] == "Fallback back"
+
+
+def _write_queue(service, rows):
+    with open(service.fallback_file, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+
+def test_count_pending_fallback(anki_service):
+    assert anki_service.count_pending_fallback() == 0
+    _write_queue(anki_service, [
+        {"deckName": "Default", "front": "a", "back": "1"},
+        {"deckName": "Default", "front": "b", "back": "2"},
+    ])
+    assert anki_service.count_pending_fallback() == 2
+
+
+def test_flush_fallback_sends_and_clears(anki_service):
+    _write_queue(anki_service, [
+        {"deckName": "Default", "front": "a", "back": "1", "tags": ["t"]},
+        {"deckName": "Default", "front": "b", "back": "2", "tags": ["t"]},
+    ])
+    with patch.object(anki_service, "is_available", return_value=True), \
+         patch.object(anki_service, "_invoke", return_value=111):
+        summary = anki_service.flush_fallback_to_anki()
+    assert summary["sent"] == 2
+    assert summary["kept"] == 0
+    assert summary["total"] == 2
+    assert anki_service.count_pending_fallback() == 0
+
+
+def test_flush_fallback_raises_when_unavailable(anki_service):
+    _write_queue(anki_service, [{"deckName": "Default", "front": "a", "back": "1"}])
+    with patch.object(anki_service, "is_available", return_value=False):
+        with pytest.raises(ConnectionError):
+            anki_service.flush_fallback_to_anki()
+    # Fila intocada
+    assert anki_service.count_pending_fallback() == 1
+
+
+def test_flush_fallback_drops_duplicates_keeps_unknown_errors(anki_service):
+    _write_queue(anki_service, [
+        {"deckName": "Default", "front": "dup", "back": "1"},
+        {"deckName": "Default", "front": "ok", "back": "2"},
+        {"deckName": "Default", "front": "boom", "back": "3"},
+    ])
+
+    def fake_invoke(action, **params):
+        front = params["note"]["fields"]["Front"]
+        if front == "dup":
+            raise Exception("cannot create note because it is a duplicate")
+        if front == "boom":
+            raise Exception("erro desconhecido do anki")
+        return 222
+
+    with patch.object(anki_service, "is_available", return_value=True), \
+         patch.object(anki_service, "_invoke", side_effect=fake_invoke):
+        summary = anki_service.flush_fallback_to_anki()
+
+    assert summary["sent"] == 1
+    assert summary["duplicates"] == 1
+    assert summary["kept"] == 1  # o 'boom' permanece na fila
+    # Apenas a nota com erro desconhecido permanece
+    assert anki_service.count_pending_fallback() == 1

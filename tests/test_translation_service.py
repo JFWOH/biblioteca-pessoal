@@ -122,7 +122,7 @@ class TestTranslationServiceSingleton:
     """Garante que TranslationService é singleton."""
 
     def test_singleton_returns_same_instance(self):
-        from src.core.translation_service import TranslationService
+        from src.gui.translation_service import TranslationService
 
         # Reset para isolar o teste
         TranslationService._instance = None
@@ -141,7 +141,7 @@ class TestTranslationServiceErrorHandling:
     """Garante que erros no worker são propagados via callback on_error, sem crash."""
 
     def test_error_callback_is_invoked(self, qtbot):
-        from src.core.translation_service import TranslationService
+        from src.gui.translation_service import TranslationService
 
         TranslationService._instance = None
         service = TranslationService.get_instance()

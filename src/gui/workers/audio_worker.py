@@ -3,6 +3,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from src.core.tts.tts_router import TTSRouter
 from src.core.tts.voice_profile import NarrationRole
 from src.core.tts.text_preprocessor import TTSTextPreprocessor
+from src.core.tts.language_detect import detect_language
 from src.core.audio.tts_backend import TTSBackendUnavailable
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ class AudioWorker(QThread):
     def __init__(self, text: str, rate: float = 1.0, volume: float = 1.0,
                  role: NarrationRole = NarrationRole.BOOK_NARRATOR,
                  router: TTSRouter | None = None,
+                 language: str | None = None,
                  parent=None):
         super().__init__(parent)
         self._text = text
@@ -31,6 +33,9 @@ class AudioWorker(QThread):
         self._volume = volume
         self._role = role
         self._router = router
+        # Idioma da narração: explícito (ex.: tradução) ou autodetectado do texto,
+        # para que páginas em inglês sejam lidas com voz em inglês.
+        self._language = language or detect_language(text)
         self._is_cancelled = False
         
         # Load configuration profiles from MainWindow IN THE MAIN THREAD
@@ -86,6 +91,7 @@ class AudioWorker(QThread):
                 self._text,
                 role=self._role,
                 preprocess=True,
+                language=self._language,
             )
 
             # Report final provider used

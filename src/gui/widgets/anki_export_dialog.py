@@ -66,6 +66,12 @@ class AnkiExportDialog(QDialog):
         self.status_label = QLabel()
         self.status_label.setStyleSheet("color: #64748b; font-size: 11px;")
         layout.addWidget(self.status_label)
+
+        # Reenvio da fila de fallback (só aparece quando há pendências e o Anki está online)
+        self.flush_btn = QPushButton()
+        self.flush_btn.setVisible(False)
+        self.flush_btn.clicked.connect(self._on_flush_pending)
+        layout.addWidget(self.flush_btn)
         
         # Buttons
         btn_layout = QHBoxLayout()
@@ -106,11 +112,44 @@ class AnkiExportDialog(QDialog):
                     self.deck_combo.addItems(decks)
                 self.status_label.setText("Anki conectado. Selecione o deck.")
                 self.status_label.setStyleSheet("color: #059669; font-size: 11px;")
+                self._refresh_pending_button()
             else:
                 self.status_label.setText("Anki fechado. O card será salvo na fila local de exportação.")
                 self.status_label.setStyleSheet("color: #d97706; font-size: 11px;")
         except Exception as e:
             self.status_label.setText(f"Erro ao conectar: {e}")
+
+    def _refresh_pending_button(self):
+        """Mostra o botão de reenvio se houver notas na fila de fallback."""
+        try:
+            pending = self.service.count_pending_fallback()
+        except Exception:
+            pending = 0
+        if pending > 0:
+            self.flush_btn.setText(f"↩️ Reenviar {pending} flashcard(s) da fila para o Anki")
+            self.flush_btn.setVisible(True)
+        else:
+            self.flush_btn.setVisible(False)
+
+    def _on_flush_pending(self):
+        """Reenvia a fila de fallback ao Anki e informa o resultado."""
+        self.flush_btn.setEnabled(False)
+        try:
+            r = self.service.flush_fallback_to_anki()
+        except ConnectionError:
+            QMessageBox.warning(self, "Anki", "AnkiConnect indisponível. Tente novamente com o Anki aberto.")
+            self.flush_btn.setEnabled(True)
+            return
+        except Exception as e:
+            QMessageBox.critical(self, "Anki", f"Falha ao reenviar a fila: {e}")
+            self.flush_btn.setEnabled(True)
+            return
+
+        msg = (f"Enviados: {r['sent']}\nJá existentes (duplicados): {r['duplicates']}\n"
+               f"Descartados (vazios): {r['dropped']}\nAinda na fila: {r['kept']}")
+        QMessageBox.information(self, "Fila reenviada", msg)
+        self.flush_btn.setEnabled(True)
+        self._refresh_pending_button()
 
     def _on_save(self):
         front = self.front_edit.toPlainText().strip()

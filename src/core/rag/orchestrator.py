@@ -51,8 +51,7 @@ class Orchestrator:
         """Gera uma lista de consultas (queries) alternativas para a busca web.
         
         Tenta enriquecimento via LLM se o Ollama estiver online. Caso contrário,
-        usa regras heurísticas de mapeamento de conceitos históricos (ex: Cardano)
-        e filtragem determinística de stopwords.
+        usa filtragem determinística de stopwords (remoção de termos comuns).
         """
         alternatives: List[str] = []
         
@@ -98,17 +97,8 @@ class Orchestrator:
         except Exception as exc:
             logger.warning("Falha ao reformular via LLM: %s", exc)
 
-        # 2. Camada Heurística Determinística (Sempre disponível offline)
-        query_lower = query.lower()
-        
-        # 2a. Mapeamento de termos famosos (Caso Cardano)
-        if "cardano" in query_lower:
-            alternatives.append("Girolamo Cardano Liber de ludo aleae probability")
-            alternatives.append("Cardano Book on Games of Chance probability")
-            alternatives.append("Cardano jogos de azar probabilidade")
-            alternatives.append("Cardano história probabilidade")
-
-        # 2b. Filtragem de Stopwords geral (TF-IDF-like heurística)
+        # 2. Camada Heurística Determinística (sempre disponível offline):
+        # filtragem de stopwords (heurística tipo TF-IDF) sobre a query.
         words = query.split()
         filtered_words = []
         for word in words:
