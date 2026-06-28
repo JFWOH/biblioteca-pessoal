@@ -252,6 +252,7 @@ class MainWindow(QMainWindow):
         self._rag_panel.stop_requested.connect(self._on_rag_stop)
         self._rag_panel.model_changed.connect(self._on_model_changed)
         self._rag_panel.save_annotation_requested.connect(self._on_rag_annotation_save)
+        self._rag_panel.clear_chat_requested.connect(self._on_clear_chat)
         self._rag_panel.back_requested.connect(lambda: self._main_stack.setCurrentIndex(0))
         self._main_stack.addWidget(self._rag_panel)  # index 3
 
@@ -827,6 +828,15 @@ class MainWindow(QMainWindow):
         )
         self._rag_worker.start()
         self._statusbar.showMessage("🧠 Consultando Assistente IA…")
+
+    def _on_clear_chat(self) -> None:
+        """Limpa a memória conversacional do contexto atual (livro ou global)."""
+        if self._rag_engine is None:
+            return
+        ctx = self._rag_panel.get_reading_context()
+        is_global = getattr(self._rag_panel, "_is_standalone", False)
+        book_id = ctx.get("book_id") if (ctx and not is_global) else None
+        self._rag_engine.clear_chat_history(book_id)
 
     def _on_ai_action_requested(self, action_type: str, text: str) -> None:
         """Processa requisições de IA vindas do menu de contexto de leitura."""

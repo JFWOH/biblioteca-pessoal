@@ -196,6 +196,9 @@ class RAGEngine:
         self._collection = None
         self._cancelled = False
 
+        # Memória conversacional por livro: book_id -> lista de mensagens recentes.
+        self._chat_history: dict = {}
+
         self._init_chroma()
 
     # ── Inicialização ──────────────────────────────────────────────────────────
@@ -676,4 +679,25 @@ class RAGEngine:
         Deve ser chamado no início de cada operação iniciada pelo usuário.
         """
         self._cancelled = False
+
+    # ── Memória conversacional por livro ───────────────────────────────────────
+
+    def get_chat_history(self, book_id) -> list[dict]:
+        """Retorna o histórico recente de conversa do livro (cópia)."""
+        return list(self._chat_history.get(book_id, []))
+
+    def append_chat_turn(self, book_id, user_content: str, assistant_content: str,
+                         max_messages: int = 6) -> None:
+        """Acrescenta um turno (pergunta + resposta) ao histórico, limitado a max_messages."""
+        if not (assistant_content or "").strip():
+            return
+        hist = self._chat_history.setdefault(book_id, [])
+        hist.append({"role": "user", "content": (user_content or "")[:2000]})
+        hist.append({"role": "assistant", "content": assistant_content})
+        if len(hist) > max_messages:
+            del hist[: len(hist) - max_messages]
+
+    def clear_chat_history(self, book_id=None) -> None:
+        """Limpa o histórico conversacional de um livro (chave book_id)."""
+        self._chat_history.pop(book_id, None)
 

@@ -677,3 +677,64 @@ class TestRAGWorker:
                 assert worker._book_id == 1
                 with qtbot.waitSignal(worker.finished_work, timeout=5000):
                     worker.start()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TestChatMemory (Item 8a — memória conversacional por livro)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestChatMemory:
+    def test_append_and_get_isolated_by_book(self, mock_engine):
+        mock_engine.append_chat_turn(1, "pergunta", "resposta")
+        assert mock_engine.get_chat_history(1) == [
+            {"role": "user", "content": "pergunta"},
+            {"role": "assistant", "content": "resposta"},
+        ]
+        assert mock_engine.get_chat_history(2) == []  # outro livro isolado
+
+    def test_empty_assistant_not_stored(self, mock_engine):
+        mock_engine.append_chat_turn(1, "p", "   ")
+        assert mock_engine.get_chat_history(1) == []
+
+    def test_history_trims_to_max(self, mock_engine):
+        for i in range(5):
+            mock_engine.append_chat_turn(1, f"p{i}", f"r{i}")
+        h = mock_engine.get_chat_history(1)
+        assert len(h) == 6  # default max_messages = 3 turnos
+        assert h[-1]["content"] == "r4"   # mantém os mais recentes
+        assert h[0]["content"] == "p2"
+
+    def test_clear_history(self, mock_engine):
+        mock_engine.append_chat_turn(1, "p", "r")
+        mock_engine.clear_chat_history(1)
+        assert mock_engine.get_chat_history(1) == []
+
+    def test_get_returns_copy(self, mock_engine):
+        mock_engine.append_chat_turn(1, "p", "r")
+        h = mock_engine.get_chat_history(1)
+        h.append("x")
+        assert len(mock_engine.get_chat_history(1)) == 2  # não afeta o estado interno
+
+    def test_query_rag_injects_history_on_followup(self, mock_engine):
+        mock_engine.append_chat_turn(None, "Quem é Capitu?", "Personagem de Dom Casmurro.")
+
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured.update(json.loads(req.data.decode()))
+            resp = MagicMock()
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = MagicMock(return_value=False)
+            resp.__iter__ = lambda s: iter([
+                json.dumps({"message": {"content": "ok"}, "done": True, "done_reason": "stop"}).encode("utf-8")
+            ])
+            return resp
+
+        with patch.object(mock_engine, "is_ollama_available", return_value=True):
+            mock_engine.index_book(1)
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                list(mock_engine.query_rag("E ela trai Bentinho?"))
+
+        contents = [m.get("content", "") for m in captured["messages"]]
+        assert any("Quem é Capitu?" in c for c in contents)        # histórico injetado
+        assert any("E ela trai Bentinho?" in c for c in contents)  # pergunta atual

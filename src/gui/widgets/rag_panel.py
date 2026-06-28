@@ -38,6 +38,7 @@ class RAGPanel(QWidget):
     close_requested = pyqtSignal()     # Emitido para ocultar o painel no modo side-by-side
     back_requested = pyqtSignal()      # Emitido para voltar à biblioteca no modo tela cheia
     save_annotation_requested = pyqtSignal(int, int, str) # book_id, page, content
+    clear_chat_requested = pyqtSignal()  # limpar a memória conversacional do contexto atual
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -826,6 +827,7 @@ class RAGPanel(QWidget):
         self._full_answer = ""
         self._question_input.clear()
         self._question_input.setFocus()
+        self.clear_chat_requested.emit()
 
     def _set_generating(self, active: bool) -> None:
         self._is_generating = active

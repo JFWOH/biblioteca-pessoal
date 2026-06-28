@@ -765,13 +765,18 @@ class Orchestrator:
         trace_logger.emit("context_loaded", step=1, payload={"context_length": len(context), "documents_found": len(similar)})
 
         from src.core.rag_engine import _FIXED_SYSTEM_PROMPT, _TOOLS_DEF
+        # Memória por livro: injeta os turnos recentes antes da pergunta atual,
+        # permitindo perguntas de acompanhamento ("e por quê?", "dá um exemplo").
+        history = self.engine.get_chat_history(book_id) if hasattr(self.engine, "get_chat_history") else []
         messages = [
             {"role": "system", "content": _FIXED_SYSTEM_PROMPT},
             {"role": "system", "content": f"Ferramentas Disponíveis (JSON Schema):\n{json.dumps(_TOOLS_DEF, ensure_ascii=False)}"},
             {"role": "system", "content": f"--- CONTEXTO ATUAL ---\n{context}\n--- FIM DO CONTEXTO ---"},
+            *history,
             {"role": "user", "content": question},
         ]
 
+        answer_acc: list[str] = []
         state = AgentState(session_id=session_id, max_rounds=5, max_time_ms=25000)
 
         while state.is_budget_ok():
@@ -809,6 +814,7 @@ class Orchestrator:
                                 trace_logger.emit("final_answer_started", step=state.current_round, round_num=state.current_round)
                                 answer_streaming_started = True
                             content_parts.append(token)
+                            answer_acc.append(token)
                             yield token
 
                         if chunk.get("done"):
@@ -835,6 +841,10 @@ class Orchestrator:
                     messages.append({"role": "user", "content": "Continue exatamente de onde parou."})
                     logger.info("Continuação transparente acionada no round %d", state.current_round)
                     continue  # Nova chamada no loop while budget_ok
+
+                # Memória por livro: grava o turno concluído.
+                if hasattr(self.engine, "append_chat_turn"):
+                    self.engine.append_chat_turn(book_id, question, "".join(answer_acc))
 
                 payload = {
                     "sources_used": list(state.sources_used),
@@ -933,6 +943,8 @@ class Orchestrator:
                                             except json.JSONDecodeError: continue
                                 except Exception:
                                     pass
+                            if hasattr(self.engine, "append_chat_turn"):
+                                self.engine.append_chat_turn(book_id, question, "".join(accumulated_content))
                             trace_logger.emit("query_completed", step=state.current_round + 1)
                             return
                     except json.JSONDecodeError:
