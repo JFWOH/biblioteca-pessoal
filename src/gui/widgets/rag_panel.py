@@ -341,15 +341,15 @@ class RAGPanel(QWidget):
 
         self._model_combo = QComboBox()
 
-        # Catálogo de modelos
+        # Catálogo de modelos (tamanhos aproximados, Q4)
         self._MODEL_CATALOG = [
-            ("gemma4:12b", "Gemma 4 (12B)", "~12 GB", "🔥 Poderoso"),
-            ("gemma4:e4b", "Gemma 4 E4B",   "~9.6 GB", "⭐ Recomendado"),
-            ("gemma3:4b",  "Gemma 3 (4B)",  "~3.3 GB", "Alternativo"),
-            ("llama3",     "Llama 3 (8B)",  "~4.7 GB", "Atual"),
-            ("gemma2:2b",  "Gemma 2 (2B)",  "~1.5 GB", "🪶 Leve"),
-            ("mistral",    "Mistral (7B)",  "~4.1 GB", "Alternativo"),
-            ("phi3",       "Phi-3 Mini",    "~2.2 GB", "🪶 Leve"),
+            ("gemma4:12b",  "Gemma 4 (12B)",  "~8 GB",   "🔥 Qualidade"),
+            ("gemma4:e4b",  "Gemma 4 E4B",    "~4 GB",   "⭐ Recomendado (rápido)"),
+            ("qwen2.5:7b",  "Qwen 2.5 (7B)",  "~4.7 GB", "🌍 Multilíngue + tools"),
+            ("gemma3:4b",   "Gemma 3 (4B)",   "~3.3 GB", "Equilíbrio"),
+            ("qwen2.5:3b",  "Qwen 2.5 (3B)",  "~1.9 GB", "🪶 Leve forte"),
+            ("llama3.1:8b", "Llama 3.1 (8B)", "~4.9 GB", "Alternativo"),
+            ("gemma2:2b",   "Gemma 2 (2B)",   "~1.6 GB", "🪶 Mínimo"),
         ]
         for model_id, display, size, tag in self._MODEL_CATALOG:
             self._model_combo.addItem(f"{display}  {tag}  ({size})", userData=model_id)
@@ -414,7 +414,7 @@ class RAGPanel(QWidget):
         self._tips_text = QLabel(
             "• Indexe sua biblioteca antes de perguntar\n"
             "• Funciona com Ollama rodando localmente\n"
-            "• Modelos: nomic-embed-text + llama3"
+            "• Modelos: nomic-embed-text + gemma4:e4b"
         )
         self._tips_text.setWordWrap(True)
         tips_layout.addWidget(self._tips_text)
