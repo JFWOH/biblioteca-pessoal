@@ -19,6 +19,7 @@ from src.gui.styles import get_reader_css
 from src.gui.widgets.proactive_footer import ProactiveFooterWidget
 from src.gui.widgets.selection_popover import SelectionActionPopover
 from src.gui.widgets.reader_dock import ReaderDock
+from src.gui.widgets.proactive_insights_panel import ProactiveInsightsPanel
 from src.gui.proactive_reader_service import ProactiveReaderService
 from PyQt6.QtWidgets import QComboBox
 
@@ -316,6 +317,9 @@ class ReaderView(QWidget):
             p_act.triggered.connect(lambda _c=False, lv=level: self._set_proactive_intensity(lv))
             proactive_menu.addAction(p_act)
             self._proactive_acts[level] = p_act
+        self._act_insights = QAction("💡 Insights do Proativo", self)
+        self._act_insights.triggered.connect(lambda: self._show_dock_tab("insights"))
+        self._overflow_menu.addAction(self._act_insights)
         self._overflow_menu.addSeparator()
         self._overflow_menu.addAction(self._act_tts)
         self._overflow_menu.aboutToShow.connect(self._sync_overflow_menu)
@@ -419,6 +423,12 @@ class ReaderView(QWidget):
         # exibindo um painel por vez para maximizar o espaço de leitura.
         self._dock = ReaderDock()
         self._dock.add_tab("annotations", "📝 Anotações", self._annotation_panel)
+        # Insights do agente proativo: registro persistente das observações da sessão.
+        self._insights_panel = ProactiveInsightsPanel()
+        self._insights_panel.flashcard_requested.connect(
+            lambda text: self.ai_action_requested.emit("flashcard", text)
+        )
+        self._dock.add_tab("insights", "💡 Insights", self._insights_panel)
         self._dock.closed.connect(self.hide_dock)
         self._dock.tab_changed.connect(lambda _k: self._sync_dock_buttons())
         self._main_splitter.addWidget(self._dock)
@@ -728,6 +738,8 @@ class ReaderView(QWidget):
         self._annotation_panel.set_theme(theme)
         if hasattr(self, '_dock'):
             self._dock.set_theme(theme)
+        if hasattr(self, '_insights_panel'):
+            self._insights_panel.set_theme(theme)
         if hasattr(self, '_search_bar') and hasattr(self._search_bar, 'set_theme'):
             self._search_bar.set_theme(theme)
         if hasattr(self, '_proactive_footer') and hasattr(self._proactive_footer, 'set_theme'):
@@ -1484,11 +1496,16 @@ class ReaderView(QWidget):
         menu.exec(anchor.mapToGlobal(QPoint(0, anchor.height() + 2)))
 
     def _on_proactive_observation(self, obs: dict):
-        """Exibe a observação proativa recebida."""
+        """Exibe a observação proativa no rodapé e a registra no painel de Insights."""
         self._proactive_footer.set_observation(obs)
+        if hasattr(self, "_insights_panel"):
+            self._insights_panel.add_observation(obs)
 
     def _on_proactive_error(self, msg: str):
-        """Mostra falhas do agente proativo no statusbar (antes eram silenciosas)."""
+        """Mostra falhas do agente proativo no statusbar e no painel de Insights
+        (antes eram silenciosas)."""
         parent_window = self.window()
         if parent_window and hasattr(parent_window, "_statusbar") and parent_window._statusbar:
             parent_window._statusbar.showMessage(f"⚠️ {msg}", 6000)
+        if hasattr(self, "_insights_panel"):
+            self._insights_panel.add_error(msg)
