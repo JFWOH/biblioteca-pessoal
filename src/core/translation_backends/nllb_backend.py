@@ -34,18 +34,25 @@ class NLLBBackend:
         if self._is_loaded:
             return
 
+        import os
+        # O provedor Kokoro força HF_HUB_OFFLINE=1 no processo inteiro (para evitar
+        # travas de rede no load dele), o que bloqueava o download do NLLB na primeira
+        # vez — quebrando a tradução. Liberamos a rede apenas ao redor deste load e
+        # restauramos o valor anterior em seguida (não vaza o modo online).
+        prev_offline = os.environ.get("HF_HUB_OFFLINE")
+        os.environ["HF_HUB_OFFLINE"] = "0"
         try:
             from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
             import torch
-            
+
             logger.info(f"Carregando tokenizer {self.model_id}...")
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
-            
+
             logger.info(f"Carregando modelo {self.model_id}...")
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            
+
             self._model = AutoModelForSeq2SeqLM.from_pretrained(
-                self.model_id, 
+                self.model_id,
                 dtype=torch.float32,
                 low_cpu_mem_usage=True
             ).to(device)
@@ -59,6 +66,11 @@ class NLLBBackend:
         except Exception as e:
             logger.error(f"Falha ao carregar modelo NLLB: {e}")
             raise RuntimeError(f"Falha ao carregar modelo de tradução: {e}") from e
+        finally:
+            if prev_offline is None:
+                os.environ.pop("HF_HUB_OFFLINE", None)
+            else:
+                os.environ["HF_HUB_OFFLINE"] = prev_offline
 
     def translate(self, text: str, src_lang: str = "en", tgt_lang: str = "pt") -> str:
         """
