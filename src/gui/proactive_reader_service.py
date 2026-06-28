@@ -15,6 +15,7 @@ from src.gui.workers.proactive_worker import ProactiveWorker
 
 class ProactiveReaderService(QObject):
     observation_ready = pyqtSignal(dict)
+    error_occurred = pyqtSignal(str)
 
     def __init__(self, ollama_url: str = "http://localhost:11434", parent=None):
         super().__init__(parent)
@@ -39,17 +40,68 @@ class ProactiveReaderService(QObject):
         if self._worker is not None and self._worker.isRunning():
             return
 
-        model = self.hardware_service.get_proactive_model_name()
-        if not model:
+        # Tier do hardware: vazio = máquina fraca → proativo desativado por padrão.
+        tier_model = self.hardware_service.get_proactive_model_name()
+        if not tier_model:
             return
 
-        if self.trigger_engine.should_trigger(page_text, page_number, self.intensity):
-            self._worker = ProactiveWorker(model, page_text, self.ollama_url)
-            self._worker.finished.connect(self._on_worker_finished)
-            self._worker.start()
+        if not self.trigger_engine.should_trigger(page_text, page_number, self.intensity):
+            return
+
+        model = self._resolve_model(tier_model)
+        if not model:
+            # Antes isso falhava em silêncio; agora avisamos o usuário.
+            self.error_occurred.emit(
+                "Agente proativo: nenhum modelo do Ollama disponível. "
+                "Verifique se o Ollama está rodando e se há um modelo baixado."
+            )
+            return
+
+        self._worker = ProactiveWorker(model, page_text, self.ollama_url)
+        self._worker.finished.connect(self._on_worker_finished)
+        self._worker.error.connect(self._on_worker_error)
+        self._worker.start()
+
+    def _resolve_model(self, tier_model: str):
+        """Escolhe um modelo instalado no Ollama para o proativo.
+
+        O proativo é frequente e discreto, então favorece velocidade: tenta o
+        modelo leve/rápido primeiro, depois o recomendado pelo tier, depois
+        qualquer um instalado. Devolve None se nada estiver disponível.
+        """
+        installed = self._installed_models()
+        if not installed:
+            return None
+        installed_bases: dict[str, str] = {}
+        for name in installed:
+            installed_bases.setdefault(name.split(":")[0], name)
+        for pref in ("gemma4:e4b", tier_model, "gemma3:4b", "gemma2:2b"):
+            if not pref:
+                continue
+            if pref in installed:
+                return pref
+            base = pref.split(":")[0]
+            if base in installed_bases:
+                return installed_bases[base]
+        return installed[0]
+
+    def _installed_models(self) -> list[str]:
+        """Lista os nomes de modelos instalados no Ollama (vazio em caso de falha)."""
+        try:
+            import json
+            import urllib.request
+            req = urllib.request.Request(f"{self.ollama_url.rstrip('/')}/api/tags")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read())
+            return [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+        except Exception:
+            return []
 
     def _on_worker_finished(self, obs: dict):
         self.observation_ready.emit(obs)
+
+    def _on_worker_error(self, msg: str):
+        self.error_occurred.emit(f"Agente proativo: {msg}")
 
     def stop(self):
         """Cancelamento cooperativo (sem terminate): descarta o resultado pendente.

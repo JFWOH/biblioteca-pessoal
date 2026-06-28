@@ -45,6 +45,7 @@ class ReaderView(QWidget):
         self._annotations: list[dict] = []
         self._proactive_service = ProactiveReaderService(parent=self)
         self._proactive_service.observation_ready.connect(self._on_proactive_observation)
+        self._proactive_service.error_occurred.connect(self._on_proactive_error)
         self._setup_ui()
         self._setup_shortcuts()
         self.reading_context_updated.connect(lambda b, t, p, txt: self._proactive_service.process_page_context(txt, p))
@@ -1485,3 +1486,9 @@ class ReaderView(QWidget):
     def _on_proactive_observation(self, obs: dict):
         """Exibe a observação proativa recebida."""
         self._proactive_footer.set_observation(obs)
+
+    def _on_proactive_error(self, msg: str):
+        """Mostra falhas do agente proativo no statusbar (antes eram silenciosas)."""
+        parent_window = self.window()
+        if parent_window and hasattr(parent_window, "_statusbar") and parent_window._statusbar:
+            parent_window._statusbar.showMessage(f"⚠️ {msg}", 6000)

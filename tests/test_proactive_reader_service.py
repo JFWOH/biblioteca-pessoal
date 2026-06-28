@@ -34,7 +34,8 @@ def test_service_skips_when_worker_running(qtbot):
     with patch("src.gui.proactive_reader_service.ProactiveWorker") as MockWorker:
         MockWorker.return_value.isRunning.return_value = True
         with patch.object(svc.hardware_service, "get_proactive_model_name", return_value="gemma4:e4b"), \
-             patch.object(svc.trigger_engine, "should_trigger", return_value=True):
+             patch.object(svc.trigger_engine, "should_trigger", return_value=True), \
+             patch.object(svc, "_installed_models", return_value=["gemma4:e4b"]):
             svc.process_page_context("Texto longo " * 30, 10)
             assert MockWorker.call_count == 1  # primeiro disparo cria o worker
 
@@ -52,8 +53,70 @@ def test_service_creates_worker_when_idle(qtbot):
     with patch("src.gui.proactive_reader_service.ProactiveWorker") as MockWorker:
         MockWorker.return_value.isRunning.return_value = False
         with patch.object(svc.hardware_service, "get_proactive_model_name", return_value="gemma4:e4b"), \
-             patch.object(svc.trigger_engine, "should_trigger", return_value=True):
+             patch.object(svc.trigger_engine, "should_trigger", return_value=True), \
+             patch.object(svc, "_installed_models", return_value=["gemma4:e4b"]):
             svc.process_page_context("Texto longo " * 30, 10)
 
         assert MockWorker.call_count == 1
         MockWorker.return_value.start.assert_called_once()
+
+
+# ── Confiabilidade: resolução de modelo + erros visíveis ──────────────────────
+
+def test_resolve_model_prefers_fast_e4b(qtbot):
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    with patch.object(svc, "_installed_models", return_value=["gemma4:12b", "gemma4:e4b", "mistral:latest"]):
+        # proativo favorece velocidade → e4b mesmo com o tier pedindo 12b
+        assert svc._resolve_model("gemma4:12b") == "gemma4:e4b"
+
+
+def test_resolve_model_falls_back_to_tier(qtbot):
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    with patch.object(svc, "_installed_models", return_value=["gemma4:12b", "mistral:latest"]):
+        # e4b não instalado → usa o gemma4 instalado (12b)
+        assert svc._resolve_model("gemma4:12b") == "gemma4:12b"
+
+
+def test_resolve_model_last_resort_any_installed(qtbot):
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    with patch.object(svc, "_installed_models", return_value=["phi3:latest"]):
+        assert svc._resolve_model("gemma4:12b") == "phi3:latest"
+
+
+def test_resolve_model_none_when_nothing_installed(qtbot):
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    with patch.object(svc, "_installed_models", return_value=[]):
+        assert svc._resolve_model("gemma4:12b") is None
+
+
+def test_process_emits_error_when_no_models(qtbot):
+    """Antes a falha era silenciosa; agora o usuário recebe um aviso."""
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    svc.intensity = "Estudo"
+    errors = []
+    svc.error_occurred.connect(errors.append)
+    with patch.object(svc.hardware_service, "get_proactive_model_name", return_value="gemma4:12b"), \
+         patch.object(svc.trigger_engine, "should_trigger", return_value=True), \
+         patch.object(svc, "_installed_models", return_value=[]):
+        svc.process_page_context("Texto longo " * 30, 5)
+    assert len(errors) == 1
+    assert "modelo" in errors[0].lower()
+
+
+def test_process_uses_resolved_model(qtbot):
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    svc.intensity = "Estudo"
+    with patch("src.gui.proactive_reader_service.ProactiveWorker") as MockWorker, \
+         patch.object(svc.hardware_service, "get_proactive_model_name", return_value="gemma4:12b"), \
+         patch.object(svc.trigger_engine, "should_trigger", return_value=True), \
+         patch.object(svc, "_installed_models", return_value=["gemma4:e4b"]):
+        MockWorker.return_value.isRunning.return_value = False
+        svc.process_page_context("Texto longo " * 30, 5)
+        MockWorker.assert_called_once()
+        assert MockWorker.call_args[0][0] == "gemma4:e4b"  # modelo resolvido (rápido)
