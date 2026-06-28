@@ -105,6 +105,20 @@ class LibraryDB:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS flashcards (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    book_id INTEGER,
+                    front TEXT NOT NULL,
+                    back TEXT DEFAULT '',
+                    deck TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    due_date TEXT DEFAULT '',
+                    interval_days INTEGER DEFAULT 0,
+                    ease REAL DEFAULT 2.5,
+                    reps INTEGER DEFAULT 0,
+                    lapses INTEGER DEFAULT 0,
+                    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE SET NULL
+                );
                 CREATE INDEX IF NOT EXISTS idx_books_title ON books(title);
                 CREATE INDEX IF NOT EXISTS idx_books_author ON books(author);
                 CREATE INDEX IF NOT EXISTS idx_books_format ON books(file_format);
@@ -112,6 +126,8 @@ class LibraryDB:
                 CREATE INDEX IF NOT EXISTS idx_books_hash ON books(file_hash);
                 CREATE INDEX IF NOT EXISTS idx_annotations_book ON annotations(book_id);
                 CREATE INDEX IF NOT EXISTS idx_indexing_status ON indexing_state(status);
+                CREATE INDEX IF NOT EXISTS idx_flashcards_book ON flashcards(book_id);
+                CREATE INDEX IF NOT EXISTS idx_flashcards_due ON flashcards(due_date);
             """)
             try:
                 self.conn.execute("""
@@ -405,6 +421,62 @@ class LibraryDB:
         with self._write_lock:
             self.conn.execute("DELETE FROM annotations WHERE id = ?", (annotation_id,))
             self.conn.commit()
+
+    # ── Flashcards ─────────────────────────────────────────────────────
+
+    def add_flashcard(self, front: str, back: str = "", book_id: int | None = None,
+                      deck: str = "", due_date: str = "") -> int:
+        with self._write_lock:
+            cur = self.conn.execute(
+                """INSERT INTO flashcards (book_id, front, back, deck, due_date)
+                   VALUES (?,?,?,?,?)""",
+                (book_id, front, back, deck, due_date))
+            self.conn.commit()
+            return cur.lastrowid
+
+    def get_flashcards(self, book_id: int | None = None) -> list[dict]:
+        if book_id is not None:
+            rows = self.conn.execute(
+                "SELECT * FROM flashcards WHERE book_id=? ORDER BY created_at DESC",
+                (book_id,)).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM flashcards ORDER BY created_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_due_flashcards(self, today_iso: str, book_id: int | None = None) -> list[dict]:
+        """Cards devidos: nunca revisados (due_date vazio) ou com due_date <= hoje."""
+        query = "SELECT * FROM flashcards WHERE (due_date = '' OR due_date <= ?)"
+        params: list = [today_iso]
+        if book_id is not None:
+            query += " AND book_id = ?"
+            params.append(book_id)
+        # novos primeiro, depois por data de vencimento
+        query += " ORDER BY (due_date = '') DESC, due_date ASC, created_at ASC"
+        rows = self.conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_flashcard_review(self, fc_id: int, due_date: str, interval_days: int,
+                                ease: float, reps: int, lapses: int) -> None:
+        with self._write_lock:
+            self.conn.execute(
+                """UPDATE flashcards SET due_date=?, interval_days=?, ease=?, reps=?, lapses=?
+                   WHERE id=?""",
+                (due_date, interval_days, ease, reps, lapses, fc_id))
+            self.conn.commit()
+
+    def delete_flashcard(self, fc_id: int) -> None:
+        with self._write_lock:
+            self.conn.execute("DELETE FROM flashcards WHERE id=?", (fc_id,))
+            self.conn.commit()
+
+    def count_flashcards(self, book_id: int | None = None) -> int:
+        if book_id is not None:
+            r = self.conn.execute(
+                "SELECT COUNT(*) FROM flashcards WHERE book_id=?", (book_id,)).fetchone()
+        else:
+            r = self.conn.execute("SELECT COUNT(*) FROM flashcards").fetchone()
+        return r[0]
 
     # ── Busca ──────────────────────────────────────────────────────────
 

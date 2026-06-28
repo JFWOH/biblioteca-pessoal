@@ -150,6 +150,11 @@ class MainWindow(QMainWindow):
         ai_action.triggered.connect(self._show_rag_panel)
         tools_menu.addAction(ai_action)
 
+        flashcards_action = QAction("🃏 Flashcards", self)
+        flashcards_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
+        flashcards_action.triggered.connect(self._show_flashcards)
+        tools_menu.addAction(flashcards_action)
+
         tools_menu.addSeparator()
 
         reindex_action = QAction("🔄 Reindexar Biblioteca (IA)", self)
@@ -879,6 +884,15 @@ class MainWindow(QMainWindow):
         self._rag_panel._question_input.setText(question)
         self._rag_panel._on_send()
 
+    def _show_flashcards(self) -> None:
+        """Abre o diálogo de Flashcards (lista + modo estudo)."""
+        from src.gui.dialogs.flashcards_dialog import FlashcardsDialog
+        current_book_id = None
+        if self._main_stack.currentIndex() == 1 and self._reader_view._book_id > 0:
+            current_book_id = self._reader_view._book_id
+        dialog = FlashcardsDialog(self._db, current_book_id=current_book_id, parent=self)
+        dialog.exec()
+
     def _open_anki_export_dialog(self, front: str, back: str):
         """Abre o diálogo de exportação para o Anki."""
         from src.core.anki_service import AnkiService
@@ -890,7 +904,20 @@ class MainWindow(QMainWindow):
         dialog = AnkiExportDialog(service=service, initial_front=front, initial_back=back, parent=self)
         if dialog.exec() == AnkiExportDialog.DialogCode.Accepted and dialog.saved:
             self._statusbar.showMessage("⏳ Enviando card para o Anki...", 3000)
-            
+
+            # Persiste o flashcard localmente (fonte de verdade consultável no app + estudo)
+            try:
+                fc_book_id = self._reader_view._book_id if self._reader_view._book_id > 0 else None
+                self._db.add_flashcard(
+                    front=dialog.result_front,
+                    back=dialog.result_back,
+                    book_id=fc_book_id,
+                    deck=dialog.result_deck,
+                )
+            except Exception as exc:
+                print(f"[Flashcards] Falha ao salvar card localmente: {exc}", flush=True)
+
+
             self._anki_worker = AnkiAddNoteWorker(
                 service=service,
                 deck_name=dialog.result_deck,
