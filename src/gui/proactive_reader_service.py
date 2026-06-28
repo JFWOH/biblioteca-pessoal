@@ -24,12 +24,17 @@ class ProactiveReaderService(QObject):
         self.trigger_engine = ProactiveTriggerEngine()
         self.intensity = "Desligado"  # Desligado, Leve, Moderado, Estudo
         self._worker = None
+        self._cross_ref_fn = None  # função injetada: page_text -> hits vetoriais
 
     def set_intensity(self, intensity: str):
         self.intensity = intensity
         self.trigger_engine.reset()
 
-    def process_page_context(self, page_text: str, page_number: int):
+    def set_cross_reference(self, fn):
+        """Injeta a busca vetorial usada para conectar a página a outros livros."""
+        self._cross_ref_fn = fn
+
+    def process_page_context(self, page_text: str, page_number: int, book_id=None):
         if self.intensity == "Desligado":
             return
 
@@ -57,7 +62,10 @@ class ProactiveReaderService(QObject):
             )
             return
 
-        self._worker = ProactiveWorker(model, page_text, self.ollama_url)
+        self._worker = ProactiveWorker(
+            model, page_text, self.ollama_url,
+            search_fn=self._cross_ref_fn, book_id=book_id,
+        )
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.error.connect(self._on_worker_error)
         self._worker.start()

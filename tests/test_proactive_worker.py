@@ -71,3 +71,20 @@ class TestProactiveWorkerRun:
             w.run()
 
         assert len(errors) == 1
+
+    def test_run_appends_cross_reference(self, qtbot):
+        """Com search_fn, a observação ganha a conexão com outro livro."""
+        def fake_search(text):
+            return [{"metadata": {"book_id": 99, "title": "Outro Livro", "page_number": 4}, "distance": 0.1}]
+
+        w = ProactiveWorker("m", "texto da página", "http://localhost:11434",
+                            search_fn=fake_search, book_id=1)
+        received = []
+        w.finished.connect(received.append)
+        obs = {"tipo": "Observação do texto", "confianca": "Alta", "texto": "Algo."}
+        with patch("urllib.request.urlopen", return_value=_fake_chat_response(json.dumps(obs))):
+            w.run()
+
+        assert len(received) == 1
+        assert "Outro Livro" in received[0]["texto"]
+        assert received[0]["texto"].startswith("Algo.")

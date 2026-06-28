@@ -120,3 +120,21 @@ def test_process_uses_resolved_model(qtbot):
         svc.process_page_context("Texto longo " * 30, 5)
         MockWorker.assert_called_once()
         assert MockWorker.call_args[0][0] == "gemma4:e4b"  # modelo resolvido (rápido)
+
+
+def test_process_passes_search_fn_and_book_id(qtbot):
+    """O cross-ref injetado e o book_id são repassados ao worker."""
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    svc.intensity = "Estudo"
+    fn = lambda text: []
+    svc.set_cross_reference(fn)
+    with patch("src.gui.proactive_reader_service.ProactiveWorker") as MockWorker, \
+         patch.object(svc.hardware_service, "get_proactive_model_name", return_value="gemma4:e4b"), \
+         patch.object(svc.trigger_engine, "should_trigger", return_value=True), \
+         patch.object(svc, "_installed_models", return_value=["gemma4:e4b"]):
+        MockWorker.return_value.isRunning.return_value = False
+        svc.process_page_context("Texto longo " * 30, 5, book_id=7)
+        MockWorker.assert_called_once()
+        assert MockWorker.call_args.kwargs.get("book_id") == 7
+        assert MockWorker.call_args.kwargs.get("search_fn") is fn

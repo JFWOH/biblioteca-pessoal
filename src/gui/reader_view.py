@@ -35,9 +35,10 @@ class ReaderView(QWidget):
     reading_context_updated = pyqtSignal(int, str, int, str) # book_id, title, page_number, page_text
     ai_action_requested = pyqtSignal(str, str)      # action_type, text
 
-    def __init__(self, parent=None, tts_router=None):
+    def __init__(self, parent=None, tts_router=None, rag_engine=None):
         super().__init__(parent)
         self._tts_router = tts_router
+        self._rag_engine = rag_engine
         self._reader: BaseReader | None = None
         self._book_id: int = 0
         self._theme = "dark"
@@ -47,9 +48,26 @@ class ReaderView(QWidget):
         self._proactive_service = ProactiveReaderService(parent=self)
         self._proactive_service.observation_ready.connect(self._on_proactive_observation)
         self._proactive_service.error_occurred.connect(self._on_proactive_error)
+        # Cross-reference proativo: dá ao agente acesso de leitura ao índice vetorial
+        # para conectar a página atual a outros livros da biblioteca.
+        if rag_engine is not None:
+            self._proactive_service.set_cross_reference(self._proactive_cross_ref)
         self._setup_ui()
         self._setup_shortcuts()
-        self.reading_context_updated.connect(lambda b, t, p, txt: self._proactive_service.process_page_context(txt, p))
+        self.reading_context_updated.connect(
+            lambda b, t, p, txt: self._proactive_service.process_page_context(txt, p, b)
+        )
+
+    def _proactive_cross_ref(self, page_text: str):
+        """Busca o conceito da página em toda a biblioteca (roda na thread do worker).
+
+        A exclusão do livro atual e o limiar de relevância são aplicados em
+        format_cross_reference. Devolve [] em caso de qualquer falha.
+        """
+        try:
+            return self._rag_engine.search_similar(page_text[:600], n_results=5)
+        except Exception:
+            return []
 
     def _setup_ui(self):
         # O layout raiz agora é um QSplitter horizontal para Side-by-Side

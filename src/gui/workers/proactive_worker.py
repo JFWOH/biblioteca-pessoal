@@ -12,11 +12,15 @@ class ProactiveWorker(QThread):
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
 
-    def __init__(self, model: str, page_text: str, ollama_url: str = "http://localhost:11434", parent=None):
+    def __init__(self, model: str, page_text: str, ollama_url: str = "http://localhost:11434",
+                 parent=None, search_fn=None, book_id=None):
         super().__init__(parent)
         self.model = model
         self.page_text = page_text
         self.ollama_url = ollama_url
+        # Cross-reference proativo: busca o conceito em outros livros (injetada).
+        self.search_fn = search_fn
+        self.book_id = book_id
         self._is_cancelled = False
 
     def cancel(self):
@@ -102,6 +106,17 @@ class ProactiveWorker(QThread):
 
             if "tipo" not in obs or "confianca" not in obs or "texto" not in obs:
                 raise ValueError("JSON incompleto")
+
+            # Enriquecimento: conexão com outros livros da biblioteca (cross-reference).
+            if self.search_fn is not None:
+                try:
+                    from src.core.proactive_cross_reference import format_cross_reference
+                    hits = self.search_fn(self.page_text)
+                    note = format_cross_reference(hits, self.book_id)
+                    if note:
+                        obs["texto"] = (obs.get("texto", "") + "\n\n" + note).strip()
+                except Exception as exc:
+                    logger.warning(f"Cross-reference proativo falhou (ignorado): {exc}")
 
             if self._is_cancelled:
                 return  # usuário avançou de página/cancelou: descarta o resultado

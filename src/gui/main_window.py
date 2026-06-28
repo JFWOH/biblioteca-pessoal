@@ -231,7 +231,7 @@ class MainWindow(QMainWindow):
         self._main_stack.addWidget(library_page)  # index 0
 
         # ── Página do Leitor ──
-        self._reader_view = ReaderView(parent=self, tts_router=self._tts_router)
+        self._reader_view = ReaderView(parent=self, tts_router=self._tts_router, rag_engine=self._rag_engine)
         self._reader_view.closed.connect(self._close_reader)
         self._reader_view.progress_changed.connect(self._on_progress)
         self._reader_view.annotation_added.connect(self._on_annotation_added)
