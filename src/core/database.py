@@ -133,6 +133,8 @@ class LibraryDB:
                     VALUES ('delete', old.id, old.title, old.author, old.description);
                     INSERT INTO books_fts(rowid, title, author, description)
                     VALUES (new.id, new.title, new.author, new.description); END""",
+                # Migração: título opcional para anotações/notas.
+                "ALTER TABLE annotations ADD COLUMN title TEXT DEFAULT ''",
             ]:
                 try:
                     self.conn.execute(sql)
@@ -377,13 +379,13 @@ class LibraryDB:
 
     def add_annotation(self, book_id: int, page_number: int, content="",
                        highlight_color="#fbbf24", annotation_type="highlight",
-                       position_data="{}") -> int:
+                       position_data="{}", title="") -> int:
         with self._write_lock:
             cur = self.conn.execute(
                 """INSERT INTO annotations (book_id, page_number, content,
-                   highlight_color, annotation_type, position_data)
-                   VALUES (?,?,?,?,?,?)""",
-                (book_id, page_number, content, highlight_color, annotation_type, position_data))
+                   highlight_color, annotation_type, position_data, title)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (book_id, page_number, content, highlight_color, annotation_type, position_data, title))
             self.conn.commit()
             return cur.lastrowid
 

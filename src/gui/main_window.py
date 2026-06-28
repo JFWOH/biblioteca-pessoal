@@ -431,6 +431,7 @@ class MainWindow(QMainWindow):
             highlight_color=data.get("color", data.get("highlight_color", "#fbbf24")),
             annotation_type=data.get("type", data.get("annotation_type", "note")),
             position_data=data.get("position_data", "{}"),
+            title=data.get("title", ""),
         )
         # Recarrega anotações no painel
         annotations = self._db.get_annotations(book_id)

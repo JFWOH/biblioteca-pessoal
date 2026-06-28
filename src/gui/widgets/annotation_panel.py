@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QScrollArea, QFrame, QComboBox,
+    QTextEdit, QScrollArea, QFrame, QComboBox, QLineEdit,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
@@ -54,6 +54,15 @@ class AnnotationItem(QFrame):
         header.addWidget(self._page_btn)
 
         layout.addLayout(header)
+
+        # Título (opcional) — destaque acima do conteúdo
+        title = self._annotation.get("title", "")
+        self._title_item_lbl = None
+        if title:
+            self._title_item_lbl = QLabel(title)
+            self._title_item_lbl.setWordWrap(True)
+            self._title_item_lbl.setStyleSheet("color: #e5e7eb; font-size: 13px; font-weight: 600;")
+            layout.addWidget(self._title_item_lbl)
 
         # Conteúdo
         content = self._annotation.get("content", "")
@@ -159,6 +168,8 @@ class AnnotationItem(QFrame):
             }}
             QPushButton:hover {{ background: {page_hover}; }}
         """)
+        if hasattr(self, "_title_item_lbl") and self._title_item_lbl:
+            self._title_item_lbl.setStyleSheet(f"color: {content_color}; font-size: 13px; font-weight: 600; background: transparent; border: none;")
         if hasattr(self, "_content_lbl") and self._content_lbl:
             self._content_lbl.setStyleSheet(f"color: {content_color}; font-size: 12px; line-height: 1.5; background: transparent; border: none;")
         if hasattr(self, "_date_lbl") and self._date_lbl:
@@ -192,8 +203,8 @@ class AnnotationPanel(QWidget):
         super().__init__(parent)
         self._book_id = 0
         self._current_page = 0
-        self.setMinimumWidth(280)
-        self.setMaximumWidth(340)
+        # Largura mínima razoável; sem máximo, para preencher todo o dock.
+        self.setMinimumWidth(240)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -245,6 +256,19 @@ class AnnotationPanel(QWidget):
         add_layout = QVBoxLayout(self._add_frame)
         add_layout.setContentsMargins(10, 8, 10, 8)
         add_layout.setSpacing(6)
+
+        # Título opcional da nota
+        self._title_input = QLineEdit()
+        self._title_input.setPlaceholderText("Título da nota (opcional)")
+        self._title_input.setStyleSheet("""
+            QLineEdit {
+                background: #0f0f17; border: 1px solid #27272a;
+                border-radius: 6px; padding: 5px 6px; color: #e4e4e7;
+                font-size: 12px;
+            }
+            QLineEdit:focus { border-color: #6366f1; }
+        """)
+        add_layout.addWidget(self._title_input)
 
         self._note_input = QTextEdit()
         self._note_input.setPlaceholderText("Escreva uma nota para esta página...")
@@ -402,7 +426,15 @@ class AnnotationPanel(QWidget):
             }}
         """)
 
-        # Note input
+        # Title + Note input
+        self._title_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {bg_input}; border: 1px solid {border_color};
+                border-radius: 6px; padding: 5px 6px; color: {text_main};
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{ border-color: {btn_primary_bg}; }}
+        """)
         self._note_input.setStyleSheet(f"""
             QTextEdit {{
                 background: {bg_input}; border: 1px solid {border_color};
@@ -487,8 +519,10 @@ class AnnotationPanel(QWidget):
             "content": content,
             "type": "note",
             "color": self._selected_color,
+            "title": self._title_input.text().strip(),
         })
         self._note_input.clear()
+        self._title_input.clear()
 
     def _add_bookmark(self):
         self.annotation_added.emit({
