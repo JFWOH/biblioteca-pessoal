@@ -53,14 +53,12 @@ class ProactiveWorker(QThread):
             # Structured output do Ollama: garante JSON válido na resposta,
             # tornando o parsing robusto sem depender de limpeza de markdown.
             "format": "json",
-            # Desliga o "thinking": modelos de raciocínio (ex.: gemma4:e4b) gastavam
-            # todo o num_predict no campo de reasoning e devolviam content vazio
-            # ("Resposta vazia da IA"). Com think=False o modelo produz a observação
-            # direto. Ignorado por modelos que não suportam raciocínio.
-            "think": False,
-            # A observação é curta (1-4 frases); 256 tokens é folgado e evita
-            # reservar 4096 tokens à toa (geração mais rápida, libera o modelo).
-            "options": {"temperature": 0.2, "num_predict": 256},
+            # num_predict é um TETO, não uma reserva: o modelo para em done=stop ao
+            # terminar (gera só o necessário). Modelos de raciocínio (ex.: gemma4:e4b)
+            # consomem tokens "pensando" ANTES do content; um teto baixo (256)
+            # estourava no meio do raciocínio e devolvia content vazio ("Resposta
+            # vazia da IA"). Mantemos o raciocínio (qualidade) com teto folgado.
+            "options": {"temperature": 0.2, "num_predict": 4096},
         }
 
     def run(self):

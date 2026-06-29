@@ -21,11 +21,13 @@ class TestProactiveWorkerPayload:
         assert payload["stream"] is False
         assert payload["model"] == "gemma4:e4b"
 
-    def test_build_payload_reduces_num_predict(self):
+    def test_build_payload_num_predict_allows_reasoning(self):
         w = ProactiveWorker("gemma4:e4b", "Texto.", "http://localhost:11434")
         payload = w._build_payload()
-        # Observação curta (1-4 frases): não deve reservar os antigos 4096 tokens.
-        assert payload["options"]["num_predict"] <= 512
+        # num_predict é um TETO (não reserva). Modelos de raciocínio gastam tokens
+        # "pensando" antes do content; um teto baixo (256) devolvia content vazio.
+        # Precisa ser folgado o suficiente para o raciocínio + a observação.
+        assert payload["options"]["num_predict"] >= 1024
 
     def test_build_payload_includes_page_text(self):
         w = ProactiveWorker("m", "CONTEUDO_UNICO_XYZ", "http://localhost:11434")
