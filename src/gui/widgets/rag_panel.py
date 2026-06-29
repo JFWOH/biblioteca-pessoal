@@ -6,6 +6,8 @@ fontes bibliográficas e controle de indexação — tudo rodando localmente.
 
 from __future__ import annotations
 
+import uuid
+
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
@@ -39,6 +41,7 @@ class RAGPanel(QWidget):
     back_requested = pyqtSignal()      # Emitido para voltar à biblioteca no modo tela cheia
     save_annotation_requested = pyqtSignal(int, int, str) # book_id, page, content
     clear_chat_requested = pyqtSignal()  # limpar a memória conversacional do contexto atual
+    feedback_submitted = pyqtSignal(int, dict)  # rating (+1/-1), context dict
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -46,6 +49,11 @@ class RAGPanel(QWidget):
         self._full_answer = ""
         self._reading_context = None
         self._is_standalone = False
+        # Feedback (Fase 1b): id de sessão por pergunta + última query, para
+        # gravar 👍/👎 em agent_feedback; 1 voto por resposta.
+        self._current_session_id = ""
+        self._last_query = ""
+        self._feedback_given = False
         self._setup_ui()
 
     # ── Construção da UI ───────────────────────────────────────────────────────
@@ -215,7 +223,33 @@ class RAGPanel(QWidget):
         """)
         self._save_note_btn.clicked.connect(self._on_save_note_clicked)
         action_btns_layout.addWidget(self._save_note_btn)
-        
+
+        # Feedback 👍/👎 (Fase 1b): avalia a resposta → agent_feedback.
+        # Estilo "ghost" discreto, espelhando selection_popover.
+        _fb_style = """
+            QPushButton {
+                background: transparent;
+                border: 1px solid #3f3f46;
+                border-radius: 8px;
+                color: #9ca3af;
+                padding: 8px 12px;
+                font-size: 12px;
+            }
+            QPushButton:hover { background: rgba(16, 185, 129, 0.12); color: #10b981; }
+            QPushButton:disabled { color: #52525b; border-color: #2a2a2e; }
+        """
+        self._thumbs_up_btn = QPushButton("👍 Útil")
+        self._thumbs_up_btn.setVisible(False)
+        self._thumbs_up_btn.setStyleSheet(_fb_style)
+        self._thumbs_up_btn.clicked.connect(lambda: self._on_feedback_clicked(1))
+        action_btns_layout.addWidget(self._thumbs_up_btn)
+
+        self._thumbs_down_btn = QPushButton("👎 Não ajudou")
+        self._thumbs_down_btn.setVisible(False)
+        self._thumbs_down_btn.setStyleSheet(_fb_style)
+        self._thumbs_down_btn.clicked.connect(lambda: self._on_feedback_clicked(-1))
+        action_btns_layout.addWidget(self._thumbs_down_btn)
+
         chat_layout.addLayout(action_btns_layout)
 
         # Progress bar (visível durante geração/indexação)
@@ -725,6 +759,46 @@ class RAGPanel(QWidget):
             # Mesmo fora do contexto, deixa criar flashcard livre
             self._flashcard_btn.setVisible(True)
 
+        # Feedback 👍/👎: disponível em qualquer resposta não vazia (livro ou global).
+        if full_answer.strip():
+            self._show_feedback_buttons()
+
+    def _show_feedback_buttons(self) -> None:
+        for btn, label in (
+            (self._thumbs_up_btn, "👍 Útil"),
+            (self._thumbs_down_btn, "👎 Não ajudou"),
+        ):
+            btn.setText(label)
+            btn.setEnabled(True)
+            btn.setVisible(True)
+
+    def _hide_feedback_buttons(self) -> None:
+        self._thumbs_up_btn.setVisible(False)
+        self._thumbs_down_btn.setVisible(False)
+
+    def _on_feedback_clicked(self, rating: int) -> None:
+        """Registra 👍 (+1) / 👎 (-1) da resposta atual. Um voto por resposta."""
+        if self._feedback_given:
+            return
+        self._feedback_given = True
+        ctx = self._reading_context or {}
+        book_id = ctx.get("book_id") or None
+        if book_id == 0:
+            book_id = None
+        context = {
+            "kind": "answer",
+            "book_id": book_id,
+            "page": ctx.get("page"),
+            "session_id": self._current_session_id,
+            "query": self._last_query,
+        }
+        self.feedback_submitted.emit(rating, context)
+        # Confirmação visual: desabilita ambos e destaca o escolhido.
+        chosen = self._thumbs_up_btn if rating > 0 else self._thumbs_down_btn
+        chosen.setText("✅ Obrigado!")
+        self._thumbs_up_btn.setEnabled(False)
+        self._thumbs_down_btn.setEnabled(False)
+
     def _on_flashcard_clicked(self) -> None:
         """Abre o dialog para criar um flashcard a partir da resposta e do contexto."""
         if not self._full_answer.strip():
@@ -808,6 +882,10 @@ class RAGPanel(QWidget):
         self._sources_list.clear()
         self._set_generating(True)
         self._save_note_btn.setVisible(False)
+        # Nova pergunta: nova sessão de feedback (1 voto por resposta).
+        self._last_query = question
+        self._current_session_id = str(uuid.uuid4())
+        self._feedback_given = False
         self._gen_status.setText(f'🔍 Consultando: "{question[:60]}..."')
         self.query_requested.emit(question)
 
@@ -839,6 +917,7 @@ class RAGPanel(QWidget):
         if active:
             self._save_note_btn.setVisible(False)
             self._flashcard_btn.setVisible(False)
+            self._hide_feedback_buttons()
         else:
             self._gen_status.setText("")
 

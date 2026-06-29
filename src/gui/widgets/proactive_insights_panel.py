@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 class ProactiveInsightsPanel(QWidget):
     flashcard_requested = pyqtSignal(str)
+    dismiss_requested = pyqtSignal(int)  # obs_id — usuário dispensou a observação
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -62,7 +63,8 @@ class ProactiveInsightsPanel(QWidget):
         conf = (obs.get("confianca") or "").strip()
         texto = obs.get("texto", "")
         head = f"{tipo} · {conf}" if conf else tipo
-        self._prepend(self._make_card(head, texto, "#10b981", with_flashcard=True))
+        self._prepend(self._make_card(
+            head, texto, "#10b981", with_flashcard=True, obs_id=obs.get("id")))
 
     def add_error(self, msg: str):
         self._prepend(self._make_card("Aviso", msg, "#f59e0b", with_flashcard=False))
@@ -84,16 +86,42 @@ class ProactiveInsightsPanel(QWidget):
         self._empty.setVisible(False)
         self._scroll.setVisible(True)
 
-    def _make_card(self, header_text: str, body_text: str, accent: str, with_flashcard: bool) -> QFrame:
+    def _dismiss_card(self, frame: QFrame, obs_id: int):
+        self.dismiss_requested.emit(obs_id)
+        frame.setParent(None)
+        frame.deleteLater()
+        self._count = max(0, self._count - 1)
+        if self._count == 0:
+            self._empty.setVisible(True)
+            self._scroll.setVisible(False)
+
+    def _make_card(self, header_text: str, body_text: str, accent: str,
+                   with_flashcard: bool, obs_id=None) -> QFrame:
         frame = QFrame()
         frame.setObjectName("insightCard")
         lay = QVBoxLayout(frame)
         lay.setContentsMargins(10, 8, 10, 8)
         lay.setSpacing(4)
 
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
         head = QLabel(header_text.upper())
         head.setStyleSheet(f"color: {accent}; font-size: 10px; font-weight: 700; background: transparent; border: none;")
-        lay.addWidget(head)
+        header_row.addWidget(head)
+        header_row.addStretch()
+        # ✕ de dispensa: só para observações persistidas (com id).
+        if obs_id is not None:
+            close_btn = QPushButton("✕")
+            close_btn.setFixedSize(18, 18)
+            close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            close_btn.setStyleSheet(
+                "QPushButton { background: transparent; border: none; color: #6b7280;"
+                " font-size: 11px; } QPushButton:hover { color: #f87171; }"
+            )
+            close_btn.clicked.connect(
+                lambda _checked=False, f=frame, oid=obs_id: self._dismiss_card(f, oid))
+            header_row.addWidget(close_btn)
+        lay.addLayout(header_row)
 
         body = QLabel(body_text)
         body.setObjectName("insightBody")

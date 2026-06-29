@@ -1,5 +1,8 @@
 """Visualização do leitor de documentos."""
 
+import json
+import logging
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QSplitter, QStackedWidget, QMenu, QRubberBand,
@@ -21,7 +24,10 @@ from src.gui.widgets.selection_popover import SelectionActionPopover
 from src.gui.widgets.reader_dock import ReaderDock
 from src.gui.widgets.proactive_insights_panel import ProactiveInsightsPanel
 from src.gui.proactive_reader_service import ProactiveReaderService
+from src.core.proactive_observation import confidence_to_float, obs_dict_from_row
 from PyQt6.QtWidgets import QComboBox
+
+logger = logging.getLogger(__name__)
 
 
 class ReaderView(QWidget):
@@ -35,16 +41,21 @@ class ReaderView(QWidget):
     reading_context_updated = pyqtSignal(int, str, int, str) # book_id, title, page_number, page_text
     ai_action_requested = pyqtSignal(str, str)      # action_type, text
 
-    def __init__(self, parent=None, tts_router=None, rag_engine=None):
+    def __init__(self, parent=None, tts_router=None, rag_engine=None, db=None):
         super().__init__(parent)
         self._tts_router = tts_router
         self._rag_engine = rag_engine
+        self._db = db  # LibraryDB (core puro) para persistir observações proativas
         self._reader: BaseReader | None = None
         self._book_id: int = 0
         self._theme = "dark"
         self._is_fullscreen = False
         self._search_results: list[dict] = []
         self._annotations: list[dict] = []
+        # Página 1-based da última observação proativa e id da obs no rodapé
+        # (para persistir/dispensar em ai_observations — Fase 1b).
+        self._current_proactive_page: int = 0
+        self._footer_obs_id = None
         self._proactive_service = ProactiveReaderService(parent=self)
         self._proactive_service.observation_ready.connect(self._on_proactive_observation)
         self._proactive_service.error_occurred.connect(self._on_proactive_error)
@@ -420,6 +431,7 @@ class ReaderView(QWidget):
         self._proactive_footer.flashcard_requested.connect(
             lambda text: self.ai_action_requested.emit("flashcard", text)
         )
+        self._proactive_footer.closed.connect(self._on_footer_closed)
         left_layout.addWidget(self._proactive_footer)
 
         # Barra de progresso inferior
@@ -446,6 +458,7 @@ class ReaderView(QWidget):
         self._insights_panel.flashcard_requested.connect(
             lambda text: self.ai_action_requested.emit("flashcard", text)
         )
+        self._insights_panel.dismiss_requested.connect(self._on_observation_dismissed)
         self._dock.add_tab("insights", "💡 Insights", self._insights_panel)
         self._dock.closed.connect(self.hide_dock)
         self._dock.tab_changed.connect(lambda _k: self._sync_dock_buttons())
@@ -559,6 +572,7 @@ class ReaderView(QWidget):
         self._book_id = book_data.get("id", 0)
         self._annotation_panel.set_book_id(self._book_id)
         self._title_label.setText(book_data.get("title", ""))
+        self._load_persisted_observations()
 
         # Fecha leitor anterior
         if self._reader and self._reader.is_open:
@@ -615,10 +629,13 @@ class ReaderView(QWidget):
             page_text = self._reader.get_chapter_text(page)
         
         if page_text:
+            # Página 1-based passada ao serviço proativo; guardada para persistir
+            # a observação resultante em ai_observations.
+            self._current_proactive_page = page + 1
             self.reading_context_updated.emit(
-                self._book_id, 
-                self._title_label.text(), 
-                page + 1, 
+                self._book_id,
+                self._title_label.text(),
+                page + 1,
                 page_text[:1500]
             )
 
@@ -1533,10 +1550,66 @@ class ReaderView(QWidget):
         menu.exec(anchor.mapToGlobal(QPoint(0, anchor.height() + 2)))
 
     def _on_proactive_observation(self, obs: dict):
-        """Exibe a observação proativa no rodapé e a registra no painel de Insights."""
+        """Persiste a observação proativa e a exibe no rodapé + painel de Insights."""
+        # Persistência (Fase 1b): grava em ai_observations e enriquece o dict com
+        # id/page para permitir dismiss e reload. Graceful (ADR-005): se o banco
+        # falhar, ainda exibimos o card.
+        self._footer_obs_id = None
+        if self._db is not None and self._book_id:
+            try:
+                conf = confidence_to_float(obs.get("confianca", ""))
+                obs_id = self._db.add_observation(
+                    self._book_id,
+                    self._current_proactive_page,
+                    obs.get("texto", ""),
+                    kind=obs.get("tipo", "insight"),
+                    payload_json=json.dumps(obs, ensure_ascii=False),
+                    confidence=conf,
+                )
+                obs["id"] = obs_id
+                obs["page"] = self._current_proactive_page
+                self._footer_obs_id = obs_id
+            except Exception as exc:
+                logger.warning(f"Falha ao persistir observação proativa (ignorado): {exc}")
+
         self._proactive_footer.set_observation(obs)
         if hasattr(self, "_insights_panel"):
             self._insights_panel.add_observation(obs)
+
+    def _load_persisted_observations(self):
+        """Recarrega no painel de Insights as observações salvas deste livro.
+
+        Reabertura/restart: traz de volta as observações não dispensadas
+        (Fase 1b). Graceful (ADR-005): sem banco ou em erro, apenas limpa o painel.
+        """
+        if not hasattr(self, "_insights_panel"):
+            return
+        self._insights_panel.clear()
+        if self._db is None or not self._book_id:
+            return
+        try:
+            rows = self._db.get_observations(book_id=self._book_id, limit=30)
+        except Exception as exc:
+            logger.warning(f"Falha ao carregar observações do livro (ignorado): {exc}")
+            return
+        # get_observations vem DESC (mais nova primeiro); add_observation faz
+        # prepend, então iteramos em reversed para a mais nova terminar no topo.
+        for row in reversed(rows):
+            self._insights_panel.add_observation(obs_dict_from_row(row))
+
+    def _on_observation_dismissed(self, obs_id: int):
+        """Marca a observação como dispensada (não reaparece ao reabrir o livro)."""
+        if self._db is not None and obs_id:
+            try:
+                self._db.dismiss_observation(obs_id)
+            except Exception as exc:
+                logger.warning(f"Falha ao dispensar observação {obs_id} (ignorado): {exc}")
+
+    def _on_footer_closed(self):
+        """Fechar o rodapé dispensa a observação exibida nele."""
+        if self._footer_obs_id:
+            self._on_observation_dismissed(self._footer_obs_id)
+            self._footer_obs_id = None
 
     def _on_proactive_error(self, msg: str):
         """Mostra falhas do agente proativo no statusbar e no painel de Insights

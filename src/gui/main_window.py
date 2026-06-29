@@ -1,5 +1,6 @@
 """Janela principal da aplicação Biblioteca Pessoal."""
 
+import logging
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -32,6 +33,8 @@ from src.gui.widgets.rag_panel import RAGPanel
 from src.utils.constants import FILE_FILTER, DATA_DIR
 from src.utils.export import export_annotations_markdown
 from src.gui.watcher import DirectoryWatcher
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -231,7 +234,7 @@ class MainWindow(QMainWindow):
         self._main_stack.addWidget(library_page)  # index 0
 
         # ── Página do Leitor ──
-        self._reader_view = ReaderView(parent=self, tts_router=self._tts_router, rag_engine=self._rag_engine)
+        self._reader_view = ReaderView(parent=self, tts_router=self._tts_router, rag_engine=self._rag_engine, db=self._db)
         self._reader_view.closed.connect(self._close_reader)
         self._reader_view.progress_changed.connect(self._on_progress)
         self._reader_view.annotation_added.connect(self._on_annotation_added)
@@ -252,6 +255,7 @@ class MainWindow(QMainWindow):
         self._rag_panel.stop_requested.connect(self._on_rag_stop)
         self._rag_panel.model_changed.connect(self._on_model_changed)
         self._rag_panel.save_annotation_requested.connect(self._on_rag_annotation_save)
+        self._rag_panel.feedback_submitted.connect(self._on_rag_feedback)
         self._rag_panel.clear_chat_requested.connect(self._on_clear_chat)
         self._rag_panel.back_requested.connect(lambda: self._main_stack.setCurrentIndex(0))
         self._main_stack.addWidget(self._rag_panel)  # index 3
@@ -424,6 +428,13 @@ class MainWindow(QMainWindow):
             current_book_id,
             {"page": page, "content": content, "type": "ai_note", "color": "#6366f1"}
         )
+
+    def _on_rag_feedback(self, rating: int, context: dict):
+        """Persiste 👍/👎 do usuário sobre a resposta do RAG em agent_feedback."""
+        try:
+            self._db.add_feedback(rating=rating, **context)
+        except Exception as exc:
+            logger.warning(f"Falha ao registrar feedback do RAG (ignorado): {exc}")
 
     def _on_annotation_added(self, book_id: int, data: dict):
         """Persiste uma nova anotação no banco."""

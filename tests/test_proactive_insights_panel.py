@@ -67,3 +67,35 @@ def test_set_theme_all_modes(qtbot):
     p.add_observation({"tipo": "X", "texto": "a"})
     for theme in ("dark", "light", "sepia"):
         p.set_theme(theme)
+
+
+def test_dismiss_button_present_with_id(qtbot):
+    p = ProactiveInsightsPanel()
+    qtbot.addWidget(p)
+    p.add_observation({"tipo": "X", "texto": "a", "id": 42})
+    top = p._list.itemAt(0).widget()
+    labels = [b.text() for b in top.findChildren(QPushButton)]
+    assert "✕" in labels
+
+
+def test_no_dismiss_button_without_id(qtbot):
+    p = ProactiveInsightsPanel()
+    qtbot.addWidget(p)
+    p.add_observation({"tipo": "X", "texto": "a"})
+    top = p._list.itemAt(0).widget()
+    labels = [b.text() for b in top.findChildren(QPushButton)]
+    assert "✕" not in labels
+
+
+def test_dismiss_emits_obs_id_and_removes_card(qtbot):
+    p = ProactiveInsightsPanel()
+    qtbot.addWidget(p)
+    got = []
+    p.dismiss_requested.connect(got.append)
+    p.add_observation({"tipo": "X", "texto": "a", "id": 42})
+    top = p._list.itemAt(0).widget()
+    close_btn = next(b for b in top.findChildren(QPushButton) if b.text() == "✕")
+    close_btn.click()
+    assert got == [42]
+    assert p._count == 0
+    assert p._empty.isVisibleTo(p)
