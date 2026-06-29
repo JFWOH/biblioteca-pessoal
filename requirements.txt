@@ -36,6 +36,9 @@ kokoro>=0.9.4            # TTS neural padrão (usa GPU se disponível, senão CP
 piper-tts>=1.4.2         # TTS de fallback (ONNX, CPU)
 pyttsx3>=2.99            # TTS Engine legado offline local
 
+# OCR de PDFs escaneados (RapidOCR via ONNX — sem binário de sistema, roda em CPU)
+rapidocr-onnxruntime>=1.3.0
+
 # Tradução Offline (Fase 8) + TTS neural (Kokoro)
 # torch do PyPI = CPU. Para GPU NVIDIA (inclui Blackwell/sm_120, ex. RTX 5060 Ti),
 # instale a build CUDA 12.8 a partir do índice do PyTorch (ver README, seção GPU):

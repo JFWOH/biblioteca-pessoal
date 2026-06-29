@@ -1,43 +1,40 @@
-"""Serviço local de OCR utilizando PyTesseract e PyMuPDF."""
+"""Serviço local de OCR usando RapidOCR (onnxruntime) e PyMuPDF.
+
+RapidOCR roda 100% via pip (sem binário de sistema), com modelos ONNX embarcados
+no pacote — adequado para texto em alfabeto latino (PT/EN/ES). Roda em CPU.
+"""
 
 import logging
-import json
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+
 class OCRService:
     def __init__(self, config_path: str | Path = "data/config.json"):
         self.config_path = Path(config_path)
-        self._tesseract_available = None
-        self._supported_langs = self._load_ocr_language()
-        
-    def _load_ocr_language(self) -> str:
-        """Carrega o idioma de OCR do config.json, com fallback para 'por+eng'."""
+        self._available: Optional[bool] = None
+        self._engine = None  # RapidOCR (lazy)
+
+    def _get_engine(self):
+        """Constrói (uma vez) e retorna o motor RapidOCR, ou None se indisponível."""
+        if self._engine is not None:
+            return self._engine
         try:
-            if self.config_path.exists():
-                with open(self.config_path, "r", encoding="utf-8") as f:
-                    config = json.load(f)
-                return config.get("ocr_language", "por+eng")
+            from rapidocr_onnxruntime import RapidOCR
+            self._engine = RapidOCR()
+            return self._engine
         except Exception as e:
-            logger.warning("Falha ao ler config.json para OCR: %s", e)
-        return "por+eng"
-        
+            logger.warning("RapidOCR indisponível: %s", e)
+            return None
+
     def is_available(self) -> bool:
-        """Verifica se o tesseract está instalado e disponível no PATH."""
-        if self._tesseract_available is not None:
-            return self._tesseract_available
-            
-        try:
-            import pytesseract
-            pytesseract.get_tesseract_version()
-            self._tesseract_available = True
-        except (ImportError, Exception) as e:
-            logger.warning("Tesseract OCR não disponível ou não encontrado no PATH: %s", e)
-            self._tesseract_available = False
-            
-        return self._tesseract_available
+        """Verifica se o motor de OCR (RapidOCR) pode ser carregado (sem binário externo)."""
+        if self._available is not None:
+            return self._available
+        self._available = self._get_engine() is not None
+        return self._available
 
     def is_scanned_pdf(self, filepath: str | Path, sample_pages: int = 3) -> bool:
         """Detecta heurística se um PDF é provável 'scanned' (muita imagem, pouco texto)."""
@@ -72,46 +69,36 @@ class OCRService:
         return empty_text_pages >= (pages_to_check / 2) and pages_with_images > 0
 
     def extract_text_from_page(self, filepath: str | Path, page_number: int) -> Optional[str]:
-        """Extrai texto de uma página de PDF usando OCR via rasterização (pixmap)."""
+        """Extrai texto de uma página de PDF via OCR (rasterização + RapidOCR)."""
         if not self.is_available():
             return None
-            
+
+        engine = self._get_engine()
+        if engine is None:
+            return None
+
         import fitz
-        import pytesseract
-        from PIL import Image
-        
+
         try:
             doc = fitz.open(str(filepath))
             if page_number >= doc.page_count:
+                doc.close()
                 return None
-                
+
             page = doc[page_number]
-            # Zoom = 2 para 144 DPI, bom equilíbrio para OCR de texto legível
+            # Zoom = 2 para ~144 DPI, bom equilíbrio para OCR de texto legível
             mat = fitz.Matrix(2.0, 2.0)
             pix = page.get_pixmap(matrix=mat, alpha=False)
-            
-            # Converte Pixmap para objeto PIL Image
-            if pix.n - pix.alpha < 4:      # RGB ou Grayscale
-                mode = "RGB" if pix.n == 3 else "L"
-            else:
-                mode = "CMYK"
-            
-            img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
-            
-            # Tenta com as linguagens do config
-            try:
-                text = pytesseract.image_to_string(img, lang=self._supported_langs)
-            except pytesseract.TesseractError as e:
-                # Fallback para 'por' caso 'por+eng' falhe por falta de pack
-                if "por+eng" in self._supported_langs and "Failed loading language" in str(e):
-                    logger.warning("Idioma OCR '%s' indisponível, tentando fallback para 'por'.", self._supported_langs)
-                    text = pytesseract.image_to_string(img, lang="por")
-                else:
-                    raise e
-                    
+            png_bytes = pix.tobytes("png")
             doc.close()
+
+            # RapidOCR aceita bytes PNG; result = lista de [box, texto, confiança]
+            result, _ = engine(png_bytes)
+            if not result:
+                return ""
+            text = "\n".join(line[1] for line in result)
             return text.strip()
-            
+
         except Exception as e:
             logger.error("Erro durante OCR na página %d do PDF %s: %s", page_number, filepath, e)
             return None

@@ -48,8 +48,43 @@ def test_detect_scanned_pdf(test_pdf_dir):
 
 def test_ocr_unavailable_graceful_fail():
     service = OCRService()
-    # Forçar erro mock
-    service._tesseract_available = False
-    
+    # Força indisponibilidade do motor OCR
+    service._available = False
+
     text = service.extract_text_from_page("fake.pdf", 0)
     assert text is None
+
+
+def test_ocr_extracts_from_image_pdf(test_pdf_dir):
+    """Integração: o pipeline RapidOCR roda de ponta a ponta sobre uma página-imagem.
+
+    (Regressão: antes o OCR dependia do binário Tesseract; agora é RapidOCR via pip.)
+    """
+    from PIL import Image, ImageDraw, ImageFont
+    import io
+
+    img = Image.new("RGB", (700, 220), "white")
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("arial.ttf", 64)
+    except Exception:
+        font = ImageFont.load_default()
+    draw.text((25, 70), "BIBLIOTECA", fill="black", font=font)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+
+    doc = fitz.open()
+    page = doc.new_page(width=700, height=220)
+    page.insert_image(fitz.Rect(0, 0, 700, 220), stream=buf.getvalue())
+    p = test_pdf_dir / "img_text.pdf"
+    doc.save(str(p))
+    doc.close()
+
+    service = OCRService()
+    if not service.is_available():
+        pytest.skip("RapidOCR indisponível neste ambiente")
+
+    text = service.extract_text_from_page(p, 0)
+    # O pipeline deve executar sem erro e retornar uma string (não None)
+    assert text is not None
+    assert isinstance(text, str)
