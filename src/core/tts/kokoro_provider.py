@@ -206,6 +206,40 @@ class KokoroProvider(BaseTTSProvider):
                 return None
         return self._pipelines.get(lang_code)
 
+    def _ensure_voice(self, pipeline, voice: str) -> None:
+        """Garante que a voz esteja carregada, baixando-a no 1º uso.
+
+        O Kokoro baixa o arquivo da voz sob demanda; como o processo força
+        HF_HUB_OFFLINE=1, vozes ainda não cacheadas (ex.: vozes em inglês numa
+        instalação nova) falhariam offline. Aqui liberamos a rede apenas ao redor
+        do load da voz e restauramos em seguida — mesmo padrão do NLLB. Se a voz
+        já está no cache do pipeline, é um no-op (nenhuma rede).
+        """
+        try:
+            if voice in getattr(pipeline, "voices", {}):
+                return
+        except Exception:
+            return
+        # Libera a rede só ao redor do load da voz. NOTA: o huggingface_hub lê
+        # HF_HUB_OFFLINE numa constante de módulo no import; mudar só os.environ
+        # depois não tem efeito — é preciso patchar constants.HF_HUB_OFFLINE.
+        import huggingface_hub.constants as hf_const
+        prev_const = hf_const.HF_HUB_OFFLINE
+        prev_env = os.environ.get("HF_HUB_OFFLINE")
+        hf_const.HF_HUB_OFFLINE = False
+        os.environ["HF_HUB_OFFLINE"] = "0"
+        try:
+            pipeline.load_voice(voice)
+            logger.info("KOKORO: voz '%s' carregada (download no 1º uso se necessário).", voice)
+        except Exception as e:
+            logger.warning("KOKORO: não foi possível baixar/carregar a voz '%s': %s", voice, e)
+        finally:
+            hf_const.HF_HUB_OFFLINE = prev_const
+            if prev_env is None:
+                os.environ.pop("HF_HUB_OFFLINE", None)
+            else:
+                os.environ["HF_HUB_OFFLINE"] = prev_env
+
     def initialize(self) -> None:
         """Start a background thread to pre-warm the primary language pipeline."""
         if not self._available:
@@ -307,6 +341,7 @@ class KokoroProvider(BaseTTSProvider):
 
             inference_t0 = time.time()
             self._is_cancelled = False
+            self._ensure_voice(pipeline, voice)
             generator = pipeline(text, voice=voice, speed=rate)
 
             all_segments = []
@@ -391,6 +426,7 @@ class KokoroProvider(BaseTTSProvider):
                 return
 
             self._is_cancelled = False
+            self._ensure_voice(pipeline, voice)
             generator = pipeline(text, voice=voice, speed=rate)
             sample_rate = 24000
 
