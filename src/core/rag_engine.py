@@ -221,8 +221,8 @@ class RAGEngine:
         self._collection = None
         self._cancelled = False
 
-        # Memória conversacional por livro: book_id -> lista de mensagens recentes.
-        self._chat_history: dict = {}
+        # Memória conversacional agora persiste em SQLite (tabela chat_turns) via _chat_db().
+        self._lib_db = None
 
         self._init_chroma()
 
@@ -781,22 +781,42 @@ class RAGEngine:
 
     # ── Memória conversacional por livro ───────────────────────────────────────
 
+    def _chat_db(self):
+        """LibraryDB compartilhado (lazy) para persistir a conversa em SQLite."""
+        if getattr(self, "_lib_db", None) is None:
+            from src.core.database import LibraryDB
+            self._lib_db = LibraryDB(str(self._db_path))
+        return self._lib_db
+
     def get_chat_history(self, book_id) -> list[dict]:
-        """Retorna o histórico recente de conversa do livro (cópia)."""
-        return list(self._chat_history.get(book_id, []))
+        """Retorna o histórico recente de conversa do livro (persistido em SQLite).
+
+        book_id None = histórico global. Degrada graciosamente (lista vazia) se o
+        banco estiver indisponível.
+        """
+        try:
+            return self._chat_db().get_chat_turns(book_id, limit=6)
+        except Exception as exc:
+            logger.warning("get_chat_history falhou: %s", exc)
+            return []
 
     def append_chat_turn(self, book_id, user_content: str, assistant_content: str,
                          max_messages: int = 6) -> None:
-        """Acrescenta um turno (pergunta + resposta) ao histórico, limitado a max_messages."""
+        """Persiste um turno (pergunta + resposta), limitado a max_messages por livro."""
         if not (assistant_content or "").strip():
             return
-        hist = self._chat_history.setdefault(book_id, [])
-        hist.append({"role": "user", "content": (user_content or "")[:2000]})
-        hist.append({"role": "assistant", "content": assistant_content})
-        if len(hist) > max_messages:
-            del hist[: len(hist) - max_messages]
+        try:
+            db = self._chat_db()
+            db.add_chat_turn(book_id, "user", (user_content or "")[:2000])
+            db.add_chat_turn(book_id, "assistant", assistant_content)
+            db.prune_chat_turns(book_id, max_messages)
+        except Exception as exc:
+            logger.warning("append_chat_turn falhou: %s", exc)
 
     def clear_chat_history(self, book_id=None) -> None:
-        """Limpa o histórico conversacional de um livro (chave book_id)."""
-        self._chat_history.pop(book_id, None)
+        """Limpa o histórico conversacional persistido (book_id None = global)."""
+        try:
+            self._chat_db().clear_chat_turns(book_id)
+        except Exception as exc:
+            logger.warning("clear_chat_history falhou: %s", exc)
 

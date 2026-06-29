@@ -119,6 +119,42 @@ class LibraryDB:
                     lapses INTEGER DEFAULT 0,
                     FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE SET NULL
                 );
+                CREATE TABLE IF NOT EXISTS chat_turns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    book_id INTEGER,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL DEFAULT '',
+                    session_id TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS agent_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT DEFAULT '',
+                    book_id INTEGER,
+                    page INTEGER,
+                    kind TEXT NOT NULL DEFAULT 'answer',
+                    target_ref TEXT DEFAULT '',
+                    rating INTEGER NOT NULL DEFAULT 0,
+                    reason TEXT DEFAULT '',
+                    query TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS ai_observations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    book_id INTEGER,
+                    page INTEGER,
+                    kind TEXT NOT NULL DEFAULT 'insight',
+                    content TEXT NOT NULL DEFAULT '',
+                    payload_json TEXT DEFAULT '{}',
+                    source TEXT DEFAULT 'proactive',
+                    confidence REAL DEFAULT 0.0,
+                    dismissed INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_chat_turns_book ON chat_turns(book_id, id);
+                CREATE INDEX IF NOT EXISTS idx_ai_obs_book_page ON ai_observations(book_id, page);
                 CREATE INDEX IF NOT EXISTS idx_books_title ON books(title);
                 CREATE INDEX IF NOT EXISTS idx_books_author ON books(author);
                 CREATE INDEX IF NOT EXISTS idx_books_format ON books(file_format);
@@ -477,6 +513,98 @@ class LibraryDB:
         else:
             r = self.conn.execute("SELECT COUNT(*) FROM flashcards").fetchone()
         return r[0]
+
+    # ── Memória conversacional (chat_turns) ────────────────────────────────
+    # book_id NULL = histórico global (sem livro aberto).
+
+    def add_chat_turn(self, book_id, role: str, content: str, session_id: str = "") -> None:
+        with self._write_lock:
+            self.conn.execute(
+                "INSERT INTO chat_turns (book_id, role, content, session_id) VALUES (?,?,?,?)",
+                (book_id, role, (content or "")[:2000], session_id))
+            self.conn.commit()
+
+    def get_chat_turns(self, book_id, limit: int = 6) -> list[dict]:
+        if book_id is None:
+            rows = self.conn.execute(
+                "SELECT role, content FROM chat_turns WHERE book_id IS NULL "
+                "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT role, content FROM chat_turns WHERE book_id=? "
+                "ORDER BY id DESC LIMIT ?", (book_id, limit)).fetchall()
+        return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+
+    def prune_chat_turns(self, book_id, keep: int) -> None:
+        """Mantém apenas os ``keep`` turnos mais recentes do livro (ou do global)."""
+        with self._write_lock:
+            if book_id is None:
+                self.conn.execute(
+                    "DELETE FROM chat_turns WHERE book_id IS NULL AND id NOT IN "
+                    "(SELECT id FROM chat_turns WHERE book_id IS NULL ORDER BY id DESC LIMIT ?)",
+                    (keep,))
+            else:
+                self.conn.execute(
+                    "DELETE FROM chat_turns WHERE book_id=? AND id NOT IN "
+                    "(SELECT id FROM chat_turns WHERE book_id=? ORDER BY id DESC LIMIT ?)",
+                    (book_id, book_id, keep))
+            self.conn.commit()
+
+    def clear_chat_turns(self, book_id=None) -> None:
+        with self._write_lock:
+            if book_id is None:
+                self.conn.execute("DELETE FROM chat_turns WHERE book_id IS NULL")
+            else:
+                self.conn.execute("DELETE FROM chat_turns WHERE book_id=?", (book_id,))
+            self.conn.commit()
+
+    # ── Feedback do usuário sobre respostas/observações ────────────────────
+
+    def add_feedback(self, rating: int, kind: str = "answer", book_id=None, page=None,
+                     session_id: str = "", target_ref: str = "", reason: str = "",
+                     query: str = "") -> None:
+        with self._write_lock:
+            self.conn.execute(
+                "INSERT INTO agent_feedback (session_id, book_id, page, kind, target_ref, "
+                "rating, reason, query) VALUES (?,?,?,?,?,?,?,?)",
+                (session_id, book_id, page, kind, target_ref, int(rating), reason, query))
+            self.conn.commit()
+
+    # ── Observações da IA (proativas/agente) — persistidas ─────────────────
+
+    def add_observation(self, book_id, page, content: str, kind: str = "insight",
+                        payload_json: str = "{}", source: str = "proactive",
+                        confidence: float = 0.0) -> int:
+        with self._write_lock:
+            cur = self.conn.execute(
+                "INSERT INTO ai_observations (book_id, page, kind, content, payload_json, "
+                "source, confidence) VALUES (?,?,?,?,?,?,?)",
+                (book_id, page, kind, content, payload_json, source, float(confidence)))
+            self.conn.commit()
+            return cur.lastrowid
+
+    def get_observations(self, book_id=None, page=None, include_dismissed: bool = False,
+                         limit: int = 50) -> list[dict]:
+        query = ("SELECT id, book_id, page, kind, content, payload_json, source, confidence, "
+                 "dismissed, created_at FROM ai_observations WHERE 1=1")
+        params: list = []
+        if book_id is not None:
+            query += " AND book_id=?"
+            params.append(book_id)
+        if page is not None:
+            query += " AND page=?"
+            params.append(page)
+        if not include_dismissed:
+            query += " AND dismissed=0"
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        rows = self.conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def dismiss_observation(self, obs_id: int) -> None:
+        with self._write_lock:
+            self.conn.execute("UPDATE ai_observations SET dismissed=1 WHERE id=?", (obs_id,))
+            self.conn.commit()
 
     # ── Busca ──────────────────────────────────────────────────────────
 
