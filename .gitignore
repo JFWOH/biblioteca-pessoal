@@ -20,6 +20,10 @@ env/
 *.swo
 *~
 
+# Claude Code (local/pessoal — não versionar; settings.json compartilhado FICA)
+.claude/settings.local.json
+.claude/*.lock
+
 # Data
 data/*.db
 data/*.db-journal
