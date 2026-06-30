@@ -66,3 +66,29 @@ def test_feedback_global_context_book_none(qtbot):
 
     assert got[0]["book_id"] is None
     assert got[0]["page"] is None
+
+
+def test_changing_book_resets_conversation(qtbot):
+    """Trocar de livro limpa a conversa visível do assistente."""
+    panel = RAGPanel()
+    qtbot.addWidget(panel)
+    panel.set_reading_context(1, "Livro A", 3, "trecho A")
+    panel._response_area.setPlainText("resposta sobre o Livro A")
+    panel._full_answer = "resposta sobre o Livro A"
+
+    panel.set_reading_context(2, "Livro B", 1, "trecho B")
+
+    assert panel._response_area.toPlainText() == ""
+    assert panel._full_answer == ""
+
+
+def test_turning_page_same_book_keeps_conversation(qtbot):
+    """Virar página no MESMO livro não apaga a resposta em tela."""
+    panel = RAGPanel()
+    qtbot.addWidget(panel)
+    panel.set_reading_context(1, "Livro A", 3, "trecho p3")
+    panel._response_area.setPlainText("resposta atual")
+
+    panel.set_reading_context(1, "Livro A", 4, "trecho p4")
+
+    assert panel._response_area.toPlainText() == "resposta atual"

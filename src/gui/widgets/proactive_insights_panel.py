@@ -45,18 +45,39 @@ class ProactiveInsightsPanel(QWidget):
         self._scroll.setWidget(self._container)
         root.addWidget(self._scroll, 1)
 
-        self._empty = QLabel(
-            "Nenhuma observação ainda.\n\n"
-            "Ative o agente em ⋯ → 🧠 Agente Proativo e navegue pelas páginas; "
-            "as observações aparecem aqui e no rodapé."
-        )
+        self._empty = QLabel()
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty.setWordWrap(True)
         root.addWidget(self._empty)
 
+        self._agent_active = False
+        self._refresh_empty_text()
+
         self.set_theme("dark")
 
     # ── API ───────────────────────────────────────────────────────────
+
+    def set_agent_active(self, active: bool):
+        """Reflete no texto-vazio se o agente proativo está ligado.
+
+        Sem isso, o painel pedia 'Ative o agente…' mesmo com ele já ativo.
+        """
+        self._agent_active = active
+        self._refresh_empty_text()
+
+    def _refresh_empty_text(self):
+        if self._agent_active:
+            self._empty.setText(
+                "Agente proativo ativo.\n\n"
+                "As observações aparecem aqui e no rodapé conforme você avança "
+                "na leitura."
+            )
+        else:
+            self._empty.setText(
+                "Nenhuma observação ainda.\n\n"
+                "Ative o agente em ⋯ → 🧠 Agente Proativo e navegue pelas páginas; "
+                "as observações aparecem aqui e no rodapé."
+            )
 
     def add_observation(self, obs: dict):
         tipo = (obs.get("tipo") or "Observação").strip()

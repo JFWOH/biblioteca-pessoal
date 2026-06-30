@@ -18,6 +18,7 @@ class ContinuousAudioPlayer:
         self._channels = channels
         self._fade_ms = fade_ms
         self._is_playing = False
+        self._is_paused = False
         self._queue = queue.Queue(maxsize=10)
         self._stream = None
         self._buffer = None
@@ -39,6 +40,7 @@ class ContinuousAudioPlayer:
         import sounddevice as sd
         import numpy as np
         self._is_playing = True
+        self._is_paused = False
         self._buffer = np.zeros(0, dtype=np.float32)
         
         # Clear queue
@@ -173,9 +175,35 @@ class ContinuousAudioPlayer:
                 logger.warning("PLAYER_QUEUE_FULL: Retrying enqueue...")
                 continue
 
+    def pause(self):
+        """Pausa a reprodução preservando buffer e fila (retomada no mesmo ponto).
+
+        Usa ``stream.stop()`` (sem ``close()``): o PortAudio para de chamar o
+        callback, mas o estado do stream e os dados já bufferizados permanecem,
+        então ``resume()`` continua exatamente de onde parou.
+        """
+        if self._stream is not None and self._is_playing and not self._is_paused:
+            try:
+                self._stream.stop()
+                self._is_paused = True
+                logger.info("PLAYER_PAUSED: playback paused.")
+            except Exception as e:
+                logger.error("PLAYER_PAUSE_ERROR: %s", e)
+
+    def resume(self):
+        """Retoma a reprodução pausada a partir do ponto exato."""
+        if self._stream is not None and self._is_paused:
+            try:
+                self._stream.start()
+                self._is_paused = False
+                logger.info("PLAYER_RESUMED: playback resumed.")
+            except Exception as e:
+                logger.error("PLAYER_RESUME_ERROR: %s", e)
+
     def stop(self):
         logger.info("PLAYER_STOPPED: stop requested.")
         self._is_playing = False
+        self._is_paused = False
         if self._stream is not None:
             try:
                 self._stream.stop()

@@ -718,12 +718,29 @@ class RAGPanel(QWidget):
 
     def set_reading_context(self, book_id: int, title: str, page: int, text: str) -> None:
         """Guarda o contexto do que o usuário está lendo no momento."""
+        # Trocar de livro zera a conversa visível (a memória por-livro continua no
+        # RAGEngine). Só reseta quando o livro muda — não a cada virada de página,
+        # senão apagaria a resposta enquanto o usuário navega lendo.
+        prev = self._reading_context
+        if prev is not None and prev.get("book_id") != book_id:
+            self._reset_conversation_view()
         self._reading_context = {
             "book_id": book_id,
             "title": title,
             "page": page,
             "text": text,
         }
+
+    def _reset_conversation_view(self) -> None:
+        """Limpa a área de conversa ao trocar de livro (apenas visual)."""
+        self._response_area.clear()
+        self._sources_list.clear()
+        self._full_answer = ""
+        self._question_input.clear()
+        self._save_note_btn.setVisible(False)
+        self._flashcard_btn.setVisible(False)
+        self._hide_feedback_buttons()
+        self._feedback_given = False
 
     def clear_reading_context(self) -> None:
         """Limpa o contexto de leitura (útil para modo standalone)."""

@@ -55,6 +55,8 @@ class ReaderView(QWidget):
         # Página 1-based da última observação proativa e id da obs no rodapé
         # (para persistir/dispensar em ai_observations — Fase 1b).
         self._current_proactive_page: int = 0
+        self._current_page_text: str = ""  # texto da página atual (p/ avaliar ao ligar o proativo)
+        self._audio_paused: bool = False   # narração pausada (retomável no mesmo ponto)
         self._footer_obs_id = None
         self._proactive_service = ProactiveReaderService(parent=self)
         self._proactive_service.observation_ready.connect(self._on_proactive_observation)
@@ -275,9 +277,9 @@ class ReaderView(QWidget):
         self._ai_panel_btn.clicked.connect(self._toggle_ai_panel)
         tb_layout.addWidget(self._ai_panel_btn)
 
-        # Botão Áudio/TTS (Leitura de página)
-        self._audio_btn = QPushButton("🔊 Play")
-        self._audio_btn.setFixedSize(80, 32)
+        # Botão Áudio/TTS (Leitura de página) — Ouvir / Pausar / Retomar
+        self._audio_btn = QPushButton("🔊 Ouvir")
+        self._audio_btn.setFixedSize(95, 32)
         self._audio_btn.setToolTip("Ouvir Página (TTS)")
         self._audio_btn.setStyleSheet("""
             QPushButton { background: transparent; border: 1px solid #2d333f;
@@ -286,6 +288,19 @@ class ReaderView(QWidget):
         """)
         self._audio_btn.clicked.connect(self._toggle_audio)
         tb_layout.addWidget(self._audio_btn)
+
+        # Botão Parar (full stop) — só visível durante a reprodução/pausa.
+        self._audio_stop_btn = QPushButton("⏹️")
+        self._audio_stop_btn.setFixedSize(36, 32)
+        self._audio_stop_btn.setToolTip("Parar Leitura (TTS)")
+        self._audio_stop_btn.setVisible(False)
+        self._audio_stop_btn.setStyleSheet("""
+            QPushButton { background: transparent; border: 1px solid #2d333f;
+                          border-radius: 6px; font-size: 14px; }
+            QPushButton:hover { background: #2d333f; }
+        """)
+        self._audio_stop_btn.clicked.connect(self._stop_audio_if_running)
+        tb_layout.addWidget(self._audio_stop_btn)
 
         # Botão de Configuração de TTS (atalho Phase 13)
         self._tts_settings_btn = QPushButton("⚙️ TTS")
@@ -309,6 +324,9 @@ class ReaderView(QWidget):
             QComboBox::drop-down { border: none; }
         """)
         self._proactive_combo.currentTextChanged.connect(self._proactive_service.set_intensity)
+        # Conectado DEPOIS de set_intensity: ao reagir, a intensidade nova já está
+        # aplicada e o trigger engine resetado, então a avaliação imediata vale.
+        self._proactive_combo.currentTextChanged.connect(self._on_proactive_intensity_changed)
         # Movido para o submenu do overflow ("⋯"): mantido como state-holder de intensidade.
 
         # Menu de overflow ("⋯") — agrupa controles secundários para desafogar a toolbar.
@@ -632,6 +650,7 @@ class ReaderView(QWidget):
             # Página 1-based passada ao serviço proativo; guardada para persistir
             # a observação resultante em ai_observations.
             self._current_proactive_page = page + 1
+            self._current_page_text = page_text[:1500]
             self.reading_context_updated.emit(
                 self._book_id,
                 self._title_label.text(),
@@ -743,6 +762,24 @@ class ReaderView(QWidget):
         """Ajusta a intensidade do agente proativo a partir do submenu de overflow."""
         # setCurrentText dispara currentTextChanged → ProactiveReaderService.set_intensity
         self._proactive_combo.setCurrentText(level)
+
+    def _on_proactive_intensity_changed(self, level: str) -> None:
+        """Reage à mudança de intensidade do agente proativo.
+
+        Dois efeitos: (1) atualiza o texto-vazio do painel de Insights para
+        refletir se o agente está ligado; (2) avalia a página atual na hora,
+        para que ligar o agente não exija virar página antes de gerar a primeira
+        observação.
+        """
+        active = level != "Desligado"
+        if hasattr(self, "_insights_panel"):
+            self._insights_panel.set_agent_active(active)
+        if active and self._current_page_text:
+            # set_intensity (conectado antes) já resetou o trigger engine, então
+            # a página atual passa no critério de distância.
+            self._proactive_service.process_page_context(
+                self._current_page_text, self._current_proactive_page, self._book_id
+            )
 
     def _zoom_in(self):
         if self._reader and hasattr(self._reader, 'zoom'):
@@ -926,6 +963,16 @@ class ReaderView(QWidget):
             }}
             QPushButton:hover {{ background: {btn_hover_bg}; }}
         """)
+        if hasattr(self, "_audio_stop_btn"):
+            self._audio_stop_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: 1px solid {btn_bg};
+                    border-radius: 6px;
+                    font-size: 14px;
+                }}
+                QPushButton:hover {{ background: {btn_hover_bg}; }}
+            """)
         if hasattr(self, "_study_btn"):
             self._study_btn.setStyleSheet(f"""
                 QPushButton {{
@@ -1381,11 +1428,17 @@ class ReaderView(QWidget):
 
     def _toggle_audio(self):
         """Alterna a leitura de áudio (TTS) da página atual.
-        
+
+        Tocando → pausa; pausado → retoma no mesmo ponto; parado → inicia.
+        O botão Parar (⏹️) faz o stop completo.
         Phase 13: Uses TTSRouter with voice profiles for book narration.
         """
-        if hasattr(self, "_audio_worker") and self._audio_worker and self._audio_worker.isRunning():
-            self._stop_audio_if_running()
+        worker = getattr(self, "_audio_worker", None)
+        if worker and worker.isRunning():
+            if self._audio_paused:
+                self._resume_audio()
+            else:
+                self._pause_audio()
             return
 
         if not self._reader:
@@ -1435,9 +1488,29 @@ class ReaderView(QWidget):
         self._stop_audio_if_running()
         self._launch_audio_worker(text.strip())
 
+    def _pause_audio(self):
+        """Pausa a narração (retomável no mesmo ponto)."""
+        worker = getattr(self, "_audio_worker", None)
+        if worker and worker.isRunning():
+            worker.pause()
+            self._audio_paused = True
+            self._audio_btn.setText("▶️ Retomar")
+            self._audio_btn.setToolTip("Continuar Leitura (TTS)")
+
+    def _resume_audio(self):
+        """Retoma a narração pausada a partir do ponto exato."""
+        worker = getattr(self, "_audio_worker", None)
+        if worker and worker.isRunning():
+            worker.resume()
+            self._audio_paused = False
+            self._audio_btn.setText("⏸️ Pausar")
+            self._audio_btn.setToolTip("Pausar Leitura (TTS)")
+
     def _on_audio_started(self):
-        self._audio_btn.setText("⏹️ Stop")
-        self._audio_btn.setToolTip("Parar Leitura (TTS)")
+        self._audio_paused = False
+        self._audio_btn.setText("⏸️ Pausar")
+        self._audio_btn.setToolTip("Pausar Leitura (TTS)")
+        self._audio_stop_btn.setVisible(True)
 
     def _on_audio_finished(self, chunks):
         pass
@@ -1449,23 +1522,31 @@ class ReaderView(QWidget):
 
     def _on_audio_worker_finished(self):
         """Garante a limpeza de referências e restaura o estado visual do botão."""
-        self._audio_btn.setText("🔊 Play")
+        self._audio_paused = False
+        self._audio_btn.setText("🔊 Ouvir")
         self._audio_btn.setToolTip("Ouvir Página (TTS)")
+        if hasattr(self, "_audio_stop_btn"):
+            self._audio_stop_btn.setVisible(False)
         if hasattr(self, "_audio_worker") and self._audio_worker:
             self._audio_worker.deleteLater()
             self._audio_worker = None
 
     def _stop_audio_if_running(self):
-        """Pausa o áudio se o worker estiver ativo."""
+        """Para a narração por completo (libera o worker) e restaura a UI."""
         if hasattr(self, '_audio_worker') and self._audio_worker and self._audio_worker.isRunning():
             self._audio_worker.stop()
             self._audio_worker.wait(2000)
             self._audio_worker = None
-        self._audio_btn.setText("🔊 Play")
+        self._audio_paused = False
+        self._audio_btn.setText("🔊 Ouvir")
+        self._audio_btn.setToolTip("Ouvir Página (TTS)")
+        if hasattr(self, "_audio_stop_btn"):
+            self._audio_stop_btn.setVisible(False)
 
     def _on_audio_provider_changed(self, provider_name: str):
         """Phase 13: Updates UI to show which TTS engine is active."""
-        self._audio_btn.setToolTip(f"Parar Leitura (via {provider_name})")
+        if not self._audio_paused:
+            self._audio_btn.setToolTip(f"Pausar Leitura (via {provider_name})")
 
     def _on_tts_settings_clicked(self):
         """Abre o menu rápido de configurações TTS."""

@@ -286,6 +286,21 @@ class TestStopAndLifecycle:
         router.stop()
         assert provider.stop_called
 
+    def test_stop_stops_active_player(self):
+        """STOP deve parar o player diretamente: senão o áudio já bufferizado
+        toca até o fim porque wait_until_done() ignora _is_cancelled."""
+        router = TTSRouter()
+        fake_player = MagicMock()
+        router._active_player = fake_player
+        router.stop()
+        assert router._is_cancelled is True
+        fake_player.stop.assert_called_once()
+
+    def test_stop_without_player_is_safe(self):
+        router = TTSRouter()
+        router.stop()  # _active_player é None — não deve levantar
+        assert router._is_cancelled is True
+
     def test_shutdown_clears_providers(self):
         router = TTSRouter()
         router.register_provider(FakeProvider("A", "A"))

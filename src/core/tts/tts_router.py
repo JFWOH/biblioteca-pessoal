@@ -45,6 +45,10 @@ class TTSRouter:
         self._providers: dict[str, BaseTTSProvider] = {}
         self._preprocessor = preprocessor or TTSTextPreprocessor()
         self._active_provider: Optional[BaseTTSProvider] = None
+        # Player da reprodução em andamento. stop() precisa pará-lo diretamente:
+        # senão, com o áudio já no buffer, wait_until_done() ignora _is_cancelled
+        # e a página toca até o fim mesmo após o STOP.
+        self._active_player = None
         self._book_profile = VoiceProfile.default_book_narrator()
         self._assistant_profile = VoiceProfile.default_assistant()
         self._initialized = False
@@ -331,6 +335,9 @@ class TTSRouter:
         logger.info("PLAYER_STREAM_OPENING: sample_rate=%d", 24000 if provider.name.lower() == "kokoro" else 22050)
         player = ContinuousAudioPlayer(sample_rate=24000 if provider.name.lower() == "kokoro" else 22050)
         player.start()
+        # Expõe o player para que stop() possa interromper a reprodução já
+        # bufferizada (ver _active_player em __init__).
+        self._active_player = player
 
         state = {
             "provider": provider,
@@ -533,6 +540,7 @@ class TTSRouter:
         logger.info("TTS_ROUTER: Spoke %d/%d chunks using '%s'",
                      spoken_count, len(chunks), state["provider"].name)
         self._active_provider = None
+        self._active_player = None
         return spoken_count
 
     def stop(self) -> None:
@@ -543,6 +551,30 @@ class TTSRouter:
                 self._active_provider.stop()
             except Exception as e:
                 logger.warning("TTS_ROUTER: Error stopping active provider: %s", e)
+        # Interrompe a reprodução imediatamente: sem isto, o áudio já enfileirado
+        # continua tocando até o fim mesmo com _is_cancelled=True, porque
+        # wait_until_done() só observa o estado do próprio player.
+        if self._active_player:
+            try:
+                self._active_player.stop()
+            except Exception as e:
+                logger.warning("TTS_ROUTER: Error stopping active player: %s", e)
+
+    def pause(self) -> None:
+        """Pausa a reprodução atual (retomável no mesmo ponto via resume())."""
+        if self._active_player:
+            try:
+                self._active_player.pause()
+            except Exception as e:
+                logger.warning("TTS_ROUTER: Error pausing active player: %s", e)
+
+    def resume(self) -> None:
+        """Retoma a reprodução pausada a partir do ponto exato."""
+        if self._active_player:
+            try:
+                self._active_player.resume()
+            except Exception as e:
+                logger.warning("TTS_ROUTER: Error resuming active player: %s", e)
 
     # ── Helpers ───────────────────────────────────────────────────────
 

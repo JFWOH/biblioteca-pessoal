@@ -114,3 +114,13 @@ class AudioWorker(QThread):
         if self._router:
             self._router.stop()
         self.requestInterruption()
+
+    def pause(self) -> None:
+        """Pausa a reprodução (retomável no mesmo ponto via resume())."""
+        if self._router:
+            self._router.pause()
+
+    def resume(self) -> None:
+        """Retoma a reprodução pausada a partir do ponto exato."""
+        if self._router:
+            self._router.resume()

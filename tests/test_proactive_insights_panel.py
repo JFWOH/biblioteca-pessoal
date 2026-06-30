@@ -87,6 +87,22 @@ def test_no_dismiss_button_without_id(qtbot):
     assert "✕" not in labels
 
 
+def test_empty_text_reflects_agent_inactive_by_default(qtbot):
+    p = ProactiveInsightsPanel()
+    qtbot.addWidget(p)
+    assert "Ative o agente" in p._empty.text()
+
+
+def test_set_agent_active_updates_empty_text(qtbot):
+    p = ProactiveInsightsPanel()
+    qtbot.addWidget(p)
+    p.set_agent_active(True)
+    assert "ativo" in p._empty.text().lower()
+    assert "Ative o agente" not in p._empty.text()
+    p.set_agent_active(False)
+    assert "Ative o agente" in p._empty.text()
+
+
 def test_dismiss_emits_obs_id_and_removes_card(qtbot):
     p = ProactiveInsightsPanel()
     qtbot.addWidget(p)
