@@ -14,7 +14,7 @@ class TestAgentState:
     """Testes unitários para o gerenciador de orçamento e estado AgentState."""
 
     def test_agent_state_initial_values(self):
-        state = AgentState(max_rounds=3, max_time_ms=5000)
+        state = AgentState(session_id="test_session", max_rounds=3, max_time_ms=5000)
         assert state.max_rounds == 3
         assert state.max_time_ms == 5000
         assert state.current_round == 0
@@ -25,7 +25,7 @@ class TestAgentState:
         assert state.last_results_digest == ""
 
     def test_update_provenance_to_web(self):
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         assert state.provenance == "local"
         state.update_provenance("local")
         assert state.provenance == "local"
@@ -35,17 +35,17 @@ class TestAgentState:
         assert state.provenance == "web"
 
     def test_is_budget_ok_within_limits(self):
-        state = AgentState(max_rounds=5, max_time_ms=1000)
+        state = AgentState(session_id="test_session", max_rounds=5, max_time_ms=1000)
         state.current_round = 3
         assert state.is_budget_ok() is True
 
     def test_is_budget_ok_rounds_exceeded(self):
-        state = AgentState(max_rounds=5, max_time_ms=1000)
+        state = AgentState(session_id="test_session", max_rounds=5, max_time_ms=1000)
         state.current_round = 5
         assert state.is_budget_ok() is False
 
     def test_is_budget_ok_time_exceeded(self):
-        state = AgentState(max_rounds=5, max_time_ms=10)
+        state = AgentState(session_id="test_session", max_rounds=5, max_time_ms=10)
         time.sleep(0.02)  # Dorme 20ms (> 10ms do orçamento)
         assert state.is_budget_ok() is False
 
@@ -107,7 +107,7 @@ class TestOrchestrator:
             }
         ]
         
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         orchestrator = Orchestrator(mock_engine)
         
         output = orchestrator.execute_vector_search("busca", book_id=10, state=state)
@@ -136,7 +136,7 @@ class TestOrchestrator:
             }
         ]
         
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         orchestrator = Orchestrator(mock_engine)
         
         output = orchestrator.execute_vector_search("busca", book_id=11, state=state)
@@ -155,7 +155,7 @@ class TestOrchestrator:
     def test_execute_search_web_success(self):
         mock_engine = MagicMock()
         orchestrator = Orchestrator(mock_engine)
-        state = AgentState()
+        state = AgentState(session_id="test_session")
 
         mock_results = [{"body": "Resultado da web", "title": "Titulo Web", "href": "http://web.com"}]
         
@@ -180,7 +180,7 @@ class TestOrchestrator:
             }
         ]
         
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         orchestrator = Orchestrator(mock_engine)
         
         # Simula falha na busca web externa (ex: falta de conexão)
@@ -215,29 +215,33 @@ class TestOrchestrator:
         assert result["rounds_executed"] == 2
         assert len(result["history"]) == 1  # O primeiro round rodou, o segundo causou early-exit antes de comitar a história
 
-    def test_query_reformulation_cardano_offline(self):
-        """1 & 2. Testa _reformulate_query para Cardano com Ollama indisponível (offline)."""
+    def test_query_reformulation_offline_heuristic(self):
+        """_reformulate_query offline (sem Ollama) usa a heurística determinística:
+        filtragem de stopwords + a query original como último recurso.
+
+        (Regressão: antes havia um caso especial hardcoded para 'Cardano' — resíduo
+        de debug — que foi removido; o comportamento agora é genérico.)
+        """
         mock_engine = MagicMock()
         mock_engine.is_ollama_available.return_value = False
-        
+
         orchestrator = Orchestrator(mock_engine)
         query = "Cardano foi um dos primeiros a perceber que tais jogos podiam ser analisados matematicamente"
-        
+
         alternatives = orchestrator._reformulate_query(query)
-        
-        # Confirma que há múltiplas queries reformuladas geradas pela heurística offline
+
+        # Gera ao menos a alternativa heurística + a query original
         assert len(alternatives) > 1
-        
-        # Confirma que as alternativas contêm os termos obrigatórios (Liber, probability, etc)
-        has_cardano = any("cardano" in a.lower() for a in alternatives)
-        has_liber = any("liber de ludo aleae" in a.lower() or "book on games of chance" in a.lower() for a in alternatives)
-        has_prob = any("probability" in a.lower() or "probabilidade" in a.lower() for a in alternatives)
-        has_games = any("games of chance" in a.lower() or "jogos de azar" in a.lower() for a in alternatives)
-        
-        assert has_cardano is True
-        assert has_liber is True
-        assert has_prob is True
-        assert has_games is True
+        # A query original é sempre mantida como último recurso
+        assert query in alternatives
+
+        # Há ao menos uma alternativa derivada (palavras-chave sem stopwords)
+        generic = [a for a in alternatives if a != query]
+        assert generic, "deve haver ao menos uma alternativa heurística além da query original"
+        first = generic[0].lower().split()
+        # Palavras de conteúdo preservadas; stopwords curtas removidas
+        assert "cardano" in first
+        assert "um" not in first and "dos" not in first and "que" not in first
 
     def test_execute_search_web_retry_on_empty_and_metadata(self):
         """3 & 4. Simula primeira query vazia e segunda com resultado, confirmando sucesso e metadata.attempted_queries."""
@@ -256,20 +260,25 @@ class TestOrchestrator:
             else:
                 return [{"body": f"Resultado para {q}", "title": "Sucesso", "href": "http://sucesso.com"}]
 
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         with patch("src.core.rag.tools.web_search.search_duckduckgo", side_effect=fake_text_search):
             output = orchestrator.execute_search_web(query, state=state)
             
             assert output["status"] == "success"
             assert output["provenance"] == "web"
             assert len(output["data"]) == 1
-            assert "Cardano Book on Games of Chance probability" in output["data"][0]["text"]
-            
-            # Confirma que attempted_queries e successful_query foram gravados corretamente em metadata
+
+            # Confirma que attempted_queries e successful_query foram gravados em metadata
             assert "attempted_queries" in output["metadata"]
             assert "successful_query" in output["metadata"]
-            assert len(output["metadata"]["attempted_queries"]) > 1
-            assert output["metadata"]["successful_query"] == "Cardano Book on Games of Chance probability"
+            attempted = output["metadata"]["attempted_queries"]
+            assert len(attempted) > 1
+
+            # A 1ª tentativa retornou vazio; a 2ª teve sucesso → successful = 2ª tentativa,
+            # e o resultado retornado corresponde a essa query (independe da reformulação exata).
+            successful = output["metadata"]["successful_query"]
+            assert successful == attempted[1]
+            assert successful in output["data"][0]["text"]
 
     def test_normalize_web_result_accepts_href_body(self):
         """Requisito 2 & 3: Valida que normalize_web_result aceita e extrai o formato com href e body."""
@@ -310,7 +319,7 @@ class TestOrchestrator:
             {"title": "Google Books", "link": "http://books.google.com", "description": "Conteudo C"}
         ]
         
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         with patch("src.core.rag.tools.web_search.search_duckduckgo", return_value=mock_results):
             output = orchestrator.execute_search_web("Cardano jogos de azar", state=state)
             
@@ -331,7 +340,7 @@ class TestOrchestrator:
             {"title": "Resultado Invalido"}  # Sem link/corpo válido, deve ser descartado
         ]
         
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         with patch("src.core.rag.tools.web_search.search_duckduckgo", return_value=mock_results):
             output = orchestrator.execute_search_web("Cardano jogos de azar", state=state)
             
@@ -349,7 +358,7 @@ class TestOrchestrator:
         query = "Cardano foi um dos primeiros a perceber que tais jogos podiam ser analisados matematicamente"
         mock_results = [{"title": "Girolamo Cardano", "link": "http://britannica.com", "snippet": "Cardano publicou o Liber de ludo aleae."}]
         
-        state = AgentState()
+        state = AgentState(session_id="test_session")
         with patch("src.core.rag.tools.web_search.search_duckduckgo", return_value=mock_results):
             output = orchestrator.execute_search_web(query, state=state)
             
@@ -358,3 +367,51 @@ class TestOrchestrator:
             assert len(output["data"]) == 1
             assert output["data"][0]["title"] == "Girolamo Cardano"
             assert output["metadata"]["normalized_result_count"] == 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TestConfidenceFromDistances (Item 5)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestConfidenceFromDistances:
+    """Confiança derivada das distâncias reais do Chroma (não mais hardcoded)."""
+
+    def test_identical_distance_zero_gives_full_confidence(self):
+        assert Orchestrator._confidence_from_distances([0.0, 0.0]) == 1.0
+
+    def test_opposite_distance_one_gives_zero_confidence(self):
+        assert Orchestrator._confidence_from_distances([1.0, 1.0]) == 0.0
+
+    def test_mixed_distances_average_similarity(self):
+        # sim = 1-0.2 = 0.8 e 1-0.4 = 0.6 → média 0.7
+        assert Orchestrator._confidence_from_distances([0.2, 0.4]) == 0.7
+
+    def test_distance_above_one_clamped_to_zero(self):
+        # distância 1.5 → sim -0.5 → clamp 0.0; com 0.0 (sim 1.0) → média 0.5
+        assert Orchestrator._confidence_from_distances([0.0, 1.5]) == 0.5
+
+    def test_empty_or_none_falls_back_to_one(self):
+        assert Orchestrator._confidence_from_distances([]) == 1.0
+        assert Orchestrator._confidence_from_distances([None, None]) == 1.0
+        assert Orchestrator._confidence_from_distances([True, False]) == 1.0
+
+    def test_vector_search_confidence_reflects_distance(self):
+        mock_engine = MagicMock()
+        mock_engine.search_similar.return_value = [
+            {"document": "a", "metadata": {"title": "T", "author": "A", "page_number": 0, "book_id": 1}, "distance": 0.1},
+            {"document": "b", "metadata": {"title": "T", "author": "A", "page_number": 1, "book_id": 1}, "distance": 0.3},
+        ]
+        orch = Orchestrator(mock_engine)
+        out = orch.execute_vector_search("q", book_id=1)
+        # sim 0.9 e 0.7 → média 0.8 (antes era hardcoded 1.0)
+        assert out["status"] == "success"
+        assert out["confidence_score"] == 0.8
+
+    def test_vector_search_without_distance_defaults_full(self):
+        mock_engine = MagicMock()
+        mock_engine.search_similar.return_value = [
+            {"document": "a", "metadata": {"title": "T", "author": "A", "page_number": 0, "book_id": 1}},
+        ]
+        orch = Orchestrator(mock_engine)
+        out = orch.execute_vector_search("q", book_id=1)
+        assert out["confidence_score"] == 1.0

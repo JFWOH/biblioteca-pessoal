@@ -153,4 +153,4 @@ class TestDatabaseEdgeCases:
             db.add_book(title="Ctx", author="A", file_path="/ctx.pdf", file_format="pdf")
             assert db.count_books() == 1
         # After exit, connection is closed
-        assert db._conn is None
+        assert getattr(db._local, "conn", None) is None

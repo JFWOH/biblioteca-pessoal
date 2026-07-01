@@ -31,5 +31,19 @@ ruff>=0.1.0
 chromadb>=0.4.0,<1.0    # Vector store local (sem servidor externo)
 ollama>=0.2.0            # Python client para o daemon Ollama
 
-# Leitor de Audio Local Offline
-pyttsx3>=2.99            # TTS Engine offline local
+# Leitor de Audio Local Offline (TTS em camadas)
+kokoro>=0.9.4            # TTS neural padrão (usa GPU se disponível, senão CPU)
+piper-tts>=1.4.2         # TTS de fallback (ONNX, CPU)
+pyttsx3>=2.99            # TTS Engine legado offline local
+
+# OCR de PDFs escaneados (RapidOCR via ONNX — sem binário de sistema, roda em CPU)
+rapidocr-onnxruntime>=1.3.0
+
+# Tradução Offline (Fase 8) + TTS neural (Kokoro)
+# torch do PyPI = CPU. Para GPU NVIDIA (inclui Blackwell/sm_120, ex. RTX 5060 Ti),
+# instale a build CUDA 12.8 a partir do índice do PyTorch (ver README, seção GPU):
+#   pip install torch==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+# Stack GPU validada congelada em reports/phase_13b3_gpu_lab_requirements.txt
+torch>=2.0.0             # Tensor Backend para inferência local (CPU por padrão)
+transformers>=4.33.0     # Suporte ao NLLB-200
+sentencepiece>=0.1.99    # Tokenizer exigido pelo NLLB-200

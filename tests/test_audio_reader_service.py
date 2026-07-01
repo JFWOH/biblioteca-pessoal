@@ -274,15 +274,21 @@ def test_multiple_chunks_are_sent_to_backend():
 
 def test_worker_emits_finished_on_success(qtbot):
     from src.gui.workers.audio_worker import AudioWorker
-    worker = AudioWorker("Texto curto para o worker.")
+    import unittest.mock
+    mock_router = unittest.mock.MagicMock()
+    mock_router.get_active_provider_name.return_value = "mock_provider"
+    
+    worker = AudioWorker("Texto curto para o worker.", router=mock_router)
     
     with qtbot.waitSignal(worker.finished, timeout=5000):
         worker.start()
 
 def test_worker_emits_finished_on_error(qtbot):
     from src.gui.workers.audio_worker import AudioWorker
+    import unittest.mock
+    mock_router = unittest.mock.MagicMock()
     # Usando string vazia para garantir o retorno rápido / término por erro
-    worker = AudioWorker("")
+    worker = AudioWorker("", router=mock_router)
     with qtbot.waitSignal(worker.finished, timeout=5000):
         worker.start()
 

@@ -94,8 +94,6 @@ class RAGWorker(QThread):
         except Exception:
             pass  # Fontes são opcionais, não interrompemos a geração
 
-        # Instancia AgentState para a sessão de chat atual
-        state = AgentState()
 
         # Geração de streaming com controle de rounds e AgentState
         full_answer: list[str] = []
@@ -122,6 +120,7 @@ class RAGWorker(QThread):
 
     def _run_index_book(self) -> None:
         """Indexa um único livro com tratamento robusto de erros."""
+        self._engine.reset_cancel()
         if self._book_id is None:
             self.error_occurred.emit("book_id não fornecido para indexação.")
             return
@@ -145,6 +144,7 @@ class RAGWorker(QThread):
 
     def _run_index_all(self) -> None:
         """Reindexação completa da biblioteca com progresso e contagem de skips."""
+        self._engine.reset_cancel()
         import sqlite3
         conn = sqlite3.connect(str(self._engine._db_path))
         try:
@@ -156,6 +156,16 @@ class RAGWorker(QThread):
         if total == 0:
             self.progress_updated.emit(0, 0, "Nenhum livro para indexar.")
             return
+
+        # Migração de modelo de embeddings: se a collection foi construída com outro
+        # modelo, a dimensão dos vetores mudou — recria a collection antes do loop.
+        # Depois disso, index_book(force=False) reindexa tudo (has_book_indexed=False).
+        try:
+            if self._engine.needs_reindex():
+                self.progress_updated.emit(0, total, "Modelo de embeddings atualizado — recriando índice…")
+                self._engine.reset_collection()
+        except Exception as exc:
+            print(f"[RAGWorker] Falha ao recriar collection na migração: {exc}", flush=True)
 
         total_chunks = 0
         skipped: list[int] = []

@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QScrollArea, QFrame, QComboBox,
+    QTextEdit, QScrollArea, QFrame, QComboBox, QLineEdit,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
@@ -55,6 +55,15 @@ class AnnotationItem(QFrame):
 
         layout.addLayout(header)
 
+        # Título (opcional) — destaque acima do conteúdo
+        title = self._annotation.get("title", "")
+        self._title_item_lbl = None
+        if title:
+            self._title_item_lbl = QLabel(title)
+            self._title_item_lbl.setWordWrap(True)
+            self._title_item_lbl.setStyleSheet("color: #e5e7eb; font-size: 13px; font-weight: 600;")
+            layout.addWidget(self._title_item_lbl)
+
         # Conteúdo
         content = self._annotation.get("content", "")
         self._content_lbl = None
@@ -105,10 +114,10 @@ class AnnotationItem(QFrame):
             border_color = "#e4e4e7"
             hover_border = "#a1a1aa"
             hover_bg = "#f4f4f5"
-            type_color = "#6366f1"
-            page_bg = "rgba(99, 102, 241, 0.1)"
-            page_fg = "#6366f1"
-            page_hover = "rgba(99, 102, 241, 0.2)"
+            type_color = "#059669"
+            page_bg = "rgba(16, 185, 129, 0.1)"
+            page_fg = "#059669"
+            page_hover = "rgba(16, 185, 129, 0.2)"
             content_color = "#1A1A1A"
             date_color = "#71717a"
             del_color = "#71717a"
@@ -117,25 +126,25 @@ class AnnotationItem(QFrame):
             border_color = "#d4cbb8"
             hover_border = "#8b7355"
             hover_bg = "#ebe5d9"
-            type_color = "#8b6c42"
-            page_bg = "rgba(139, 108, 66, 0.15)"
-            page_fg = "#8b6c42"
-            page_hover = "rgba(139, 108, 66, 0.3)"
+            type_color = "#059669"
+            page_bg = "rgba(16, 185, 129, 0.15)"
+            page_fg = "#059669"
+            page_hover = "rgba(16, 185, 129, 0.3)"
             content_color = "#5B4636"
             date_color = "#8b7355"
             del_color = "#8b7355"
         else: # dark
-            bg_color = "#1e1e24"
-            border_color = "#27272a"
-            hover_border = "#3f3f46"
-            hover_bg = "#23232b"
-            type_color = "#818cf8"
-            page_bg = "rgba(99, 102, 241, 0.15)"
-            page_fg = "#818cf8"
-            page_hover = "rgba(99, 102, 241, 0.3)"
-            content_color = "#d4d4d8"
-            date_color = "#52525b"
-            del_color = "#52525b"
+            bg_color = "#20242d"
+            border_color = "#2d333f"
+            hover_border = "#475569"
+            hover_bg = "#2a3241"
+            type_color = "#10b981"
+            page_bg = "rgba(16, 185, 129, 0.15)"
+            page_fg = "#10b981"
+            page_hover = "rgba(16, 185, 129, 0.3)"
+            content_color = "#cbd5e1"
+            date_color = "#94a3b8"
+            del_color = "#94a3b8"
 
         self.setStyleSheet(f"""
             QFrame {{
@@ -159,6 +168,8 @@ class AnnotationItem(QFrame):
             }}
             QPushButton:hover {{ background: {page_hover}; }}
         """)
+        if hasattr(self, "_title_item_lbl") and self._title_item_lbl:
+            self._title_item_lbl.setStyleSheet(f"color: {content_color}; font-size: 13px; font-weight: 600; background: transparent; border: none;")
         if hasattr(self, "_content_lbl") and self._content_lbl:
             self._content_lbl.setStyleSheet(f"color: {content_color}; font-size: 12px; line-height: 1.5; background: transparent; border: none;")
         if hasattr(self, "_date_lbl") and self._date_lbl:
@@ -192,8 +203,8 @@ class AnnotationPanel(QWidget):
         super().__init__(parent)
         self._book_id = 0
         self._current_page = 0
-        self.setMinimumWidth(280)
-        self.setMaximumWidth(340)
+        # Largura mínima razoável; sem máximo, para preencher todo o dock.
+        self.setMinimumWidth(240)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -245,6 +256,19 @@ class AnnotationPanel(QWidget):
         add_layout = QVBoxLayout(self._add_frame)
         add_layout.setContentsMargins(10, 8, 10, 8)
         add_layout.setSpacing(6)
+
+        # Título opcional da nota
+        self._title_input = QLineEdit()
+        self._title_input.setPlaceholderText("Título da nota (opcional)")
+        self._title_input.setStyleSheet("""
+            QLineEdit {
+                background: #0f0f17; border: 1px solid #27272a;
+                border-radius: 6px; padding: 5px 6px; color: #e4e4e7;
+                font-size: 12px;
+            }
+            QLineEdit:focus { border-color: #6366f1; }
+        """)
+        add_layout.addWidget(self._title_input)
 
         self._note_input = QTextEdit()
         self._note_input.setPlaceholderText("Escreva uma nota para esta página...")
@@ -342,8 +366,8 @@ class AnnotationPanel(QWidget):
             border_color = "#d4d4d8"
             bg_panel = "#ffffff"
             add_bg = "#f4f4f5"
-            btn_primary_bg = "#6366f1"
-            btn_primary_hover = "#818cf8"
+            btn_primary_bg = "#059669"
+            btn_primary_hover = "#10b981"
             btn_sec_bg = "#e4e4e7"
             btn_sec_hover = "#d4d4d8"
             btn_sec_fg = "#1A1A1A"
@@ -354,23 +378,23 @@ class AnnotationPanel(QWidget):
             border_color = "#d4cbb8"
             bg_panel = "#faf5ed"
             add_bg = "#ebe5d9"
-            btn_primary_bg = "#8b6c42"
-            btn_primary_hover = "#a18055"
+            btn_primary_bg = "#059669"
+            btn_primary_hover = "#10b981"
             btn_sec_bg = "#dfd8c8"
             btn_sec_hover = "#d4cbb8"
             btn_sec_fg = "#5B4636"
         else: # dark
-            text_main = "#e4e4e7"
-            text_sec = "#52525b"
-            bg_input = "#0f0f17"
-            border_color = "#27272a"
-            bg_panel = "#18181b"
-            add_bg = "#18181b"
-            btn_primary_bg = "#6366f1"
-            btn_primary_hover = "#818cf8"
-            btn_sec_bg = "#27272a"
-            btn_sec_hover = "#3f3f46"
-            btn_sec_fg = "#e4e4e7"
+            text_main = "#e5e7eb"
+            text_sec = "#cbd5e1"
+            bg_input = "#161920"
+            border_color = "#2d333f"
+            bg_panel = "#0f1115"
+            add_bg = "#20242d"
+            btn_primary_bg = "#10b981"
+            btn_primary_hover = "#059669"
+            btn_sec_bg = "#2d333f"
+            btn_sec_hover = "#475569"
+            btn_sec_fg = "#e5e7eb"
 
         # Apply styles to self
         self.setStyleSheet(f"background-color: {bg_panel};")
@@ -402,7 +426,15 @@ class AnnotationPanel(QWidget):
             }}
         """)
 
-        # Note input
+        # Title + Note input
+        self._title_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {bg_input}; border: 1px solid {border_color};
+                border-radius: 6px; padding: 5px 6px; color: {text_main};
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{ border-color: {btn_primary_bg}; }}
+        """)
         self._note_input.setStyleSheet(f"""
             QTextEdit {{
                 background: {bg_input}; border: 1px solid {border_color};
@@ -487,8 +519,10 @@ class AnnotationPanel(QWidget):
             "content": content,
             "type": "note",
             "color": self._selected_color,
+            "title": self._title_input.text().strip(),
         })
         self._note_input.clear()
+        self._title_input.clear()
 
     def _add_bookmark(self):
         self.annotation_added.emit({

@@ -9,6 +9,7 @@ build/
 
 # Virtual environment
 venv/
+venv-*/
 .venv/
 env/
 
@@ -19,18 +20,32 @@ env/
 *.swo
 *~
 
+# Claude Code (local/pessoal — não versionar; settings.json compartilhado FICA)
+.claude/settings.local.json
+.claude/*.lock
+
 # Data
 data/*.db
 data/*.db-journal
+data/*.db-shm
+data/*.db-wal
 data/covers/
 data/chroma_db/
+data/traces/
 data/config.json
+data/*.jsonl
 chroma/
 
 # Debug / scratch
 debug_*.py
 debug_*.txt
 diag_*.py
+check_*.py
+# Scripts/artefatos de teste soltos na raiz (os testes oficiais ficam em tests/)
+/test_*.py
+/test_*.db
+# Backups
+*.zip
 
 # Agent ephemeral brain data
 .agents/brain/

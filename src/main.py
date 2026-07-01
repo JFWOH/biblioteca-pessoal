@@ -1,12 +1,18 @@
 """Entry point da aplicação Biblioteca Pessoal."""
 
 import sys
+import os
 from pathlib import Path
 
 # Garante que o diretório raiz do projeto está no sys.path
 project_root = str(Path(__file__).resolve().parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
+
+# Force HuggingFace offline mode unconditionally at process startup to prevent network hangs
+os.environ["HF_HUB_OFFLINE"] = "1"
+
+
 
 
 def main():

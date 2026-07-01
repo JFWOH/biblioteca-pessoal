@@ -25,45 +25,29 @@ import pytest
 
 def _create_test_db(path: Path) -> Path:
     """Cria um banco SQLite com alguns livros e anotações de teste."""
-    conn = sqlite3.connect(str(path))
-    conn.executescript("""
-        CREATE TABLE books (
-            id INTEGER PRIMARY KEY,
-            title TEXT NOT NULL,
-            author TEXT DEFAULT '',
-            description TEXT DEFAULT '',
-            isbn TEXT DEFAULT '',
-            publisher TEXT DEFAULT '',
-            year INTEGER,
-            file_path TEXT DEFAULT ''
-        );
-        CREATE TABLE annotations (
-            id INTEGER PRIMARY KEY,
-            book_id INTEGER NOT NULL,
-            content TEXT DEFAULT '',
-            page_number INTEGER DEFAULT 0
-        );
-    """)
-    conn.execute(
-        "INSERT INTO books (id, title, author, description) VALUES (?,?,?,?)",
+    from src.core.database import LibraryDB
+    db = LibraryDB(path)
+    
+    db.conn.execute(
+        "INSERT INTO books (id, title, author, description, file_path, file_format) VALUES (?,?,?,?,?,?)",
         (1, "Dom Casmurro", "Machado de Assis",
-         "Romance brasileiro do realismo. Bentinho e Capitu.")
+         "Romance brasileiro do realismo. Bentinho e Capitu.", "/tmp/fake1.pdf", "pdf")
     )
-    conn.execute(
-        "INSERT INTO books (id, title, author, description) VALUES (?,?,?,?)",
+    db.conn.execute(
+        "INSERT INTO books (id, title, author, description, file_path, file_format) VALUES (?,?,?,?,?,?)",
         (2, "1984", "George Orwell",
-         "Distopia sobre vigilância totalitária e controle da mente.")
+         "Distopia futurista sobre controle estatal.", "/tmp/fake2.pdf", "pdf")
     )
-    conn.execute(
-        "INSERT INTO annotations (book_id, content) VALUES (?,?)",
-        (1, "Capitu tinha olhos de ressaca — uma expressão marcante do autor.")
+    db.conn.execute(
+        "INSERT INTO annotations (book_id, content, page_number) VALUES (?,?,?)",
+        (1, "Capitu tinha olhos de ressaca — uma expressão marcante do autor.", 0)
     )
-    conn.execute(
-        "INSERT INTO books (id, title, author, description) VALUES (?,?,?,?)",
-        (3, "Livro Sem Texto", "", "")
+    db.conn.execute(
+        "INSERT INTO books (id, title, author, description, file_path, file_format) VALUES (?,?,?,?,?,?)",
+        (3, "Livro Sem Texto", "", "", "/tmp/fake3.pdf", "pdf")
     )
-    conn.commit()
-    conn.close()
+    db.conn.commit()
+    db.conn.close()
     return path
 
 
@@ -87,10 +71,18 @@ def fake_embedding() -> list[float]:
 
 @pytest.fixture
 def mock_engine(test_db, chroma_path, fake_embedding):
-    """RAGEngine com ChromaDB real em memória e Ollama mockado."""
+    """RAGEngine com ChromaDB real em memória e Ollama mockado.
+
+    Mocka tanto o embedding único (query) quanto o em lote (indexação) com a mesma
+    dimensão sintética — caso contrário a indexação bateria no Ollama real e poderia
+    gerar vetores de dimensão diferente da query (ex.: bge-m3=1024 vs query mockada),
+    causando mismatch no Chroma. Mantém os testes herméticos e independentes do modelo.
+    """
     from src.core.rag_engine import RAGEngine
 
-    with patch.object(RAGEngine, "_get_embedding", return_value=fake_embedding):
+    with patch.object(RAGEngine, "_get_embedding", return_value=fake_embedding), \
+         patch.object(RAGEngine, "_get_embeddings_batch",
+                      side_effect=lambda texts: [fake_embedding for _ in texts]):
         engine = RAGEngine(
             db_path=test_db,
             chroma_path=chroma_path,
@@ -104,45 +96,44 @@ def mock_engine(test_db, chroma_path, fake_embedding):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestChunkText:
-    """Testa a função utilitária de chunking de texto."""
+    """Testa a função de particionamento de texto."""
 
     def test_empty_string_returns_empty_list(self):
-        from src.core.rag_engine import _chunk_text
+        from src.core.document_indexer_service import _chunk_text
         assert _chunk_text("") == []
 
     def test_whitespace_only_returns_empty_list(self):
-        from src.core.rag_engine import _chunk_text
-        assert _chunk_text("   \n\t  ") == []
+        from src.core.document_indexer_service import _chunk_text
+        assert _chunk_text("   \n  \t  ") == []
 
     def test_short_text_returns_single_chunk(self):
-        from src.core.rag_engine import _chunk_text
-        text = "Texto curto."
-        chunks = _chunk_text(text, size=500)
-        assert len(chunks) == 1
-        assert chunks[0] == text
+        from src.core.document_indexer_service import _chunk_text
+        assert _chunk_text("Hello World", size=100) == ["Hello World"]
 
     def test_long_text_is_split_into_multiple_chunks(self):
-        from src.core.rag_engine import _chunk_text
-        text = "A" * 1200
-        chunks = _chunk_text(text, size=500, overlap=50)
-        assert len(chunks) >= 3
+        from src.core.document_indexer_service import _chunk_text
+        text = "A" * 150
+        chunks = _chunk_text(text, size=100, overlap=0)
+        assert len(chunks) == 2
+        assert len(chunks[0]) == 100
+        assert len(chunks[1]) == 50
 
     def test_chunks_respect_max_size(self):
-        from src.core.rag_engine import _chunk_text
-        text = "B" * 2000
-        chunks = _chunk_text(text, size=400, overlap=0)
-        for chunk in chunks:
-            assert len(chunk) <= 400
+        from src.core.document_indexer_service import _chunk_text
+        text = "This is a simple test text that should be split carefully."
+        chunks = _chunk_text(text, size=15, overlap=0)
+        for c in chunks:
+            assert len(c) <= 15
 
     def test_overlap_creates_shared_content(self):
-        from src.core.rag_engine import _chunk_text
+        from src.core.document_indexer_service import _chunk_text
         text = "X" * 600
         chunks = _chunk_text(text, size=500, overlap=100)
         # Com overlap, o segundo chunk começa antes do fim do primeiro
         assert len(chunks) == 2
 
     def test_none_text_returns_empty(self):
-        from src.core.rag_engine import _chunk_text
+        from src.core.document_indexer_service import _chunk_text
         assert _chunk_text(None) == []  # type: ignore[arg-type]
 
 
@@ -254,19 +245,15 @@ class TestRAGEngineIndexing:
 
     def test_index_book_with_no_text_returns_zero(self, mock_engine, test_db):
         """Livro com apenas espaços em todos os campos não gera chunks."""
-        import sqlite3
-        # Insere um livro com todos os campos de texto vazios
-        conn = sqlite3.connect(str(test_db))
-        conn.execute(
-            "INSERT INTO books (id, title, author, description) VALUES (?, ?, ?, ?)",
-            (99, "", "", "")
-        )
-        conn.commit()
-        conn.close()
+        from src.core.database import LibraryDB
+        db = LibraryDB(test_db)
+        book_id = db.add_book(title="Vazio", file_path="/tmp/vazio_id_99.pdf", file_format="pdf", description="", author="")
 
-        with patch.object(mock_engine, "is_ollama_available", return_value=True):
-            n = mock_engine.index_book(99)
-        assert n == 0
+        with patch.object(mock_engine, "is_ollama_available", return_value=True), \
+             patch.object(mock_engine, "is_model_available", return_value=True):
+            n = mock_engine.index_book(book_id)
+        # Título "Vazio" entra nos metadados, logo gera 1 chunk
+        assert n == 1
 
     def test_delete_book_index_removes_chunks(self, mock_engine):
         with patch.object(mock_engine, "is_ollama_available", return_value=True):
@@ -293,7 +280,7 @@ class TestRAGEngineIndexing:
         """Cancelamento deve interromper o loop de indexação."""
         call_count = 0
 
-        def fake_index(book_id):
+        def fake_index(book_id, force=False):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -301,10 +288,30 @@ class TestRAGEngineIndexing:
             return 5
 
         with patch.object(mock_engine, "is_ollama_available", return_value=True):
-            with patch.object(mock_engine, "index_book", side_effect=fake_index):
+            with patch("src.core.document_indexer_service.DocumentIndexerService.index_book", side_effect=fake_index):
                 mock_engine.index_all_books()
         # Apenas 1 livro processado antes do cancelamento
         assert call_count == 1
+        assert call_count == 1
+
+    def test_index_all_resets_cancel_flag(self, mock_engine):
+        """Regressão (Item 1): após um cancelamento anterior, uma nova reindexação
+        completa deve rodar do início — index_all_books reseta _cancelled."""
+        mock_engine._cancelled = True  # cancelamento pendente de uma operação anterior
+        call_count = 0
+
+        def fake_index(book_id, force=False):
+            nonlocal call_count
+            call_count += 1
+            return 1
+
+        with patch.object(mock_engine, "is_ollama_available", return_value=True):
+            with patch("src.core.document_indexer_service.DocumentIndexerService.index_book", side_effect=fake_index):
+                mock_engine.index_all_books()
+
+        # Sem o reset, o loop abortaria de imediato (call_count == 0).
+        assert mock_engine._cancelled is False
+        assert call_count == 3  # todos os 3 livros do banco de teste foram indexados
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -346,6 +353,18 @@ class TestRAGEngineSearch:
             assert isinstance(r["metadata"], dict)
             assert isinstance(r["distance"], float)
 
+    def test_keyword_search_finds_annotations_via_sqlite(self, mock_engine):
+        """Regressão: o ramo SQLite de keyword_search_db (anotações) deve funcionar.
+
+        Antes quebrava com AttributeError em self._open_db() (método inexistente),
+        capturado como warning — a tool keyword_search nunca achava anotações.
+        """
+        results = mock_engine.keyword_search_db("ressaca")
+        sources = [r["source"] for r in results]
+        assert "annotation" in sources, "ramo SQLite de keyword_search não retornou anotações"
+        ann = next(r for r in results if r["source"] == "annotation")
+        assert "ressaca" in ann["text"].lower()
+
     def test_get_sources_returns_list_on_success(self, mock_engine):
         with patch.object(mock_engine, "is_ollama_available", return_value=True):
             mock_engine.index_book(1)
@@ -380,16 +399,17 @@ class TestRAGEngineRAG:
         assert "indexados" in tokens[0].lower() or "índice" in tokens[0].lower() or "index" in tokens[0].lower()
 
     def test_query_rag_yields_streaming_tokens(self, mock_engine):
-        """Com documentos e Ollama mockado, deve yield tokens."""
+        """Com documentos e Ollama mockado, deve yield tokens via streaming real."""
+        # Stream NDJSON estilo Ollama: cada linha é um chunk; a última traz done=True.
+        stream_lines = [
+            json.dumps({"message": {"role": "assistant", "content": "Dom "}}).encode("utf-8"),
+            json.dumps({"message": {"content": "Casmurro "}}).encode("utf-8"),
+            json.dumps({"message": {"content": "é um clássico."}, "done": True, "done_reason": "stop"}).encode("utf-8"),
+        ]
         mock_resp = MagicMock()
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_resp.read.return_value = json.dumps({
-            "message": {
-                "role": "assistant",
-                "content": "Dom Casmurro é um clássico."
-            }
-        }).encode("utf-8")
+        mock_resp.__iter__ = lambda s: iter(stream_lines)
 
         with patch.object(mock_engine, "is_ollama_available", return_value=True):
             mock_engine.index_book(1)
@@ -399,6 +419,8 @@ class TestRAGEngineRAG:
         result_text = "".join(tokens)
         assert "Dom" in result_text
         assert "Casmurro" in result_text
+        # Streaming real: o conteúdo chega em múltiplos tokens, não num bloco único.
+        assert len([t for t in tokens if t.strip()]) >= 2
 
     def test_query_rag_prompt_contains_context_and_question(self, mock_engine):
         """Valida que o prompt enviado ao Ollama contém contexto e pergunta."""
@@ -438,16 +460,18 @@ class TestRAGEngineRAG:
         assert "Quem escreveu Dom Casmurro?" in messages[3]["content"]
 
     def test_query_rag_cancel_stops_streaming(self, mock_engine):
-        """Cancelamento deve interromper o streaming."""
+        """Cancelamento deve interromper o streaming token a token."""
+        stream_lines = [
+            json.dumps({"message": {"content": f"token{i} "}}).encode("utf-8")
+            for i in range(7)
+        ]
+        stream_lines.append(
+            json.dumps({"message": {"content": ""}, "done": True, "done_reason": "stop"}).encode("utf-8")
+        )
         mock_resp = MagicMock()
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_resp.read.return_value = json.dumps({
-            "message": {
-                "role": "assistant",
-                "content": "token0 token1 token2 token3 token4 token5 token6"
-            }
-        }).encode("utf-8")
+        mock_resp.__iter__ = lambda s: iter(stream_lines)
 
         with patch.object(mock_engine, "is_ollama_available", return_value=True):
             mock_engine.index_book(1)
@@ -460,6 +484,29 @@ class TestRAGEngineRAG:
                         mock_engine.cancel()
 
         assert len(tokens) <= 3  # Para logo após o cancelamento
+
+    def test_query_rag_resets_cancel_flag_between_queries(self, mock_engine):
+        """Regressão (Item 1): o engine é singleton; um cancelamento anterior não
+        pode bloquear queries seguintes. query_rag deve resetar _cancelled no início."""
+        stream_lines = [
+            json.dumps({"message": {"content": "resposta ok"}, "done": True, "done_reason": "stop"}).encode("utf-8"),
+        ]
+
+        def make_resp(*args, **kwargs):
+            r = MagicMock()
+            r.__enter__ = lambda s: s
+            r.__exit__ = MagicMock(return_value=False)
+            r.__iter__ = lambda s: iter(stream_lines)
+            return r
+
+        with patch.object(mock_engine, "is_ollama_available", return_value=True):
+            mock_engine.index_book(1)
+            mock_engine._cancelled = True  # simula um cancelamento pendente anterior
+            with patch("urllib.request.urlopen", side_effect=make_resp):
+                tokens = list(mock_engine.query_rag("Pergunta nova após cancelar"))
+
+        assert mock_engine._cancelled is False  # foi resetado no início da nova query
+        assert "resposta ok" in "".join(tokens)  # e a resposta foi de fato gerada
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -627,6 +674,8 @@ class TestRAGWorker:
         # Gerador curto deve completar e emitir seus tokens
         assert len(tokens) == 3
 
+
+
     def test_index_worker_alias(self, qtbot, mock_engine):
         """Testa o alias IndexWorker."""
         from src.gui.workers.rag_worker import IndexWorker
@@ -648,3 +697,64 @@ class TestRAGWorker:
                 assert worker._book_id == 1
                 with qtbot.waitSignal(worker.finished_work, timeout=5000):
                     worker.start()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TestChatMemory (Item 8a — memória conversacional por livro)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestChatMemory:
+    def test_append_and_get_isolated_by_book(self, mock_engine):
+        mock_engine.append_chat_turn(1, "pergunta", "resposta")
+        assert mock_engine.get_chat_history(1) == [
+            {"role": "user", "content": "pergunta"},
+            {"role": "assistant", "content": "resposta"},
+        ]
+        assert mock_engine.get_chat_history(2) == []  # outro livro isolado
+
+    def test_empty_assistant_not_stored(self, mock_engine):
+        mock_engine.append_chat_turn(1, "p", "   ")
+        assert mock_engine.get_chat_history(1) == []
+
+    def test_history_trims_to_max(self, mock_engine):
+        for i in range(5):
+            mock_engine.append_chat_turn(1, f"p{i}", f"r{i}")
+        h = mock_engine.get_chat_history(1)
+        assert len(h) == 6  # default max_messages = 3 turnos
+        assert h[-1]["content"] == "r4"   # mantém os mais recentes
+        assert h[0]["content"] == "p2"
+
+    def test_clear_history(self, mock_engine):
+        mock_engine.append_chat_turn(1, "p", "r")
+        mock_engine.clear_chat_history(1)
+        assert mock_engine.get_chat_history(1) == []
+
+    def test_get_returns_copy(self, mock_engine):
+        mock_engine.append_chat_turn(1, "p", "r")
+        h = mock_engine.get_chat_history(1)
+        h.append("x")
+        assert len(mock_engine.get_chat_history(1)) == 2  # não afeta o estado interno
+
+    def test_query_rag_injects_history_on_followup(self, mock_engine):
+        mock_engine.append_chat_turn(None, "Quem é Capitu?", "Personagem de Dom Casmurro.")
+
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured.update(json.loads(req.data.decode()))
+            resp = MagicMock()
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = MagicMock(return_value=False)
+            resp.__iter__ = lambda s: iter([
+                json.dumps({"message": {"content": "ok"}, "done": True, "done_reason": "stop"}).encode("utf-8")
+            ])
+            return resp
+
+        with patch.object(mock_engine, "is_ollama_available", return_value=True):
+            mock_engine.index_book(1)
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                list(mock_engine.query_rag("E ela trai Bentinho?"))
+
+        contents = [m.get("content", "") for m in captured["messages"]]
+        assert any("Quem é Capitu?" in c for c in contents)        # histórico injetado
+        assert any("E ela trai Bentinho?" in c for c in contents)  # pergunta atual

@@ -21,13 +21,15 @@ class SettingsDialog(QDialog):
     theme_changed = pyqtSignal(str)
     settings_changed = pyqtSignal()
 
-    def __init__(self, config: ConfigManager, parent=None):
+    def __init__(self, config: ConfigManager, parent=None, initial_tab: int = 0):
         super().__init__(parent)
         self._config = config
         self.setWindowTitle("⚙️ Configurações")
         self.setMinimumSize(QSize(550, 450))
         self.setModal(True)
         self._setup_ui()
+        if hasattr(self, "_tabs"):
+            self._tabs.setCurrentIndex(initial_tab)
         self._load_settings()
 
     def _setup_ui(self):
@@ -45,11 +47,12 @@ class SettingsDialog(QDialog):
         layout.addWidget(title)
 
         # Abas
-        tabs = QTabWidget()
-        tabs.addTab(self._create_appearance_tab(), "🎨 Aparência")
-        tabs.addTab(self._create_reader_tab(), "📖 Leitor")
-        tabs.addTab(self._create_library_tab(), "📚 Biblioteca")
-        layout.addWidget(tabs)
+        self._tabs = QTabWidget()
+        self._tabs.addTab(self._create_appearance_tab(), "🎨 Aparência")
+        self._tabs.addTab(self._create_reader_tab(), "📖 Leitor")
+        self._tabs.addTab(self._create_library_tab(), "📚 Biblioteca")
+        self._tabs.addTab(self._create_tts_tab(), "🔊 Narração")
+        layout.addWidget(self._tabs)
 
         # Botões
         btn_layout = QHBoxLayout()
@@ -275,6 +278,123 @@ class SettingsDialog(QDialog):
         layout.addStretch()
         return tab
 
+    def _create_tts_tab(self) -> QWidget:
+        """Aba de configurações de narração/TTS (Fase 13)."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(16)
+
+        # Narrador do Livro
+        book_group = QGroupBox("📖 Narrador do Livro")
+        book_group.setStyleSheet(self._group_style())
+        book_layout = QVBoxLayout(book_group)
+
+        # Provider preferido
+        prov_row = QHBoxLayout()
+        prov_row.addWidget(QLabel("Engine preferida:"))
+        self._tts_book_provider = QComboBox()
+        self._tts_book_provider.addItem("Kokoro (Qualidade)", "kokoro")
+        self._tts_book_provider.addItem("Piper (Leve)", "piper")
+        self._tts_book_provider.addItem("Qwen3-TTS (Avançado)", "qwen3-tts")
+        self._tts_book_provider.addItem("Sherpa-ONNX", "sherpa-onnx")
+        self._tts_book_provider.addItem("pyttsx3 (Sistema)", "pyttsx3")
+        self._tts_book_provider.setFixedWidth(220)
+        prov_row.addWidget(self._tts_book_provider)
+        prov_row.addStretch()
+        book_layout.addLayout(prov_row)
+
+        # Estilo de narração
+        style_row = QHBoxLayout()
+        style_row.addWidget(QLabel("Estilo:"))
+        self._tts_book_style = QComboBox()
+        self._tts_book_style.addItem("🌿 Sereno", "serene")
+        self._tts_book_style.addItem("📐 Técnico", "technical")
+        self._tts_book_style.addItem("🎭 Expressivo", "expressive")
+        self._tts_book_style.setFixedWidth(220)
+        style_row.addWidget(self._tts_book_style)
+        style_row.addStretch()
+        book_layout.addLayout(style_row)
+
+        # Velocidade do livro
+        rate_row = QHBoxLayout()
+        rate_row.addWidget(QLabel("Velocidade:"))
+        self._tts_book_rate = QSlider(Qt.Orientation.Horizontal)
+        self._tts_book_rate.setRange(50, 200)  # 0.5x to 2.0x
+        self._tts_book_rate.setValue(100)  # 1.0x
+        self._tts_book_rate.setFixedWidth(200)
+        self._tts_book_rate_label = QLabel("1.0x")
+        self._tts_book_rate_label.setFixedWidth(40)
+        self._tts_book_rate.valueChanged.connect(
+            lambda v: self._tts_book_rate_label.setText(f"{v / 100:.1f}x")
+        )
+        rate_row.addWidget(self._tts_book_rate)
+        rate_row.addWidget(self._tts_book_rate_label)
+        rate_row.addStretch()
+        book_layout.addLayout(rate_row)
+
+        layout.addWidget(book_group)
+
+        # Voz do Assistente
+        asst_group = QGroupBox("🤖 Voz do Assistente")
+        asst_group.setStyleSheet(self._group_style())
+        asst_layout = QVBoxLayout(asst_group)
+
+        asst_prov_row = QHBoxLayout()
+        asst_prov_row.addWidget(QLabel("Engine preferida:"))
+        self._tts_asst_provider = QComboBox()
+        self._tts_asst_provider.addItem("Kokoro (Qualidade)", "kokoro")
+        self._tts_asst_provider.addItem("Piper (Leve)", "piper")
+        self._tts_asst_provider.addItem("Qwen3-TTS (Avançado)", "qwen3-tts")
+        self._tts_asst_provider.addItem("Sherpa-ONNX", "sherpa-onnx")
+        self._tts_asst_provider.addItem("pyttsx3 (Sistema)", "pyttsx3")
+        self._tts_asst_provider.setFixedWidth(220)
+        asst_prov_row.addWidget(self._tts_asst_provider)
+        asst_prov_row.addStretch()
+        asst_layout.addLayout(asst_prov_row)
+
+        asst_style_row = QHBoxLayout()
+        asst_style_row.addWidget(QLabel("Estilo:"))
+        self._tts_asst_style = QComboBox()
+        self._tts_asst_style.addItem("📚 Didático", "didactic")
+        self._tts_asst_style.addItem("🌿 Sereno", "serene")
+        self._tts_asst_style.addItem("📐 Técnico", "technical")
+        self._tts_asst_style.setFixedWidth(220)
+        asst_style_row.addWidget(self._tts_asst_style)
+        asst_style_row.addStretch()
+        asst_layout.addLayout(asst_style_row)
+
+        asst_rate_row = QHBoxLayout()
+        asst_rate_row.addWidget(QLabel("Velocidade:"))
+        self._tts_asst_rate = QSlider(Qt.Orientation.Horizontal)
+        self._tts_asst_rate.setRange(50, 200)
+        self._tts_asst_rate.setValue(105)
+        self._tts_asst_rate.setFixedWidth(200)
+        self._tts_asst_rate_label = QLabel("1.0x")
+        self._tts_asst_rate_label.setFixedWidth(40)
+        self._tts_asst_rate.valueChanged.connect(
+            lambda v: self._tts_asst_rate_label.setText(f"{v / 100:.1f}x")
+        )
+        asst_rate_row.addWidget(self._tts_asst_rate)
+        asst_rate_row.addWidget(self._tts_asst_rate_label)
+        asst_rate_row.addStretch()
+        asst_layout.addLayout(asst_rate_row)
+
+        layout.addWidget(asst_group)
+
+        # Fallback automático
+        fallback_group = QGroupBox("⚡ Comportamento")
+        fallback_group.setStyleSheet(self._group_style())
+        fallback_layout = QVBoxLayout(fallback_group)
+
+        self._tts_auto_fallback = QCheckBox("Fallback automático para engine mais leve")
+        self._tts_auto_fallback.setChecked(True)
+        fallback_layout.addWidget(self._tts_auto_fallback)
+
+        layout.addWidget(fallback_group)
+
+        layout.addStretch()
+        return tab
+
     def _group_style(self) -> str:
         return """
             QGroupBox {
@@ -329,6 +449,33 @@ class SettingsDialog(QDialog):
         for d in dirs:
             self._watch_list.addItem(d)
 
+        # TTS — Narração (Fase 13)
+        tts_cfg = self._config.tts_config
+        book_cfg = tts_cfg.get("book_narrator", {})
+        asst_cfg = tts_cfg.get("assistant", {})
+
+        for i in range(self._tts_book_provider.count()):
+            if self._tts_book_provider.itemData(i) == book_cfg.get("preferred_provider", "kokoro"):
+                self._tts_book_provider.setCurrentIndex(i)
+                break
+        for i in range(self._tts_book_style.count()):
+            if self._tts_book_style.itemData(i) == book_cfg.get("style", "serene"):
+                self._tts_book_style.setCurrentIndex(i)
+                break
+        self._tts_book_rate.setValue(int(book_cfg.get("rate", 1.0) * 100))
+
+        for i in range(self._tts_asst_provider.count()):
+            if self._tts_asst_provider.itemData(i) == asst_cfg.get("preferred_provider", "kokoro"):
+                self._tts_asst_provider.setCurrentIndex(i)
+                break
+        for i in range(self._tts_asst_style.count()):
+            if self._tts_asst_style.itemData(i) == asst_cfg.get("style", "didactic"):
+                self._tts_asst_style.setCurrentIndex(i)
+                break
+        self._tts_asst_rate.setValue(int(asst_cfg.get("rate", 1.05) * 100))
+
+        self._tts_auto_fallback.setChecked(tts_cfg.get("auto_fallback", True))
+
     def _save_and_close(self):
         """Salva configurações e fecha o diálogo."""
         self._config.set("theme", self._theme_combo.currentData())
@@ -344,6 +491,15 @@ class SettingsDialog(QDialog):
 
         dirs = [self._watch_list.item(i).text() for i in range(self._watch_list.count())]
         self._config.set("watched_directories", dirs)
+
+        # TTS — Narração (Fase 13)
+        self._config.set("tts.book_narrator.preferred_provider", self._tts_book_provider.currentData())
+        self._config.set("tts.book_narrator.style", self._tts_book_style.currentData())
+        self._config.set("tts.book_narrator.rate", self._tts_book_rate.value() / 100)
+        self._config.set("tts.assistant.preferred_provider", self._tts_asst_provider.currentData())
+        self._config.set("tts.assistant.style", self._tts_asst_style.currentData())
+        self._config.set("tts.assistant.rate", self._tts_asst_rate.value() / 100)
+        self._config.set("tts.auto_fallback", self._tts_auto_fallback.isChecked())
 
         self.settings_changed.emit()
         self.accept()

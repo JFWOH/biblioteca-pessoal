@@ -6,6 +6,8 @@ fontes bibliográficas e controle de indexação — tudo rodando localmente.
 
 from __future__ import annotations
 
+import uuid
+
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
@@ -38,6 +40,8 @@ class RAGPanel(QWidget):
     close_requested = pyqtSignal()     # Emitido para ocultar o painel no modo side-by-side
     back_requested = pyqtSignal()      # Emitido para voltar à biblioteca no modo tela cheia
     save_annotation_requested = pyqtSignal(int, int, str) # book_id, page, content
+    clear_chat_requested = pyqtSignal()  # limpar a memória conversacional do contexto atual
+    feedback_submitted = pyqtSignal(int, dict)  # rating (+1/-1), context dict
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -45,6 +49,11 @@ class RAGPanel(QWidget):
         self._full_answer = ""
         self._reading_context = None
         self._is_standalone = False
+        # Feedback (Fase 1b): id de sessão por pergunta + última query, para
+        # gravar 👍/👎 em agent_feedback; 1 voto por resposta.
+        self._current_session_id = ""
+        self._last_query = ""
+        self._feedback_given = False
         self._setup_ui()
 
     # ── Construção da UI ───────────────────────────────────────────────────────
@@ -66,13 +75,13 @@ class RAGPanel(QWidget):
         self._back_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
-                color: #818cf8;
+                color: #10b981;
                 border: none;
                 font-weight: 500;
                 font-size: 13px;
                 padding-right: 12px;
             }
-            QPushButton:hover { color: #a5b4fc; }
+            QPushButton:hover { color: #34d399; }
         """)
         self._back_btn.setVisible(False)
         self._back_btn.clicked.connect(self.back_requested.emit)
@@ -98,7 +107,23 @@ class RAGPanel(QWidget):
             padding: 4px 12px; font-size: 11px; font-weight: 600;
         """)
         h_layout.addWidget(self._status_badge)
-        
+
+        # Botão recolher/expandir a barra lateral (fontes, modelo, indexação) —
+        # recolhido, a resposta do assistente ocupa toda a largura do painel.
+        self._sidebar_toggle_btn = QPushButton("⟩")
+        self._sidebar_toggle_btn.setFixedSize(28, 28)
+        self._sidebar_toggle_btn.setCheckable(True)
+        self._sidebar_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._sidebar_toggle_btn.setToolTip("Recolher/expandir o painel lateral (fontes, modelo)")
+        self._sidebar_toggle_btn.setStyleSheet("""
+            QPushButton { background: transparent; color: #a1a1aa; border: none;
+                          border-radius: 4px; font-size: 15px; font-weight: bold; }
+            QPushButton:hover { background: #3f3f46; color: white; }
+            QPushButton:checked { color: #10b981; }
+        """)
+        self._sidebar_toggle_btn.clicked.connect(self._toggle_sidebar)
+        h_layout.addWidget(self._sidebar_toggle_btn)
+
         # Botão Fechar (Escape Hatch)
         self._close_btn = QPushButton("✕")
         self._close_btn.setFixedSize(28, 28)
@@ -150,21 +175,45 @@ class RAGPanel(QWidget):
         self._response_area.setMinimumHeight(200)
         chat_layout.addWidget(self._response_area, stretch=1)
 
-        # Botão de Salvar Anotação Manual (Human-in-the-Loop)
-        self._save_note_btn = QPushButton("💾 Salvar como Anotação")
-        self._save_note_btn.setVisible(False)
-        self._save_note_btn.setStyleSheet("""
+        # Container para botões de ação na resposta
+        action_btns_layout = QHBoxLayout()
+        action_btns_layout.addStretch()
+
+        # Botão de Flashcard
+        self._flashcard_btn = QPushButton("🃏 Criar Flashcard")
+        self._flashcard_btn.setVisible(False)
+        self._flashcard_btn.setStyleSheet("""
             QPushButton {
-                background-color: rgba(99, 102, 241, 0.15);
-                color: #818cf8;
-                border: 1px solid #6366f1;
+                background-color: rgba(37, 99, 235, 0.15);
+                color: #3b82f6;
+                border: 1px solid #2563eb;
                 border-radius: 8px;
                 padding: 8px 16px;
                 font-weight: bold;
                 font-size: 12px;
             }
             QPushButton:hover {
-                background-color: rgba(99, 102, 241, 0.25);
+                background-color: rgba(37, 99, 235, 0.25);
+            }
+        """)
+        self._flashcard_btn.clicked.connect(self._on_flashcard_clicked)
+        action_btns_layout.addWidget(self._flashcard_btn)
+
+        # Botão de Salvar Anotação Manual (Human-in-the-Loop)
+        self._save_note_btn = QPushButton("💾 Salvar como Anotação")
+        self._save_note_btn.setVisible(False)
+        self._save_note_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(16, 185, 129, 0.15);
+                color: #10b981;
+                border: 1px solid #059669;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: rgba(16, 185, 129, 0.25);
             }
             QPushButton:disabled {
                 background-color: rgba(39, 39, 42, 0.5);
@@ -173,7 +222,35 @@ class RAGPanel(QWidget):
             }
         """)
         self._save_note_btn.clicked.connect(self._on_save_note_clicked)
-        chat_layout.addWidget(self._save_note_btn, alignment=Qt.AlignmentFlag.AlignRight)
+        action_btns_layout.addWidget(self._save_note_btn)
+
+        # Feedback 👍/👎 (Fase 1b): avalia a resposta → agent_feedback.
+        # Estilo "ghost" discreto, espelhando selection_popover.
+        _fb_style = """
+            QPushButton {
+                background: transparent;
+                border: 1px solid #3f3f46;
+                border-radius: 8px;
+                color: #9ca3af;
+                padding: 8px 12px;
+                font-size: 12px;
+            }
+            QPushButton:hover { background: rgba(16, 185, 129, 0.12); color: #10b981; }
+            QPushButton:disabled { color: #52525b; border-color: #2a2a2e; }
+        """
+        self._thumbs_up_btn = QPushButton("👍 Útil")
+        self._thumbs_up_btn.setVisible(False)
+        self._thumbs_up_btn.setStyleSheet(_fb_style)
+        self._thumbs_up_btn.clicked.connect(lambda: self._on_feedback_clicked(1))
+        action_btns_layout.addWidget(self._thumbs_up_btn)
+
+        self._thumbs_down_btn = QPushButton("👎 Não ajudou")
+        self._thumbs_down_btn.setVisible(False)
+        self._thumbs_down_btn.setStyleSheet(_fb_style)
+        self._thumbs_down_btn.clicked.connect(lambda: self._on_feedback_clicked(-1))
+        action_btns_layout.addWidget(self._thumbs_down_btn)
+
+        chat_layout.addLayout(action_btns_layout)
 
         # Progress bar (visível durante geração/indexação)
         self._progress_bar = QProgressBar()
@@ -209,7 +286,7 @@ class RAGPanel(QWidget):
         self._send_btn.setStyleSheet("""
             QPushButton#primaryBtn {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #6366f1, stop:1 #818cf8);
+                    stop:0 #059669, stop:1 #10b981);
                 color: white;
                 border: none;
                 border-radius: 8px;
@@ -219,9 +296,9 @@ class RAGPanel(QWidget):
             }
             QPushButton#primaryBtn:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #818cf8, stop:1 #a78bfa);
+                    stop:0 #10b981, stop:1 #34d399);
             }
-            QPushButton#primaryBtn:pressed { background: #4f46e5; }
+            QPushButton#primaryBtn:pressed { background: #047857; }
             QPushButton#primaryBtn:disabled { background: #27272a; color: #52525b; }
         """)
         self._send_btn.clicked.connect(self._on_send)
@@ -253,7 +330,7 @@ class RAGPanel(QWidget):
 
         # ── Painel direito: fontes e controles ─────────────────────────────────
         self._sidebar_widget = QWidget()
-        self._sidebar_widget.setFixedWidth(280)
+        self._sidebar_widget.setFixedWidth(230)
         sb_layout = QVBoxLayout(self._sidebar_widget)
         sb_layout.setContentsMargins(16, 20, 16, 20)
         sb_layout.setSpacing(16)
@@ -266,7 +343,7 @@ class RAGPanel(QWidget):
 
         idx_title = QLabel("📚 Indexação")
         idx_title.setStyleSheet(
-            "color: #818cf8; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;"
+            "color: #10b981; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;"
         )
         idx_layout.addWidget(idx_title)
 
@@ -298,14 +375,15 @@ class RAGPanel(QWidget):
 
         self._model_combo = QComboBox()
 
-        # Catálogo de modelos
+        # Catálogo de modelos (tamanhos aproximados, Q4)
         self._MODEL_CATALOG = [
-            ("gemma4:e4b", "Gemma 4 E4B",   "~9.6 GB", "⭐ Recomendado"),
-            ("gemma3:4b",  "Gemma 3 (4B)",  "~3.3 GB", "Alternativo"),
-            ("llama3",     "Llama 3 (8B)",  "~4.7 GB", "Atual"),
-            ("gemma2:2b",  "Gemma 2 (2B)",  "~1.5 GB", "🪶 Leve"),
-            ("mistral",    "Mistral (7B)",  "~4.1 GB", "Alternativo"),
-            ("phi3",       "Phi-3 Mini",    "~2.2 GB", "🪶 Leve"),
+            ("gemma4:12b",  "Gemma 4 (12B)",  "~8 GB",   "🔥 Qualidade"),
+            ("gemma4:e4b",  "Gemma 4 E4B",    "~4 GB",   "⭐ Recomendado (rápido)"),
+            ("qwen2.5:7b",  "Qwen 2.5 (7B)",  "~4.7 GB", "🌍 Multilíngue + tools"),
+            ("gemma3:4b",   "Gemma 3 (4B)",   "~3.3 GB", "Equilíbrio"),
+            ("qwen2.5:3b",  "Qwen 2.5 (3B)",  "~1.9 GB", "🪶 Leve forte"),
+            ("llama3.1:8b", "Llama 3.1 (8B)", "~4.9 GB", "Alternativo"),
+            ("gemma2:2b",   "Gemma 2 (2B)",   "~1.6 GB", "🪶 Mínimo"),
         ]
         for model_id, display, size, tag in self._MODEL_CATALOG:
             self._model_combo.addItem(f"{display}  {tag}  ({size})", userData=model_id)
@@ -370,7 +448,7 @@ class RAGPanel(QWidget):
         self._tips_text = QLabel(
             "• Indexe sua biblioteca antes de perguntar\n"
             "• Funciona com Ollama rodando localmente\n"
-            "• Modelos: nomic-embed-text + llama3"
+            "• Modelos: bge-m3 + gemma4:e4b"
         )
         self._tips_text.setWordWrap(True)
         tips_layout.addWidget(self._tips_text)
@@ -426,17 +504,17 @@ class RAGPanel(QWidget):
             
         else: # "dark" ou fallback
             # Cores do tema Escuro
-            bg_main = "#0f0f17"
-            bg_input = "#18181b"
-            border_color = "#27272a"
-            text_main = "#e4e4e7"
-            text_sec = "#52525b"
-            header_gradient = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1a1a2e, stop:1 #16213e)"
-            bg_sidebar = "#111117"
-            border_sidebar = "1px solid #1e1e24"
-            bg_tips = "#0f1f0f"
-            border_tips = "1px solid #1a3a1a"
-            text_tips = "#4ade80"
+            bg_main = "#0f1115"
+            bg_input = "#161920"
+            border_color = "#2d333f"
+            text_main = "#e5e7eb"
+            text_sec = "#cbd5e1"
+            header_gradient = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #161920, stop:1 #20242d)"
+            bg_sidebar = "#161920"
+            border_sidebar = "1px solid #2d333f"
+            bg_tips = "rgba(16, 185, 129, 0.05)"
+            border_tips = "1px solid rgba(16, 185, 129, 0.2)"
+            text_tips = "#10b981"
 
         # 1. Header
         self._header.setStyleSheet(f"""
@@ -466,10 +544,10 @@ class RAGPanel(QWidget):
                 color: {text_main};
                 font-size: 14px;
                 line-height: 1.6;
-                selection-background-color: #6366f1;
+                selection-background-color: #10b981;
             }}
             QTextEdit#responseArea:focus {{
-                border-color: #6366f1;
+                border-color: #10b981;
             }}
         """)
         
@@ -482,7 +560,7 @@ class RAGPanel(QWidget):
             }}
             QProgressBar::chunk {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #6366f1, stop:1 #a78bfa);
+                    stop:0 #059669, stop:1 #10b981);
                 border-radius: 3px;
             }}
         """)
@@ -496,7 +574,7 @@ class RAGPanel(QWidget):
                 border-radius: 12px;
             }}
             QFrame:focus-within {{
-                border-color: #6366f1;
+                border-color: #10b981;
             }}
         """)
         self._question_input.setStyleSheet(f"""
@@ -525,7 +603,7 @@ class RAGPanel(QWidget):
         self._index_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {bg_main};
-                color: #818cf8;
+                color: #10b981;
                 border: 1px solid {border_color};
                 border-radius: 8px;
                 padding: 8px 12px;
@@ -533,8 +611,8 @@ class RAGPanel(QWidget):
                 font-weight: 600;
                 text-align: left;
             }}
-            QPushButton:hover {{ background-color: {bg_input}; border-color: #6366f1; }}
-            QPushButton:pressed {{ background-color: #4338ca; color: white; }}
+            QPushButton:hover {{ background-color: {bg_input}; border-color: #10b981; }}
+            QPushButton:pressed {{ background-color: #047857; color: white; }}
         """)
         
         # Frame de Modelo de IA
@@ -575,7 +653,7 @@ class RAGPanel(QWidget):
                 border-bottom: 1px solid {border_color};
             }}
             QListWidget::item:hover {{ background-color: {bg_main}; color: {text_main}; }}
-            QListWidget::item:selected {{ background-color: rgba(99,102,241,0.15); color: #818cf8; }}
+            QListWidget::item:selected {{ background-color: rgba(16,185,129,0.15); color: #10b981; }}
         """)
         
         # Dicas
@@ -624,18 +702,45 @@ class RAGPanel(QWidget):
         self._back_btn.setVisible(is_standalone)
         self._close_btn.setVisible(not is_standalone)
 
+    def _toggle_sidebar(self) -> None:
+        """Recolhe/expande a barra lateral (fontes, modelo, indexação).
+
+        Recolhida, a área de resposta ocupa toda a largura do painel — útil no
+        dock do leitor, onde o espaço é mais estreito.
+        """
+        collapse = self._sidebar_toggle_btn.isChecked()
+        self._sidebar_widget.setVisible(not collapse)
+        self._sidebar_toggle_btn.setText("⟨" if collapse else "⟩")
+
     def set_indexed_count(self, count: int) -> None:
         """Atualiza o contador de chunks indexados."""
         self._indexed_count_lbl.setText(f"{count:,} chunks indexados".replace(",", "."))
 
     def set_reading_context(self, book_id: int, title: str, page: int, text: str) -> None:
         """Guarda o contexto do que o usuário está lendo no momento."""
+        # Trocar de livro zera a conversa visível (a memória por-livro continua no
+        # RAGEngine). Só reseta quando o livro muda — não a cada virada de página,
+        # senão apagaria a resposta enquanto o usuário navega lendo.
+        prev = self._reading_context
+        if prev is not None and prev.get("book_id") != book_id:
+            self._reset_conversation_view()
         self._reading_context = {
             "book_id": book_id,
             "title": title,
             "page": page,
             "text": text,
         }
+
+    def _reset_conversation_view(self) -> None:
+        """Limpa a área de conversa ao trocar de livro (apenas visual)."""
+        self._response_area.clear()
+        self._sources_list.clear()
+        self._full_answer = ""
+        self._question_input.clear()
+        self._save_note_btn.setVisible(False)
+        self._flashcard_btn.setVisible(False)
+        self._hide_feedback_buttons()
+        self._feedback_given = False
 
     def clear_reading_context(self) -> None:
         """Limpa o contexto de leitura (útil para modo standalone)."""
@@ -666,6 +771,69 @@ class RAGPanel(QWidget):
             self._save_note_btn.setText("💾 Salvar como Anotação")
             self._save_note_btn.setEnabled(True)
             self._save_note_btn.setVisible(True)
+            self._flashcard_btn.setVisible(True)
+        elif full_answer.strip():
+            # Mesmo fora do contexto, deixa criar flashcard livre
+            self._flashcard_btn.setVisible(True)
+
+        # Feedback 👍/👎: disponível em qualquer resposta não vazia (livro ou global).
+        if full_answer.strip():
+            self._show_feedback_buttons()
+
+    def _show_feedback_buttons(self) -> None:
+        for btn, label in (
+            (self._thumbs_up_btn, "👍 Útil"),
+            (self._thumbs_down_btn, "👎 Não ajudou"),
+        ):
+            btn.setText(label)
+            btn.setEnabled(True)
+            btn.setVisible(True)
+
+    def _hide_feedback_buttons(self) -> None:
+        self._thumbs_up_btn.setVisible(False)
+        self._thumbs_down_btn.setVisible(False)
+
+    def _on_feedback_clicked(self, rating: int) -> None:
+        """Registra 👍 (+1) / 👎 (-1) da resposta atual. Um voto por resposta."""
+        if self._feedback_given:
+            return
+        self._feedback_given = True
+        ctx = self._reading_context or {}
+        book_id = ctx.get("book_id") or None
+        if book_id == 0:
+            book_id = None
+        context = {
+            "kind": "answer",
+            "book_id": book_id,
+            "page": ctx.get("page"),
+            "session_id": self._current_session_id,
+            "query": self._last_query,
+        }
+        self.feedback_submitted.emit(rating, context)
+        # Confirmação visual: desabilita ambos e destaca o escolhido.
+        chosen = self._thumbs_up_btn if rating > 0 else self._thumbs_down_btn
+        chosen.setText("✅ Obrigado!")
+        self._thumbs_up_btn.setEnabled(False)
+        self._thumbs_down_btn.setEnabled(False)
+
+    def _on_flashcard_clicked(self) -> None:
+        """Abre o dialog para criar um flashcard a partir da resposta e do contexto."""
+        if not self._full_answer.strip():
+            return
+            
+        front = self._reading_context.get("text", "Nova Pergunta") if self._reading_context else "Nova Pergunta"
+        back = self._full_answer.strip()
+        
+        # O _rag_panel reporta para a MainWindow, precisamos enviar um sinal.
+        # Mas para simplificar, usaremos o MainWindow parent ou um custom event.
+        # Vamos achar a main_window recursivamente ou adicionar um signal:
+        from PyQt6.QtWidgets import QWidget
+        parent = self.parent()
+        while parent:
+            if hasattr(parent, "_open_anki_export_dialog"):
+                parent._open_anki_export_dialog(front, back)
+                return
+            parent = parent.parent()
 
     def _on_save_note_clicked(self) -> None:
         """Chamado quando o usuário clica para salvar a resposta como anotação."""
@@ -731,6 +899,10 @@ class RAGPanel(QWidget):
         self._sources_list.clear()
         self._set_generating(True)
         self._save_note_btn.setVisible(False)
+        # Nova pergunta: nova sessão de feedback (1 voto por resposta).
+        self._last_query = question
+        self._current_session_id = str(uuid.uuid4())
+        self._feedback_given = False
         self._gen_status.setText(f'🔍 Consultando: "{question[:60]}..."')
         self.query_requested.emit(question)
 
@@ -750,6 +922,7 @@ class RAGPanel(QWidget):
         self._full_answer = ""
         self._question_input.clear()
         self._question_input.setFocus()
+        self.clear_chat_requested.emit()
 
     def _set_generating(self, active: bool) -> None:
         self._is_generating = active
@@ -758,7 +931,11 @@ class RAGPanel(QWidget):
         self._progress_bar.setVisible(active)
         self._gen_status.setVisible(active)
         self._question_input.setEnabled(not active)
-        if not active:
+        if active:
+            self._save_note_btn.setVisible(False)
+            self._flashcard_btn.setVisible(False)
+            self._hide_feedback_buttons()
+        else:
             self._gen_status.setText("")
 
     def _set_indexing(self, active: bool) -> None:

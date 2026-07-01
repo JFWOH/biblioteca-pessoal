@@ -1,13 +1,25 @@
 import pytest
 from fastapi.testclient import TestClient
-from src.core.opds_server import app, db
 import os
 import tempfile
+from pathlib import Path
+from src.core.opds_server import app, db
 
 client = TestClient(app)
 
 @pytest.fixture(autouse=True)
-def setup_db():
+def setup_db(tmp_path):
+    # Redireciona o DB para um arquivo temporário
+    original_db_path = db._db_path
+    temp_db_path = tmp_path / "test_opds.db"
+    db._db_path = temp_db_path
+    
+    # Recria as conexões
+    db.close()
+    # A conexão será recriada automaticamente via db.conn property na próxima leitura
+    db._create_tables()
+
+    # Limpa antes
     books = db.get_all_books()
     for b in books:
         db.delete_book(b["id"])
@@ -24,9 +36,9 @@ def setup_db():
 
     yield
 
-    books = db.get_all_books()
-    for b in books:
-        db.delete_book(b["id"])
+    # Restaura o DB original
+    db.close()
+    db._db_path = original_db_path
 
 def test_get_opds_catalog():
     response = client.get("/opds")

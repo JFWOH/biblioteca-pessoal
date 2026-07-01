@@ -1,5 +1,6 @@
 """Janela principal da aplicação Biblioteca Pessoal."""
 
+import logging
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -31,7 +32,9 @@ from src.gui.widgets.stats_panel import StatsPanel
 from src.gui.widgets.rag_panel import RAGPanel
 from src.utils.constants import FILE_FILTER, DATA_DIR
 from src.utils.export import export_annotations_markdown
-from src.core.watcher import DirectoryWatcher
+from src.gui.watcher import DirectoryWatcher
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -46,6 +49,13 @@ class MainWindow(QMainWindow):
         self._config = ConfigManager()
         self._library = LibraryManager(self._db, self._config)
         self._search_engine = SearchEngine(self._db)
+
+        # Inicializa TTS router persistente
+        from src.core.tts.tts_router import TTSRouter
+        from src.core.tts.text_preprocessor import TTSTextPreprocessor
+        self._tts_router = TTSRouter(TTSTextPreprocessor())
+        self._tts_router.auto_register_providers()
+        self._tts_router.initialize()
 
         # Inicializa RAG engine (graceful — não trava se Ollama offline)
         self._rag_engine = None
@@ -143,6 +153,11 @@ class MainWindow(QMainWindow):
         ai_action.triggered.connect(self._show_rag_panel)
         tools_menu.addAction(ai_action)
 
+        flashcards_action = QAction("🃏 Flashcards", self)
+        flashcards_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
+        flashcards_action.triggered.connect(self._show_flashcards)
+        tools_menu.addAction(flashcards_action)
+
         tools_menu.addSeparator()
 
         reindex_action = QAction("🔄 Reindexar Biblioteca (IA)", self)
@@ -185,9 +200,7 @@ class MainWindow(QMainWindow):
 
         # Search bar
         search_container = QWidget()
-        search_container.setStyleSheet(
-            "background-color: #0f0f17; border-bottom: 1px solid #1e1e24;"
-        )
+        search_container.setObjectName("searchContainer")
         sc_layout = QHBoxLayout(search_container)
         sc_layout.setContentsMargins(24, 12, 24, 12)
         self._search_bar = SearchBar()
@@ -221,7 +234,7 @@ class MainWindow(QMainWindow):
         self._main_stack.addWidget(library_page)  # index 0
 
         # ── Página do Leitor ──
-        self._reader_view = ReaderView()
+        self._reader_view = ReaderView(parent=self, tts_router=self._tts_router, rag_engine=self._rag_engine, db=self._db)
         self._reader_view.closed.connect(self._close_reader)
         self._reader_view.progress_changed.connect(self._on_progress)
         self._reader_view.annotation_added.connect(self._on_annotation_added)
@@ -242,6 +255,8 @@ class MainWindow(QMainWindow):
         self._rag_panel.stop_requested.connect(self._on_rag_stop)
         self._rag_panel.model_changed.connect(self._on_model_changed)
         self._rag_panel.save_annotation_requested.connect(self._on_rag_annotation_save)
+        self._rag_panel.feedback_submitted.connect(self._on_rag_feedback)
+        self._rag_panel.clear_chat_requested.connect(self._on_clear_chat)
         self._rag_panel.back_requested.connect(lambda: self._main_stack.setCurrentIndex(0))
         self._main_stack.addWidget(self._rag_panel)  # index 3
 
@@ -414,6 +429,13 @@ class MainWindow(QMainWindow):
             {"page": page, "content": content, "type": "ai_note", "color": "#6366f1"}
         )
 
+    def _on_rag_feedback(self, rating: int, context: dict):
+        """Persiste 👍/👎 do usuário sobre a resposta do RAG em agent_feedback."""
+        try:
+            self._db.add_feedback(rating=rating, **context)
+        except Exception as exc:
+            logger.warning(f"Falha ao registrar feedback do RAG (ignorado): {exc}")
+
     def _on_annotation_added(self, book_id: int, data: dict):
         """Persiste uma nova anotação no banco."""
         if self._reader_view._book_id > 0 and book_id != self._reader_view._book_id:
@@ -426,6 +448,7 @@ class MainWindow(QMainWindow):
             highlight_color=data.get("color", data.get("highlight_color", "#fbbf24")),
             annotation_type=data.get("type", data.get("annotation_type", "note")),
             position_data=data.get("position_data", "{}"),
+            title=data.get("title", ""),
         )
         # Recarrega anotações no painel
         annotations = self._db.get_annotations(book_id)
@@ -512,9 +535,10 @@ class MainWindow(QMainWindow):
             )
             self._load_library()
 
-    def _show_settings(self):
+    def _show_settings(self, initial_tab: int = 0):
         """Abre o diálogo de configurações."""
-        dialog = SettingsDialog(self._config, self)
+        from src.gui.settings_dialog import SettingsDialog
+        dialog = SettingsDialog(self._config, self, initial_tab=initial_tab)
         dialog.theme_changed.connect(self._set_theme)
         dialog.settings_changed.connect(lambda: self._apply_theme())
         dialog.exec()
@@ -716,7 +740,7 @@ class MainWindow(QMainWindow):
                 db_path=db_path,
                 chroma_path=chroma_path,
                 ollama_url=self._config.get("rag.ollama_url", "http://localhost:11434"),
-                embed_model=self._config.get("rag.embed_model", "nomic-embed-text"),
+                embed_model=self._config.get("rag.embed_model", "bge-m3"),
                 llm_model=self._config.get("rag.llm_model", "gemma4:e4b"),
             )
         except Exception as exc:
@@ -766,10 +790,12 @@ class MainWindow(QMainWindow):
 
     def _show_rag_panel(self) -> None:
         """Navega para o painel do Assistente IA (visão cheia)."""
-        # Se estiver ancorado no leitor, devolve para a stack principal
+        # Se estiver ancorado no dock do leitor, devolve para a stack principal
         if self._rag_panel.parentWidget() != self._main_stack:
-            self._main_stack.insertWidget(3, self._rag_panel)
+            if hasattr(self._reader_view, "_dock") and self._reader_view._dock.has_tab("assistant"):
+                self._reader_view._dock.remove_tab("assistant")
             self._reader_view._ai_panel_container = None
+            self._main_stack.insertWidget(3, self._rag_panel)
             self._reader_view._ai_panel_btn.setChecked(False)
 
         self._sidebar.show()
@@ -814,16 +840,76 @@ class MainWindow(QMainWindow):
         self._rag_worker.start()
         self._statusbar.showMessage("🧠 Consultando Assistente IA…")
 
+    def _on_clear_chat(self) -> None:
+        """Limpa a memória conversacional do contexto atual (livro ou global)."""
+        if self._rag_engine is None:
+            return
+        ctx = self._rag_panel.get_reading_context()
+        is_global = getattr(self._rag_panel, "_is_standalone", False)
+        book_id = ctx.get("book_id") if (ctx and not is_global) else None
+        self._rag_engine.clear_chat_history(book_id)
+
     def _on_ai_action_requested(self, action_type: str, text: str) -> None:
         """Processa requisições de IA vindas do menu de contexto de leitura."""
         if action_type == "translate":
-            question = f"Traduza o seguinte trecho com precisão literária: '{text}'"
+            self._statusbar.showMessage("🌐 Iniciando tradução offline...", 5000)
+            from src.gui.translation_service import TranslationService
+            
+            def on_success(result):
+                self._statusbar.clearMessage()
+                from PyQt6.QtWidgets import QMessageBox
+                from PyQt6.QtCore import Qt
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Tradução Offline (NLLB-200)")
+                msg.setText(result)
+                msg.setModal(False)
+                msg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+                msg.show()
+                self._translation_msg = msg  # Evitar coleta de lixo prematura
+
+            def on_error(err):
+                self._statusbar.showMessage(f"⚠️ Erro na tradução offline: {err}", 5000)
+
+            TranslationService.get_instance().translate_async(
+                text=text,
+                on_success=on_success,
+                on_error=on_error
+            )
+            return
+
+        elif action_type == "translate_audio":
+            self._statusbar.showMessage("🌐 Traduzindo para narrar...", 5000)
+            from src.gui.translation_service import TranslationService
+
+            def on_audio_success(result):
+                self._statusbar.clearMessage()
+                self._reader_view.narrate_text(result)
+
+            def on_audio_error(err):
+                self._statusbar.showMessage(f"⚠️ Erro na tradução: {err}", 5000)
+
+            TranslationService.get_instance().translate_async(
+                text=text,
+                on_success=on_audio_success,
+                on_error=on_audio_error,
+            )
+            return
+
         elif action_type == "explain":
             question = f"Explique o contexto e o significado deste trecho detalhadamente: '{text}'"
         elif action_type == "search":
             question = f"Busque na web informações complementares sobre: '{text}' e resuma os achados."
         elif action_type == "save_note":
             question = f"Gere uma anotação sucinta, clara e em formato Markdown para o seguinte trecho (não precisa usar ferramentas, apenas responda com o texto da anotação): '{text}'"
+        elif action_type == "flashcard":
+            self._open_anki_export_dialog(front=text, back="")
+            return
+        elif action_type in ("explain_page", "summarize", "glossary", "flashcards"):
+            from src.core.study_prompts import build_study_prompt
+            question = build_study_prompt(action_type, text)
+            if not question:
+                self._statusbar.showMessage("⚠️ Nenhum texto na página para estudar.", 3000)
+                return
         else:
             return
             
@@ -836,6 +922,60 @@ class MainWindow(QMainWindow):
         # Preenche o input e envia automaticamente
         self._rag_panel._question_input.setText(question)
         self._rag_panel._on_send()
+
+    def _show_flashcards(self) -> None:
+        """Abre o diálogo de Flashcards (lista + modo estudo)."""
+        from src.gui.dialogs.flashcards_dialog import FlashcardsDialog
+        current_book_id = None
+        if self._main_stack.currentIndex() == 1 and self._reader_view._book_id > 0:
+            current_book_id = self._reader_view._book_id
+        dialog = FlashcardsDialog(self._db, current_book_id=current_book_id, parent=self)
+        dialog.exec()
+
+    def _open_anki_export_dialog(self, front: str, back: str):
+        """Abre o diálogo de exportação para o Anki."""
+        from src.core.anki_service import AnkiService
+        from src.gui.widgets.anki_export_dialog import AnkiExportDialog
+        from src.gui.workers.anki_worker import AnkiAddNoteWorker
+        from PyQt6.QtWidgets import QMessageBox
+
+        service = AnkiService()
+        dialog = AnkiExportDialog(service=service, initial_front=front, initial_back=back, parent=self)
+        if dialog.exec() == AnkiExportDialog.DialogCode.Accepted and dialog.saved:
+            self._statusbar.showMessage("⏳ Enviando card para o Anki...", 3000)
+
+            # Persiste o flashcard localmente (fonte de verdade consultável no app + estudo)
+            try:
+                fc_book_id = self._reader_view._book_id if self._reader_view._book_id > 0 else None
+                self._db.add_flashcard(
+                    front=dialog.result_front,
+                    back=dialog.result_back,
+                    book_id=fc_book_id,
+                    deck=dialog.result_deck,
+                )
+            except Exception as exc:
+                print(f"[Flashcards] Falha ao salvar card localmente: {exc}", flush=True)
+
+
+            self._anki_worker = AnkiAddNoteWorker(
+                service=service,
+                deck_name=dialog.result_deck,
+                front=dialog.result_front,
+                back=dialog.result_back
+            )
+            
+            def on_finished(note_id):
+                if note_id is not None:
+                    self._statusbar.showMessage("✅ Flashcard salvo no Anki com sucesso!", 5000)
+                else:
+                    self._statusbar.showMessage("⚠️ Anki fechado. Flashcard salvo na fila local de fallback.", 5000)
+            
+            def on_error(err):
+                QMessageBox.warning(self, "Erro no Anki", f"Falha ao salvar flashcard:\n{err}")
+                
+            self._anki_worker.finished.connect(on_finished)
+            self._anki_worker.error.connect(on_error)
+            self._anki_worker.start()
 
     def _on_rag_index_all(self) -> None:
         """Reindexação completa da biblioteca em background."""

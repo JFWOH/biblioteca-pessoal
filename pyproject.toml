@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "biblioteca-pessoal"
-version = "0.1.0"
+version = "0.1.10"
 description = "Gerenciador de biblioteca pessoal e leitor multi-formato"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,6 +23,9 @@ dependencies = [
     "markdown>=3.5.0",
     "natsort>=8.4.0",
     "pyttsx3>=2.99",
+    "torch>=2.0.0",
+    "transformers>=4.33.0",
+    "sentencepiece>=0.1.99",
 ]
 
 [project.optional-dependencies]
@@ -51,5 +54,13 @@ markers = [
     "slow: marks tests as slow",
     "integration: marks integration tests",
     "requires_ollama: marks tests that require Ollama running",
-    "requires_chromadb: marks tests that require ChromaDB persistence"
+    "requires_chromadb: marks tests that require ChromaDB persistence",
+]
+filterwarnings = [
+    # Fase 13B.1: Supressão de warnings externos (302 ocorrências).
+    # Filtros restritos por módulo — não mascaram warnings internos do projeto.
+    # chromadb/types.py: Pydantic V2.11 model_fields deprecation (301x)
+    "ignore:Accessing the 'model_fields' attribute on the instance is deprecated:DeprecationWarning:chromadb",
+    # opentelemetry: SelectableGroups dict interface deprecation (1x)
+    "ignore:SelectableGroups dict interface is deprecated:DeprecationWarning:opentelemetry",
 ]

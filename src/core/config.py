@@ -42,7 +42,29 @@ DEFAULT_CONFIG = {
         "maximized": False,
         "sidebar_width": 250,
     },
+    "tts": {
+        "book_narrator": {
+            "role": "book_narrator",
+            "preferred_provider": "kokoro",
+            "voice_id": None,
+            "rate": 1.0,
+            "volume": 1.0,
+            "style": "serene",
+            "language": "pt-BR",
+        },
+        "assistant": {
+            "role": "assistant",
+            "preferred_provider": "kokoro",
+            "voice_id": None,
+            "rate": 1.05,
+            "volume": 1.0,
+            "style": "didactic",
+            "language": "pt-BR",
+        },
+        "auto_fallback": True,
+    },
 }
+
 
 
 class ConfigManager:
@@ -108,6 +130,11 @@ class ConfigManager:
     @property
     def library_config(self) -> dict:
         return self.get("library", DEFAULT_CONFIG["library"])
+
+    @property
+    def tts_config(self) -> dict:
+        return self.get("tts", DEFAULT_CONFIG["tts"])
+
 
     @staticmethod
     def _deep_merge(base: dict, override: dict) -> dict:

@@ -13,9 +13,34 @@ from typing import Generator, Iterator
 
 logger = logging.getLogger(__name__)
 
+# ── Retry de embeddings (resiliência a esgotamento de portas no Windows) ────────
+_EMBED_MAX_ATTEMPTS = 4
+_TRANSIENT_NET_MARKERS = (
+    "only one usage of each socket address",  # WinError 10048 (portas efêmeras)
+    "health resp",
+    "dial tcp",
+    "10048",
+    "connection reset",
+    "actively refused",
+    "forcibly closed",
+)
+
+
+def _is_transient_net_error(text: str) -> bool:
+    """Heurística para erros de rede transitórios.
+
+    Em reindexações grandes no Windows, a rajada de conexões HTTP curtas ao Ollama
+    pode esgotar as portas efêmeras (WinError 10048), e o próprio Ollama falha ao
+    "discar" para seu runner interno (retornando HTTP 400 com 'health resp'). São
+    erros passageiros que se resolvem com um curto backoff + retry.
+    """
+    t = (text or "").lower()
+    return any(m in t for m in _TRANSIENT_NET_MARKERS)
+
+
 # ── Constantes de configuração ─────────────────────────────────────────────────
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
-DEFAULT_EMBED_MODEL = "nomic-embed-text"
+DEFAULT_EMBED_MODEL = "bge-m3"
 DEFAULT_LLM_MODEL = "gemma4:e4b"
 DEFAULT_CHROMA_PATH = "data/chroma_db"
 DEFAULT_CHUNK_SIZE = 1000
@@ -157,25 +182,6 @@ _TOOLS_DEF = [
 ]
 
 
-
-def _chunk_text(text: str, size: int = DEFAULT_CHUNK_SIZE,
-                overlap: int = DEFAULT_CHUNK_OVERLAP) -> list[str]:
-    """Divide texto em chunks com sobreposição."""
-    if not text or not text.strip():
-        return []
-    chunks: list[str] = []
-    start = 0
-    while start < len(text):
-        end = min(start + size, len(text))
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        if end == len(text):
-            break
-        start += size - overlap
-    return chunks
-
-
 class RAGEngine:
     """Motor de Retrieval-Augmented Generation 100% local.
 
@@ -215,6 +221,9 @@ class RAGEngine:
         self._collection = None
         self._cancelled = False
 
+        # Memória conversacional agora persiste em SQLite (tabela chat_turns) via _chat_db().
+        self._lib_db = None
+
         self._init_chroma()
 
     # ── Inicialização ──────────────────────────────────────────────────────────
@@ -237,7 +246,7 @@ class RAGEngine:
             )
             self._collection = self._chroma_client.get_or_create_collection(
                 name=_COLLECTION_NAME,
-                metadata={"hnsw:space": "cosine"},
+                metadata={"hnsw:space": "cosine", "embed_model": self._embed_model},
             )
             logger.info("ChromaDB inicializado em: %s", self._chroma_path)
         except Exception as exc:
@@ -295,117 +304,49 @@ class RAGEngine:
         except Exception:
             return 0
 
-    # ── Extração de texto ──────────────────────────────────────────────────────
+    # ── Migração de modelo de embeddings ───────────────────────────────────────
 
-    def _open_db(self) -> sqlite3.Connection:
-        """Abre conexão SQLite somente-leitura."""
-        conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _extract_book_text(self, book_id: int) -> tuple[dict, list[dict]]:
-        """Extrai todo o texto relevante de um livro e suas anotações com mapeamento de páginas.
-
-        Returns:
-            (book_meta, list_of_chunk_dicts)
-            onde cada chunk_dict é: {"text": str, "page_number": int, "chunk_type": str}
-        """
-        conn = self._open_db()
+    def _stored_embed_model(self) -> str | None:
+        """Modelo de embeddings com que a collection atual foi construída (metadata)."""
+        if self._collection is None:
+            return None
         try:
-            row = conn.execute(
-                "SELECT id, title, author, description, isbn, publisher, year, file_path "
-                "FROM books WHERE id = ?", (book_id,)
-            ).fetchone()
-            if not row:
-                return {}, []
+            return (self._collection.metadata or {}).get("embed_model")
+        except Exception:
+            return None
 
-            book_meta = dict(row)
-            chunks: list[dict] = []
+    def needs_reindex(self) -> bool:
+        """True se o índice vetorial foi construído com outro modelo de embeddings.
 
-            # Texto principal (metadados): título + autor + descrição
-            main_text = " ".join(filter(None, [
-                book_meta.get("title", ""),
-                book_meta.get("author", ""),
-                book_meta.get("description", ""),
-            ]))
-            if main_text.strip():
-                for c in _chunk_text(main_text, self._chunk_size, self._chunk_overlap):
-                    chunks.append({
-                        "text": c,
-                        "page_number": 0,
-                        "chunk_type": "metadata"
-                    })
+        Trocar o modelo muda a dimensão dos vetores (ex.: nomic=768 → bge-m3=1024),
+        tornando a collection existente incompatível. Enquanto não reindexar, as
+        buscas vetoriais devem ser bloqueadas com mensagem clara (nunca crashar com
+        erro bruto de dimensão do Chroma).
+        """
+        if self._collection is None:
+            return False
+        if self.get_indexed_count() == 0:
+            return False
+        return self._stored_embed_model() != self._embed_model
 
-            # Anotações do livro
-            ann_rows = conn.execute(
-                "SELECT page_number, content FROM annotations WHERE book_id = ? AND content != ''",
-                (book_id,)
-            ).fetchall()
-            for ann in ann_rows:
-                content = ann["content"].strip()
-                if content:
-                    pg = ann["page_number"] if ann["page_number"] is not None else 0
-                    for c in _chunk_text(content, self._chunk_size, self._chunk_overlap):
-                        chunks.append({
-                            "text": c,
-                            "page_number": pg,
-                            "chunk_type": "note"
-                        })
+    def reset_collection(self) -> None:
+        """Apaga e recria a collection vetorial (usado ao trocar o modelo de embeddings).
 
-        finally:
-            conn.close()
-
-        # Extração do conteúdo literal do arquivo do livro
-        file_path = book_meta.get("file_path", "")
-        if file_path:
-            p = Path(file_path)
-            if p.exists():
-                try:
-                    from src.readers.reader_factory import create_reader
-                    reader = create_reader(p)
-                    reader.open()
-                    try:
-                        if hasattr(reader, "get_page_text"):
-                            for i in range(reader.total_pages):
-                                text = reader.get_page_text(i)
-                                if text and text.strip():
-                                    for c in _chunk_text(text, self._chunk_size, self._chunk_overlap):
-                                        chunks.append({
-                                            "text": c,
-                                            "page_number": i,
-                                            "chunk_type": "content"
-                                        })
-                        elif hasattr(reader, "get_chapter_text"):
-                            for i in range(reader.total_pages):
-                                text = reader.get_chapter_text(i)
-                                if text and text.strip():
-                                    for c in _chunk_text(text, self._chunk_size, self._chunk_overlap):
-                                        chunks.append({
-                                            "text": c,
-                                            "page_number": i,
-                                            "chunk_type": "content"
-                                        })
-                        elif hasattr(reader, "get_page"):
-                            from bs4 import BeautifulSoup
-                            for i in range(reader.total_pages):
-                                page = reader.get_page(i)
-                                if page.content_type == "html" and isinstance(page.content, str):
-                                    soup = BeautifulSoup(page.content, "html.parser")
-                                    text = soup.get_text(separator=" ")
-                                    if text and text.strip():
-                                        for c in _chunk_text(text, self._chunk_size, self._chunk_overlap):
-                                            chunks.append({
-                                                "text": c,
-                                                "page_number": i,
-                                                "chunk_type": "content"
-                                            })
-                    finally:
-                        reader.close()
-                except Exception as e:
-                    logger.warning("Falha ao extrair texto do arquivo %s: %s", file_path, e)
-                    print(f"[RAGEngine] Falha ao extrair texto de {file_path}: {e}")
-
-        return book_meta, chunks
+        A dimensão de uma collection Chroma é fixada no primeiro vetor inserido; por
+        isso, ao mudar de modelo, é preciso recriar a collection do zero (não basta
+        esvaziar). O `embed_model` é gravado na metadata para detecção futura.
+        """
+        if self._chroma_client is None:
+            return
+        try:
+            self._chroma_client.delete_collection(_COLLECTION_NAME)
+        except Exception as exc:
+            logger.warning("Falha ao apagar collection para reindex: %s", exc)
+        self._collection = self._chroma_client.get_or_create_collection(
+            name=_COLLECTION_NAME,
+            metadata={"hnsw:space": "cosine", "embed_model": self._embed_model},
+        )
+        logger.info("Collection vetorial recriada para o modelo '%s'.", self._embed_model)
 
     # ── Embeddings via Ollama ──────────────────────────────────────────────────
 
@@ -482,11 +423,17 @@ class RAGEngine:
         )
 
     def _get_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
-        """Gera múltiplos embeddings em uma única requisição."""
+        """Gera múltiplos embeddings em uma única requisição.
+
+        Resiliente a erros de rede transitórios (ex.: esgotamento de portas
+        efêmeras no Windows durante reindexações grandes): tenta novamente com
+        backoff exponencial curto antes de desistir.
+        """
         import json
         import urllib.request
         import urllib.error
         import socket
+        import time
 
         if ":" not in self._embed_model:
             exact_embed = self.get_exact_model_name(self._embed_model)
@@ -497,251 +444,85 @@ class RAGEngine:
             "model": self._embed_model,
             "input": texts,
         }).encode()
-        
-        req = urllib.request.Request(
-            f"{self._ollama_url}/api/embed",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        
-        try:
-            # Tempo limite maior para lotes (e.g. 50 chunks)
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                data = json.loads(resp.read())
-            embeddings = data.get("embeddings")
-            if embeddings and len(embeddings) == len(texts):
-                return embeddings
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                # O Ollama antigo não tem /api/embed, apenas /api/embeddings que não aceita lotes de forma trivial.
-                raise NotImplementedError("Batching não é suportado nesta versão do Ollama (requer endpoint /api/embed).")
-            else:
-                error_body = e.read().decode('utf-8')
+
+        for attempt in range(1, _EMBED_MAX_ATTEMPTS + 1):
+            req = urllib.request.Request(
+                f"{self._ollama_url}/api/embed",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                # Tempo limite maior para lotes (e.g. 50 chunks)
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    data = json.loads(resp.read())
+                embeddings = data.get("embeddings")
+                if embeddings and len(embeddings) == len(texts):
+                    return embeddings
+                raise ValueError("Ollama não retornou embeddings para o lote inteiro.")
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    # O Ollama antigo não tem /api/embed, apenas /api/embeddings que não aceita lotes de forma trivial.
+                    raise NotImplementedError("Batching não é suportado nesta versão do Ollama (requer endpoint /api/embed).")
+                error_body = ""
+                try:
+                    error_body = e.read().decode("utf-8")
+                except Exception:
+                    pass
+                if _is_transient_net_error(error_body) and attempt < _EMBED_MAX_ATTEMPTS:
+                    logger.warning(
+                        "Embedding em lote: erro transitório do Ollama (tentativa %d/%d), aguardando…: %s",
+                        attempt, _EMBED_MAX_ATTEMPTS, error_body[:120],
+                    )
+                    time.sleep(min(2 ** attempt, 10))
+                    continue
                 raise RuntimeError(f"Ollama retornou erro HTTP {e.code} ao gerar lote de embeddings: {error_body}") from e
-        except (TimeoutError, urllib.error.URLError, socket.timeout, ConnectionError) as e:
-            raise TimeoutError(f"Ollama não respondeu em 120s ao gerar lote de embeddings. {str(e)}")
+            except (TimeoutError, urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
+                if attempt < _EMBED_MAX_ATTEMPTS:
+                    logger.warning(
+                        "Embedding em lote: conexão transitória (tentativa %d/%d), aguardando…: %s",
+                        attempt, _EMBED_MAX_ATTEMPTS, str(e)[:120],
+                    )
+                    time.sleep(min(2 ** attempt, 10))
+                    continue
+                raise TimeoutError(f"Ollama não respondeu ao gerar lote de embeddings após {attempt} tentativas. {str(e)}")
 
         raise ValueError("Ollama não retornou embeddings para o lote inteiro.")
 
     # ── Indexação ──────────────────────────────────────────────────────────────
 
-    def index_book(self, book_id: int) -> int:
-        """Indexa um livro e suas anotações no ChromaDB.
-
-        Args:
-            book_id: ID do livro no SQLite.
-
-        Returns:
-            Número de chunks indexados.
-
-        Raises:
-            RuntimeError: Se o Ollama não estiver disponível ou o modelo de
-                          embedding não puder ser obtido.
-            ValueError: Se o livro não for encontrado.
-        """
-        # --- Idempotência: Pula se já estiver indexado ---
-        if self.has_book_indexed(book_id):
-            print(f"[RAGEngine] Livro {book_id} já está indexado no ChromaDB. Pulando...", flush=True)
-            return 0
-
-        if not self.is_ollama_available():
-            raise RuntimeError(
-                "Ollama não está disponível. Certifique-se de que o daemon "
-                "está rodando (execute 'ollama serve' no terminal)."
-            )
-
-        # ── Validação do modelo de embeddings (Fix #2) ────────────────────────
-        if not self.is_model_available(self._embed_model):
-            logger.info(
-                "Modelo de embedding '%s' não encontrado localmente. Baixando…",
-                self._embed_model,
-            )
-            print(
-                f"[RAGEngine] Modelo '{self._embed_model}' ausente — iniciando pull…",
-                flush=True,
-            )
-            for status in self.pull_model(self._embed_model):
-                logger.debug("Pull embed model: %s", status.get("status", ""))
-            if not self.is_model_available(self._embed_model):
-                raise RuntimeError(
-                    f"Modelo de embedding '{self._embed_model}' não disponível após download. "
-                    "Verifique sua conexão e tente novamente."
-                )
-            logger.info("Modelo '%s' baixado com sucesso.", self._embed_model)
-        # ─────────────────────────────────────────────────────────────────────
-
-        print("1. Extraindo texto do livro...", flush=True)
-        book_meta, chunks = self._extract_book_text(book_id)
-        if not book_meta:
-            raise ValueError(f"Livro com id={book_id} não encontrado no banco.")
-        
-        book_title = book_meta.get("title", "Sem título")
-        print(f"[RAGEngine] Livro: {book_title} | Chunks extraídos pelo Reader: {len(chunks)}", flush=True)
-
-        if not chunks:
-            logger.warning("Nenhum texto extraível para book_id=%d", book_id)
-            return 0
-
-        # Remove chunks anteriores deste livro (re-indexação limpa)
-        self._delete_book_chunks(book_id)
-
-        ids: list[str] = []
-        embeddings: list[list[float]] = []
-        documents: list[str] = []
-        metadatas: list[dict] = []
-
-        print("2. Gerando chunks... concluído. Iniciando geração de embeddings", flush=True)
-        print("3. Solicitando embeddings ao Ollama (tentando em lote)...", flush=True)
-        
-        BATCH_SIZE = 50
-        batch_texts = []
-        batch_indices = []
-        
-        def _process_batch(current_texts, current_indices):
-            try:
-                # Tenta gerar em lote
-                batch_embs = self._get_embeddings_batch(current_texts)
-                for i_idx, emb in zip(current_indices, batch_embs):
-                    ids.append(f"book_{book_id}_chunk_{i_idx}")
-                    embeddings.append(emb)
-                    documents.append(current_texts[current_indices.index(i_idx)])
-                    chunk_data = chunks[i_idx]
-                    metadatas.append({
-                        "book_id": book_id,
-                        "title": book_meta.get("title", ""),
-                        "author": book_meta.get("author", ""),
-                        "chunk_index": i_idx,
-                        "page_number": chunk_data.get("page_number", 0),
-                        "chunk_type": chunk_data.get("chunk_type", "content")
-                    })
-            except NotImplementedError:
-                # Fallback: se o Ollama não suporta batch, faz um por um
-                for idx, text_chunk in zip(current_indices, current_texts):
-                    emb = self._get_embedding(text_chunk)
-                    ids.append(f"book_{book_id}_chunk_{idx}")
-                    embeddings.append(emb)
-                    documents.append(text_chunk)
-                    chunk_data = chunks[idx]
-                    metadatas.append({
-                        "book_id": book_id,
-                        "title": book_meta.get("title", ""),
-                        "author": book_meta.get("author", ""),
-                        "chunk_index": idx,
-                        "page_number": chunk_data.get("page_number", 0),
-                        "chunk_type": chunk_data.get("chunk_type", "content")
-                    })
-
-        import time
-        start_time = time.time()
-        
-        for i, chunk_data in enumerate(chunks):
-            if self._cancelled:
-                break
-            batch_texts.append(chunk_data["text"])
-            batch_indices.append(i)
-            
-            if len(batch_texts) >= BATCH_SIZE:
-                try:
-                    _process_batch(batch_texts, batch_indices)
-                except Exception as e:
-                    print(f"ERRO CRÍTICO NA INDEXAÇÃO NO LOTE (Chunks {batch_indices[0]} até {batch_indices[-1]}): {str(e)}", flush=True)
-                    raise
-                
-                # Cálculo de ETA
-                elapsed = time.time() - start_time
-                chunks_processed = i + 1
-                chunks_per_sec = chunks_processed / elapsed if elapsed > 0 else 0
-                chunks_remaining = len(chunks) - chunks_processed
-                eta_secs = chunks_remaining / chunks_per_sec if chunks_per_sec > 0 else 0
-                eta_mins = int(eta_secs // 60)
-                eta_remainder_secs = int(eta_secs % 60)
-                eta_str = f"Faltam ~{eta_mins}m {eta_remainder_secs}s"
-                
-                print(f"   [{chunks_processed}/{len(chunks)}] embeddings gerados... ({eta_str})", flush=True)
-                
-                batch_texts.clear()
-                batch_indices.clear()
-                
-        # Processa chunks restantes
-        if batch_texts and not self._cancelled:
-            try:
-                _process_batch(batch_texts, batch_indices)
-                print(f"   [{len(chunks)}/{len(chunks)}] embeddings gerados...", flush=True)
-            except Exception as e:
-                print(f"ERRO CRÍTICO NA INDEXAÇÃO NO LOTE FINAL: {str(e)}", flush=True)
-                raise
-
-        if ids:
-            print("4. Salvando no ChromaDB...", flush=True)
-            self._collection.upsert(
-                ids=ids,
-                embeddings=embeddings,
-                documents=documents,
-                metadatas=metadatas,
-            )
-            logger.info("Indexados %d chunks para book_id=%d", len(ids), book_id)
-            try:
-                print(f"OK: Concluído: {len(ids)} chunks indexados para {book_title}", flush=True)
-            except UnicodeEncodeError:
-                safe_title = book_title.encode('ascii', 'ignore').decode('ascii')
-                print(f"OK: Concluido: {len(ids)} chunks indexados para {safe_title}", flush=True)
-
-        return len(ids)
+    def index_book(self, book_id: int, force: bool = False) -> int:
+        """Indexa um livro e suas anotações no ChromaDB (delegado para o DocumentIndexerService)."""
+        from src.core.document_indexer_service import DocumentIndexerService
+        from src.core.database import LibraryDB
+        db = LibraryDB(str(self._db_path))
+        indexer = DocumentIndexerService(db, self)
+        return indexer.index_book(book_id, force=force)
 
     def index_all_books(self) -> dict[int, int]:
-        """Re-indexa todos os livros da biblioteca.
-
-        Returns:
-            Dict {book_id: n_chunks_indexed}
-        """
-        conn = self._open_db()
-        try:
-            rows = conn.execute("SELECT id FROM books").fetchall()
-            book_ids = [r["id"] for r in rows]
-        finally:
-            conn.close()
-
-        results: dict[int, int] = {}
-        self._cancelled = False
-        for book_id in book_ids:
-            if self._cancelled:
-                break
-            try:
-                n = self.index_book(book_id)
-                results[book_id] = n
-            except Exception as exc:
-                logger.error("Erro ao indexar book_id=%d: %s", book_id, exc)
-                results[book_id] = -1
-        return results
-
-    def _delete_book_chunks(self, book_id: int) -> None:
-        """Remove todos os chunks de um livro do ChromaDB."""
-        try:
-            existing = self._collection.get(
-                where={"book_id": book_id}
-            )
-            if existing and existing.get("ids"):
-                self._collection.delete(ids=existing["ids"])
-        except Exception as exc:
-            logger.warning("Não foi possível remover chunks de book_id=%d: %s", book_id, exc)
+        """Re-indexa todos os livros da biblioteca (delegado para o DocumentIndexerService)."""
+        self.reset_cancel()
+        from src.core.document_indexer_service import DocumentIndexerService
+        from src.core.database import LibraryDB
+        db = LibraryDB(str(self._db_path))
+        indexer = DocumentIndexerService(db, self)
+        return indexer.index_all_books()
 
     def delete_book_index(self, book_id: int) -> None:
         """Remove um livro do índice vetorial (chamado ao excluir da biblioteca)."""
-        self._delete_book_chunks(book_id)
+        from src.core.document_indexer_service import DocumentIndexerService
+        from src.core.database import LibraryDB
+        db = LibraryDB(str(self._db_path))
+        indexer = DocumentIndexerService(db, self)
+        indexer.delete_book_index(book_id)
 
     def has_book_indexed(self, book_id: int) -> bool:
         """Verifica se o livro já possui chunks no banco vetorial."""
-        if not self._collection:
-            return False
-        try:
-            existing = self._collection.get(
-                where={"book_id": book_id},
-                limit=1
-            )
-            return bool(existing and existing.get("ids"))
-        except Exception:
-            return False
+        from src.core.document_indexer_service import DocumentIndexerService
+        from src.core.database import LibraryDB
+        db = LibraryDB(str(self._db_path))
+        indexer = DocumentIndexerService(db, self)
+        return indexer.has_book_indexed(book_id)
 
     # ── Busca Vetorial ─────────────────────────────────────────────────────────
 
@@ -758,6 +539,12 @@ class RAGEngine:
         """
         if not self.is_ollama_available():
             raise RuntimeError("Ollama não está disponível para gerar embeddings.")
+
+        if self.needs_reindex():
+            raise RuntimeError(
+                f"Índice vetorial desatualizado: foi construído com outro modelo de "
+                f"embeddings. Reindexe a biblioteca para usar '{self._embed_model}'."
+            )
 
         if self._collection.count() == 0:
             return []
@@ -831,7 +618,7 @@ class RAGEngine:
 
         # 2. SQLite: busca nas anotações
         try:
-            conn = self._open_db()
+            conn = sqlite3.connect(str(self._db_path))
             try:
                 if book_id:
                     rows = conn.execute(
@@ -981,4 +768,55 @@ class RAGEngine:
     def cancel(self) -> None:
         """Sinaliza cancelamento da operação em andamento."""
         self._cancelled = True
+
+    def reset_cancel(self) -> None:
+        """Limpa o sinal de cancelamento antes de iniciar uma nova operação.
+
+        O engine é um singleton compartilhado pelo MainWindow. Sem este reset,
+        um único cancelamento (Stop) deixaria ``_cancelled=True`` para sempre,
+        abortando toda query e indexação seguintes até reiniciar o aplicativo.
+        Deve ser chamado no início de cada operação iniciada pelo usuário.
+        """
+        self._cancelled = False
+
+    # ── Memória conversacional por livro ───────────────────────────────────────
+
+    def _chat_db(self):
+        """LibraryDB compartilhado (lazy) para persistir a conversa em SQLite."""
+        if getattr(self, "_lib_db", None) is None:
+            from src.core.database import LibraryDB
+            self._lib_db = LibraryDB(str(self._db_path))
+        return self._lib_db
+
+    def get_chat_history(self, book_id) -> list[dict]:
+        """Retorna o histórico recente de conversa do livro (persistido em SQLite).
+
+        book_id None = histórico global. Degrada graciosamente (lista vazia) se o
+        banco estiver indisponível.
+        """
+        try:
+            return self._chat_db().get_chat_turns(book_id, limit=6)
+        except Exception as exc:
+            logger.warning("get_chat_history falhou: %s", exc)
+            return []
+
+    def append_chat_turn(self, book_id, user_content: str, assistant_content: str,
+                         max_messages: int = 6) -> None:
+        """Persiste um turno (pergunta + resposta), limitado a max_messages por livro."""
+        if not (assistant_content or "").strip():
+            return
+        try:
+            db = self._chat_db()
+            db.add_chat_turn(book_id, "user", (user_content or "")[:2000])
+            db.add_chat_turn(book_id, "assistant", assistant_content)
+            db.prune_chat_turns(book_id, max_messages)
+        except Exception as exc:
+            logger.warning("append_chat_turn falhou: %s", exc)
+
+    def clear_chat_history(self, book_id=None) -> None:
+        """Limpa o histórico conversacional persistido (book_id None = global)."""
+        try:
+            self._chat_db().clear_chat_turns(book_id)
+        except Exception as exc:
+            logger.warning("clear_chat_history falhou: %s", exc)
 

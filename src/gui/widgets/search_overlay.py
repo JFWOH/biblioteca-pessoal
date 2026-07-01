@@ -21,8 +21,8 @@ class DocumentSearchBar(QWidget):
         self.setFixedHeight(48)
         self.setStyleSheet("""
             QWidget {
-                background-color: #1e1e24;
-                border-bottom: 1px solid #27272a;
+                background-color: #161920;
+                border-bottom: 1px solid #2d333f;
             }
         """)
         self._setup_ui()
@@ -43,15 +43,15 @@ class DocumentSearchBar(QWidget):
         self._input.setPlaceholderText("Buscar no documento...")
         self._input.setStyleSheet("""
             QLineEdit {
-                background: #0f0f17;
-                border: 1px solid #27272a;
+                background: #0f1115;
+                border: 1px solid #2d333f;
                 border-radius: 6px;
                 padding: 6px 12px;
-                color: #e4e4e7;
+                color: #e5e7eb;
                 font-size: 13px;
             }
             QLineEdit:focus {
-                border-color: #6366f1;
+                border-color: #10b981;
             }
         """)
         self._input.returnPressed.connect(self._on_search)
@@ -69,11 +69,11 @@ class DocumentSearchBar(QWidget):
         # Navegação
         btn_style = """
             QPushButton {
-                background: #27272a; border: none; border-radius: 4px;
-                color: #e4e4e7; font-size: 12px; padding: 4px 8px;
+                background: #20242d; border: none; border-radius: 4px;
+                color: #e5e7eb; font-size: 12px; padding: 4px 8px;
                 min-width: 28px; min-height: 28px;
             }
-            QPushButton:hover { background: #3f3f46; }
+            QPushButton:hover { background: #2d333f; }
             QPushButton:disabled { color: #52525b; }
         """
 
@@ -92,17 +92,98 @@ class DocumentSearchBar(QWidget):
         layout.addWidget(self._next_btn)
 
         # Fechar
-        close_btn = QPushButton("✕")
-        close_btn.setFixedSize(28, 28)
-        close_btn.setStyleSheet("""
+        self._close_btn = QPushButton("✕")
+        self._close_btn.setFixedSize(28, 28)
+        self._close_btn.setStyleSheet("""
             QPushButton {
                 background: transparent; border: none;
                 color: #71717a; font-size: 14px;
             }
             QPushButton:hover { color: #e4e4e7; }
         """)
-        close_btn.clicked.connect(self.close_bar)
-        layout.addWidget(close_btn)
+        self._close_btn.clicked.connect(self.close_bar)
+        layout.addWidget(self._close_btn)
+        
+        self._theme_count_color = "#10b981"
+
+    def set_theme(self, theme: str):
+        if theme == "light":
+            bg_bar = "#f4f4f5"
+            border_bar = "#e4e4e7"
+            bg_input = "#ffffff"
+            border_input = "#d4d4d8"
+            focus_input = "#059669"
+            text_main = "#1A1A1A"
+            btn_bg = "#e4e4e7"
+            btn_hover = "#d4d4d8"
+            btn_text = "#1A1A1A"
+            count_color = "#059669"
+        elif theme == "sepia":
+            bg_bar = "#ebe5d9"
+            border_bar = "#d4cbb8"
+            bg_input = "#EADFCA"
+            border_input = "#d4cbb8"
+            focus_input = "#059669"
+            text_main = "#433422"
+            btn_bg = "#dfd8c8"
+            btn_hover = "#d4cbb8"
+            btn_text = "#433422"
+            count_color = "#059669"
+        else: # dark
+            bg_bar = "#161920"
+            border_bar = "#2d333f"
+            bg_input = "#0f1115"
+            border_input = "#2d333f"
+            focus_input = "#10b981"
+            text_main = "#e5e7eb"
+            btn_bg = "#20242d"
+            btn_hover = "#2d333f"
+            btn_text = "#e5e7eb"
+            count_color = "#10b981"
+
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {bg_bar};
+                border-bottom: 1px solid {border_bar};
+            }}
+        """)
+        
+        self._input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {bg_input};
+                border: 1px solid {border_input};
+                border-radius: 6px;
+                padding: 6px 12px;
+                color: {text_main};
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{
+                border-color: {focus_input};
+            }}
+        """)
+
+        btn_style = f"""
+            QPushButton {{
+                background: {btn_bg}; border: none; border-radius: 4px;
+                color: {btn_text}; font-size: 12px; padding: 4px 8px;
+                min-width: 28px; min-height: 28px;
+            }}
+            QPushButton:hover {{ background: {btn_hover}; }}
+            QPushButton:disabled {{ color: #a1a1aa; }}
+        """
+        self._prev_btn.setStyleSheet(btn_style)
+        self._next_btn.setStyleSheet(btn_style)
+
+        self._close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; border: none;
+                color: {btn_text}; font-size: 14px;
+            }}
+            QPushButton:hover {{ color: #ef4444; }}
+        """)
+        
+        self._theme_count_color = count_color
+        self._update_count()
 
     def show_bar(self):
         """Exibe a barra de busca e foca no input."""
@@ -161,7 +242,7 @@ class DocumentSearchBar(QWidget):
                 f"{self._current_index + 1}/{len(self._results)}"
             )
             self._count_label.setStyleSheet(
-                "color: #818cf8; font-size: 12px; border: none; min-width: 60px;"
+                f"color: {self._theme_count_color}; font-size: 12px; border: none; min-width: 60px;"
             )
         elif self._input.text().strip():
             self._count_label.setText("0 resultados")
