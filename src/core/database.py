@@ -153,6 +153,42 @@ class LibraryDB:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS concepts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    display_name TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS concept_mentions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    concept_id INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+                    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+                    page INTEGER,
+                    weight REAL NOT NULL DEFAULT 1.0,
+                    source TEXT NOT NULL DEFAULT 'page',
+                    extracted_by TEXT NOT NULL DEFAULT 'heuristic',
+                    origin_ref TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(concept_id, book_id, origin_ref)
+                );
+                CREATE TABLE IF NOT EXISTS book_edges (
+                    book_a INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+                    book_b INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+                    weight REAL NOT NULL DEFAULT 0,
+                    shared_concepts TEXT NOT NULL DEFAULT '[]',
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (book_a, book_b),
+                    CHECK (book_a < book_b)
+                );
+                CREATE TABLE IF NOT EXISTS graph_ingest_log (
+                    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+                    origin_ref TEXT NOT NULL,
+                    mentions INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (book_id, origin_ref)
+                );
+                CREATE INDEX IF NOT EXISTS idx_mentions_book ON concept_mentions(book_id);
+                CREATE INDEX IF NOT EXISTS idx_mentions_concept ON concept_mentions(concept_id);
                 CREATE INDEX IF NOT EXISTS idx_chat_turns_book ON chat_turns(book_id, id);
                 CREATE INDEX IF NOT EXISTS idx_ai_obs_book_page ON ai_observations(book_id, page);
                 CREATE INDEX IF NOT EXISTS idx_books_title ON books(title);
@@ -240,7 +276,12 @@ class LibraryDB:
             self.conn.execute("DELETE FROM book_tags WHERE book_id = ?", (book_id,))
             self.conn.execute("DELETE FROM ocr_pages WHERE book_id = ?", (book_id,))
             self.conn.execute("DELETE FROM indexing_state WHERE book_id = ?", (book_id,))
-            
+            # Grafo de conceitos (Fase 2): menções, arestas e log de cobertura do livro.
+            self.conn.execute("DELETE FROM concept_mentions WHERE book_id = ?", (book_id,))
+            self.conn.execute(
+                "DELETE FROM book_edges WHERE book_a = ? OR book_b = ?", (book_id, book_id))
+            self.conn.execute("DELETE FROM graph_ingest_log WHERE book_id = ?", (book_id,))
+
             self.conn.execute("DELETE FROM books WHERE id = ?", (book_id,))
             self.conn.commit()
 

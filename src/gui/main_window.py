@@ -62,6 +62,11 @@ class MainWindow(QMainWindow):
         self._rag_worker = None
         self._setup_rag_engine()
 
+        # Grafo de conceitos (Fase 2): ingestão em background dirigida pela leitura.
+        from src.gui.graph_ingest_service import GraphIngestService
+        self._graph_service = GraphIngestService(
+            db=self._db, rag_engine=self._rag_engine, config=self._config, parent=self)
+
         self._setup_window()
         self._setup_menu()
         self._setup_ui()
@@ -225,6 +230,8 @@ class MainWindow(QMainWindow):
         self._book_details.add_to_collection_requested.connect(self._add_book_to_collection)
         self._book_details.remove_from_collection_requested.connect(self._remove_from_collection)
         self._book_details.fetch_metadata_requested.connect(self._on_fetch_metadata)
+        self._book_details.related_book_clicked.connect(self._on_book_selected)
+        self._graph_service.graph_updated.connect(self._on_graph_updated)
         lib_splitter.addWidget(self._book_details)
 
         lib_splitter.setStretchFactor(0, 1)
@@ -241,6 +248,7 @@ class MainWindow(QMainWindow):
         self._reader_view.annotation_deleted.connect(self._on_annotation_deleted)
         self._reader_view.fullscreen_toggled.connect(self._on_fullscreen)
         self._reader_view.reading_context_updated.connect(lambda b, t, p, txt: self._rag_panel.set_reading_context(b, t, p, txt))
+        self._reader_view.reading_context_updated.connect(self._graph_service.on_page_context)
         self._reader_view.ai_action_requested.connect(self._on_ai_action_requested)
         self._main_stack.addWidget(self._reader_view)  # index 1
 
@@ -441,7 +449,7 @@ class MainWindow(QMainWindow):
         if self._reader_view._book_id > 0 and book_id != self._reader_view._book_id:
             book_id = self._reader_view._book_id
 
-        self._db.add_annotation(
+        ann_id = self._db.add_annotation(
             book_id=book_id,
             page_number=data.get("page", data.get("page_number", 0)),
             content=data.get("content", ""),
@@ -453,6 +461,22 @@ class MainWindow(QMainWindow):
         # Recarrega anotações no painel
         annotations = self._db.get_annotations(book_id)
         self._reader_view.load_annotations(annotations)
+        # Grafo de conceitos: anotação nova alimenta o grafo (nunca quebra o salvar).
+        try:
+            text = f"{data.get('title', '')} {data.get('content', '')}".strip()
+            self._graph_service.on_annotation_saved(
+                book_id, ann_id, data.get("page", data.get("page_number", 0)), text)
+        except Exception as exc:
+            logger.warning(f"Falha ao alimentar o grafo com a anotação (ignorado): {exc}")
+
+    def _on_graph_updated(self, book_id: int):
+        """Grafo ganhou dados novos: atualiza o painel se o livro está em foco."""
+        try:
+            current = self._book_details._book
+            if current and current.get("id") == book_id:
+                self._book_details.refresh_graph_section()
+        except Exception as exc:
+            logger.warning(f"Falha ao atualizar a seção do grafo (ignorado): {exc}")
 
     def _on_annotation_deleted(self, annotation_id: int):
         """Remove uma anotação do banco."""
@@ -1182,6 +1206,11 @@ class MainWindow(QMainWindow):
     # ── Lifecycle ──────────────────────────────────────────────────────
 
     def closeEvent(self, event):
+        # Para o serviço do grafo (cancel cooperativo)
+        try:
+            self._graph_service.shutdown()
+        except Exception as exc:
+            logger.warning(f"Falha ao encerrar o serviço do grafo (ignorado): {exc}")
         # Para o worker RAG
         if self._rag_worker and self._rag_worker.isRunning():
             self._rag_worker.stop()

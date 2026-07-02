@@ -25,11 +25,20 @@ class BookDetails(QWidget):
     add_to_collection_requested = pyqtSignal(int)  # book_id
     remove_from_collection_requested = pyqtSignal(int)  # book_id
     fetch_metadata_requested = pyqtSignal(int)  # book_id
+    related_book_clicked = pyqtSignal(int)  # book_id de um livro relacionado (grafo)
 
     def __init__(self, db: LibraryDB = None, parent=None):
         super().__init__(parent)
         self._book: dict | None = None
         self._db = db
+        # Grafo de conceitos (Fase 2): leitura barata na thread da GUI.
+        self._graph_store = None
+        if db is not None:
+            try:
+                from src.core.graph.graph_store import GraphStore
+                self._graph_store = GraphStore(db)
+            except Exception:
+                self._graph_store = None
         self.setMinimumWidth(280)
         self.setMaximumWidth(340)
         self._setup_ui()
@@ -88,6 +97,29 @@ class BookDetails(QWidget):
         self._desc.setMaximumHeight(100)
         self._desc.setStyleSheet("color: #a1a1aa; font-size: 12px;")
         layout.addWidget(self._desc)
+
+        # Grafo de conceitos (Fase 2): conceitos do livro + livros relacionados
+        self._graph_section = QWidget()
+        graph_lay = QVBoxLayout(self._graph_section)
+        graph_lay.setContentsMargins(0, 0, 0, 0)
+        graph_lay.setSpacing(6)
+        self._concepts_header = QLabel("💡 Conceitos")
+        self._concepts_header.setStyleSheet(
+            "color: #71717a; font-size: 11px; font-weight: 600;")
+        graph_lay.addWidget(self._concepts_header)
+        self._concepts_label = QLabel()
+        self._concepts_label.setWordWrap(True)
+        self._concepts_label.setStyleSheet("color: #a1a1aa; font-size: 12px;")
+        graph_lay.addWidget(self._concepts_label)
+        self._related_header = QLabel("🔗 Livros relacionados")
+        self._related_header.setStyleSheet(
+            "color: #71717a; font-size: 11px; font-weight: 600;")
+        graph_lay.addWidget(self._related_header)
+        self._related_btns_lay = QVBoxLayout()
+        self._related_btns_lay.setSpacing(4)
+        graph_lay.addLayout(self._related_btns_lay)
+        self._graph_section.hide()
+        layout.addWidget(self._graph_section)
 
         layout.addStretch()
 
@@ -192,7 +224,58 @@ class BookDetails(QWidget):
         if self._tag_manager:
             self._tag_manager.set_book(book["id"])
 
+        # Grafo de conceitos
+        self.refresh_graph_section()
+
         self.show()
+
+    def refresh_graph_section(self):
+        """Atualiza conceitos e livros relacionados a partir do grafo.
+
+        Graceful (ADR-005): grafo vazio/indisponível → seção oculta, sem erro.
+        """
+        # Limpa botões antigos de relacionados
+        while self._related_btns_lay.count():
+            item = self._related_btns_lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if self._graph_store is None or not self._book:
+            self._graph_section.hide()
+            return
+        try:
+            book_id = self._book["id"]
+            concepts = self._graph_store.get_book_concepts(book_id, limit=8)
+            related = self._graph_store.related_books(book_id, limit=3)
+        except Exception:
+            self._graph_section.hide()
+            return
+        if not concepts and not related:
+            self._graph_section.hide()
+            return
+
+        self._concepts_label.setText(
+            " · ".join(c["display_name"] for c in concepts))
+        self._concepts_header.setVisible(bool(concepts))
+        self._concepts_label.setVisible(bool(concepts))
+
+        self._related_header.setVisible(bool(related))
+        for rel in related:
+            shared_n = int(rel.get("weight") or 0)
+            btn = QPushButton(f"📕 {rel['title']}  ({shared_n} em comum)")
+            btn.setObjectName("secondaryBtn")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(
+                "QPushButton { background: transparent; border: 1px solid #3f3f46;"
+                " border-radius: 6px; padding: 6px; color: #a5b4fc; font-size: 11px;"
+                " text-align: left; }"
+                " QPushButton:hover { border-color: #6366f1; }")
+            btn.setToolTip("Em comum: " + ", ".join(rel.get("shared") or []))
+            btn.clicked.connect(
+                lambda _c=False, bid=rel["book_id"]: self.related_book_clicked.emit(bid))
+            self._related_btns_lay.addWidget(btn)
+
+        self._graph_section.show()
 
     def _emit_action(self, action: str):
         if not self._book:
@@ -220,6 +303,7 @@ class BookDetails(QWidget):
         self._star_rating.rating = 0
         if self._tag_manager:
             self._tag_manager.set_book(0)
+        self._graph_section.hide()
         self.hide()
 
     def _on_rating_changed(self, rating: int):
