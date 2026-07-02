@@ -55,7 +55,9 @@ class ReaderView(QWidget):
         # Página 1-based da última observação proativa e id da obs no rodapé
         # (para persistir/dispensar em ai_observations — Fase 1b).
         self._current_proactive_page: int = 0
-        self._current_page_text: str = ""  # texto da página atual (p/ avaliar ao ligar o proativo)
+        # Texto da página atual (p/ avaliar ao ligar o proativo). NÃO usar o nome
+        # _current_page_text: colidiria com o MÉTODO homônimo do menu de estudo.
+        self._last_page_text: str = ""
         self._audio_paused: bool = False   # narração pausada (retomável no mesmo ponto)
         self._footer_obs_id = None
         self._proactive_service = ProactiveReaderService(parent=self)
@@ -650,7 +652,7 @@ class ReaderView(QWidget):
             # Página 1-based passada ao serviço proativo; guardada para persistir
             # a observação resultante em ai_observations.
             self._current_proactive_page = page + 1
-            self._current_page_text = page_text[:1500]
+            self._last_page_text = page_text[:1500]
             self.reading_context_updated.emit(
                 self._book_id,
                 self._title_label.text(),
@@ -774,11 +776,11 @@ class ReaderView(QWidget):
         active = level != "Desligado"
         if hasattr(self, "_insights_panel"):
             self._insights_panel.set_agent_active(active)
-        if active and self._current_page_text:
+        if active and self._last_page_text:
             # set_intensity (conectado antes) já resetou o trigger engine, então
             # a página atual passa no critério de distância.
             self._proactive_service.process_page_context(
-                self._current_page_text, self._current_proactive_page, self._book_id
+                self._last_page_text, self._current_proactive_page, self._book_id
             )
 
     def _zoom_in(self):
