@@ -474,16 +474,27 @@ class LibraryDB:
                        highlight_color="#fbbf24", annotation_type="highlight",
                        position_data="{}", title="") -> int:
         with self._write_lock:
-            # Dedup: cliques repetidos em "Destacar" (ou duplo-emit) criavam
-            # anotações idênticas. Se já existe uma linha exatamente igual,
-            # devolve o id existente em vez de duplicar.
-            existing = self.conn.execute(
-                """SELECT id FROM annotations
-                   WHERE book_id=? AND page_number=? AND content=?
-                     AND annotation_type=? AND position_data=? AND title=?
-                     AND highlight_color=?""",
-                (book_id, page_number, content, annotation_type,
-                 position_data, title, highlight_color)).fetchone()
+            # Dedup: cliques repetidos em "Destacar" criavam anotações
+            # duplicadas. Para anotações COM texto, a posição é ignorada na
+            # comparação — cada re-seleção do mesmo trecho gera coordenadas
+            # (floats) ligeiramente diferentes, então exigir position_data
+            # igual deixava as duplicatas passarem. Anotações SEM texto
+            # (região de imagem) só são duplicatas com a MESMA posição.
+            if (content or "").strip():
+                existing = self.conn.execute(
+                    """SELECT id FROM annotations
+                       WHERE book_id=? AND page_number=? AND content=?
+                         AND annotation_type=? AND title=? AND highlight_color=?""",
+                    (book_id, page_number, content, annotation_type,
+                     title, highlight_color)).fetchone()
+            else:
+                existing = self.conn.execute(
+                    """SELECT id FROM annotations
+                       WHERE book_id=? AND page_number=? AND content=?
+                         AND annotation_type=? AND position_data=? AND title=?
+                         AND highlight_color=?""",
+                    (book_id, page_number, content, annotation_type,
+                     position_data, title, highlight_color)).fetchone()
             if existing:
                 return existing["id"]
             cur = self.conn.execute(
@@ -539,6 +550,8 @@ class LibraryDB:
         das linhas removidas. Devolve o nº de linhas removidas.
         """
         with self._write_lock:
+            # Com texto: posição ignorada (re-seleções geram coords diferentes);
+            # sem texto: exige a mesma posição (regiões distintas são legítimas).
             dupes = self.conn.execute(
                 """SELECT a.id, a.book_id FROM annotations a
                    WHERE EXISTS (
@@ -547,9 +560,9 @@ class LibraryDB:
                          AND b.page_number = a.page_number
                          AND b.content = a.content
                          AND b.annotation_type = a.annotation_type
-                         AND b.position_data = a.position_data
                          AND b.highlight_color = a.highlight_color
                          AND IFNULL(b.title,'') = IFNULL(a.title,'')
+                         AND (TRIM(a.content) <> '' OR b.position_data = a.position_data)
                          AND b.id < a.id
                    )""").fetchall()
             for row in dupes:

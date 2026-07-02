@@ -25,6 +25,31 @@ def test_add_annotation_dedup_exact_duplicate(db):
     assert len(db.get_annotations(bid)) == 1
 
 
+def test_add_annotation_dedup_ignores_position_for_text(db):
+    """Caso real: re-selecionar o mesmo trecho gera coords (floats) diferentes —
+    o dedup de anotações COM texto ignora a posição."""
+    bid = _book(db)
+    a1 = db.add_annotation(bid, 33, content="Quarta Revolução Industrial",
+                           position_data='{"coords": [10.1, 20.2, 300.5, 40.0]}')
+    a2 = db.add_annotation(bid, 33, content="Quarta Revolução Industrial",
+                           position_data='{"coords": [10.9, 21.0, 301.2, 40.7]}')
+    assert a1 == a2
+    assert len(db.get_annotations(bid)) == 1
+
+
+def test_add_annotation_empty_content_requires_same_position(db):
+    """Destaques SEM texto (região de imagem) em posições diferentes são distintos."""
+    bid = _book(db)
+    a1 = db.add_annotation(bid, 5, content="",
+                           position_data='{"coords": [1, 1, 2, 2]}')
+    a2 = db.add_annotation(bid, 5, content="",
+                           position_data='{"coords": [9, 9, 10, 10]}')
+    a3 = db.add_annotation(bid, 5, content="",
+                           position_data='{"coords": [1, 1, 2, 2]}')
+    assert a1 != a2
+    assert a1 == a3
+
+
 def test_add_annotation_different_color_is_new_row(db):
     """Só duplicata EXATA é bloqueada — outra cor é uma anotação nova."""
     bid = _book(db)
@@ -42,21 +67,39 @@ def test_add_annotation_different_page_is_new_row(db):
 
 
 def test_dedupe_annotations_cleans_legacy_duplicates(db):
-    """Duplicatas históricas (pré-guarda) são removidas mantendo a mais antiga."""
+    """Duplicatas históricas são removidas mesmo com coords diferentes entre si
+    (o caso real: cada re-seleção do trecho gerou uma posição levemente diferente)."""
     bid = _book(db)
-    # Insere duplicatas direto no SQL (simula o estado antigo do banco)
-    for _ in range(4):
+    coords = ['{"coords": [10.1, 20.0, 300.0, 40.0]}',
+              '{"coords": [10.8, 20.5, 301.1, 40.6]}',
+              '{"coords": [9.9, 19.8, 299.7, 39.9]}',
+              '{"coords": [10.4, 20.2, 300.4, 40.2]}']
+    for pos in coords:
         with db._write_lock:
             db.conn.execute(
                 """INSERT INTO annotations (book_id, page_number, content,
                    annotation_type, position_data, title)
-                   VALUES (?, 33, 'Quarta Revolução Industrial', 'highlight', '{}', '')""",
-                (bid,))
+                   VALUES (?, 33, 'Quarta Revolução Industrial', 'highlight', ?, '')""",
+                (bid, pos))
             db.conn.commit()
     removed = db.dedupe_annotations()
     assert removed == 3
     remaining = db.get_annotations(bid)
     assert len(remaining) == 1
+
+
+def test_dedupe_keeps_distinct_empty_content_regions(db):
+    """Regiões sem texto em posições diferentes NÃO são deduplicadas."""
+    bid = _book(db)
+    for pos in ('{"coords": [1, 1, 2, 2]}', '{"coords": [9, 9, 10, 10]}'):
+        with db._write_lock:
+            db.conn.execute(
+                """INSERT INTO annotations (book_id, page_number, content,
+                   annotation_type, position_data, title)
+                   VALUES (?, 5, '', 'highlight', ?, '')""", (bid, pos))
+            db.conn.commit()
+    assert db.dedupe_annotations() == 0
+    assert len(db.get_annotations(bid)) == 2
 
 
 def test_dedupe_purges_graph_of_removed_annotations(db):
