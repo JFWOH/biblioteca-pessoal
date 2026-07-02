@@ -63,6 +63,12 @@ DEFAULT_CONFIG = {
         },
         "auto_fallback": True,
     },
+    # Auto-indexação RAG: indexa livros pendentes em ocioso (1 por vez).
+    "auto_index": {
+        "enabled": True,
+        "idle_interval_s": 120,        # frequência de verificação
+        "idle_min_inactivity_s": 120,  # só roda sem leitura ativa há N segundos
+    },
     # Grafo de conceitos (Fase 2): ingestão dirigida pela leitura + ocioso.
     "graph": {
         "enabled": True,

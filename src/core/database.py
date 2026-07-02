@@ -365,6 +365,19 @@ class LibraryDB:
         r = self.conn.execute("SELECT * FROM indexing_state WHERE book_id = ?", (book_id,)).fetchone()
         return dict(r) if r else None
 
+    def get_unindexed_books(self) -> list[dict]:
+        """Livros sem indexação RAG concluída (sem estado, pendentes ou falhos).
+
+        Base da auto-indexação em ocioso: candidatos a indexar em background.
+        """
+        rows = self.conn.execute(
+            """SELECT b.*, i.status AS indexing_status
+               FROM books b
+               LEFT JOIN indexing_state i ON i.book_id = b.id
+               WHERE i.status IS NULL OR i.status <> 'indexed_ok'
+               ORDER BY b.date_added DESC""").fetchall()
+        return [dict(r) for r in rows]
+
     def get_books_by_indexing_status(self, status: str) -> list[dict]:
         rows = self.conn.execute(
             """SELECT b.*, i.status as indexing_status, i.chunks_indexed, i.error_message 

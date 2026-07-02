@@ -75,6 +75,18 @@ class MainWindow(QMainWindow):
         self._graph_service = GraphIngestService(
             db=self._db, rag_engine=self._rag_engine, config=self._config, parent=self)
 
+        # Auto-indexação RAG em ocioso: livros sem indexed_ok são indexados em
+        # background (1 por vez), destravando RAG e grafo para toda a biblioteca.
+        from src.gui.auto_index_service import AutoIndexService
+        self._auto_index_service = AutoIndexService(
+            db=self._db, rag_engine=self._rag_engine, config=self._config,
+            busy_check=lambda: bool(self._rag_worker and self._rag_worker.isRunning()),
+            parent=self)
+        self._auto_index_service.indexing_started.connect(
+            lambda _bid, title: self._statusbar.showMessage(
+                f"📚 Indexando em segundo plano: {title}…", 10000))
+        self._auto_index_service.indexing_finished.connect(self._on_auto_index_finished)
+
         self._setup_window()
         self._setup_menu()
         self._setup_ui()
@@ -258,6 +270,8 @@ class MainWindow(QMainWindow):
         self._reader_view.fullscreen_toggled.connect(self._on_fullscreen)
         self._reader_view.reading_context_updated.connect(lambda b, t, p, txt: self._rag_panel.set_reading_context(b, t, p, txt))
         self._reader_view.reading_context_updated.connect(self._graph_service.on_page_context)
+        # Auto-indexação: leitura ativa adia o processamento em ocioso.
+        self._reader_view.reading_context_updated.connect(self._auto_index_service.on_activity)
         self._reader_view.ai_action_requested.connect(self._on_ai_action_requested)
         self._main_stack.addWidget(self._reader_view)  # index 1
 
@@ -477,6 +491,19 @@ class MainWindow(QMainWindow):
                 book_id, ann_id, data.get("page", data.get("page_number", 0)), text)
         except Exception as exc:
             logger.warning(f"Falha ao alimentar o grafo com a anotação (ignorado): {exc}")
+
+    def _on_auto_index_finished(self, book_id: int, title: str, status: str):
+        """Feedback discreto da auto-indexação + atualização do contador RAG."""
+        if status == "indexed_ok":
+            self._statusbar.showMessage(f"✅ '{title}' indexado em segundo plano.", 5000)
+            try:
+                self._rag_panel.set_indexed_count(
+                    self._rag_engine.get_indexed_count() if self._rag_engine else 0)
+            except Exception as exc:
+                logger.warning(f"Falha ao atualizar contador de indexados (ignorado): {exc}")
+        else:
+            self._statusbar.showMessage(
+                f"⚠️ Indexação de '{title}' não concluída ({status}).", 5000)
 
     def _on_graph_updated(self, book_id: int):
         """Grafo ganhou dados novos: atualiza o painel se o livro está em foco."""
@@ -1290,6 +1317,11 @@ class MainWindow(QMainWindow):
             self._graph_service.shutdown()
         except Exception as exc:
             logger.warning(f"Falha ao encerrar o serviço do grafo (ignorado): {exc}")
+        # Para a auto-indexação
+        try:
+            self._auto_index_service.shutdown()
+        except Exception as exc:
+            logger.warning(f"Falha ao encerrar a auto-indexação (ignorado): {exc}")
         # Para o worker RAG
         if self._rag_worker and self._rag_worker.isRunning():
             self._rag_worker.stop()
