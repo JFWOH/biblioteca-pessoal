@@ -35,6 +35,49 @@ _STUDY_TEMPLATES: dict[str, str] = {
 STUDY_ACTIONS = tuple(_STUDY_TEMPLATES.keys())
 
 
+_FLASHCARD_QA_PROMPT = (
+    "Você cria flashcards de estudo. A partir do INSIGHT abaixo, gere UM "
+    "flashcard: uma pergunta clara e específica cuja resposta seja o conteúdo "
+    "essencial do insight (destile a resposta; não copie o insight inteiro). "
+    "Não invente fatos que não estejam no insight.\n\n"
+    "INSIGHT:\n'''\n{text}\n'''\n\n"
+    'Responda APENAS com JSON no formato: {{"pergunta": "...", "resposta": "..."}}'
+)
+
+
+def build_flashcard_qa_prompt(text: Optional[str]) -> Optional[str]:
+    """Prompt para transformar um insight em par pergunta/resposta (1 card)."""
+    clean = (text or "").strip()
+    if not clean:
+        return None
+    return _FLASHCARD_QA_PROMPT.format(text=clean[:1500])
+
+
+def parse_flashcard_qa(content: Optional[str]) -> Optional[tuple[str, str]]:
+    """Extrai (pergunta, resposta) da resposta JSON do modelo.
+
+    Saneia a resposta (pega do primeiro '{' ao último '}') e aceita as chaves
+    pergunta/resposta ou front/back. Devolve None se inválida/incompleta.
+    """
+    import json
+
+    raw = (content or "").strip()
+    start, end = raw.find("{"), raw.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        data = json.loads(raw[start:end + 1])
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    front = str(data.get("pergunta") or data.get("front") or "").strip()
+    back = str(data.get("resposta") or data.get("back") or "").strip()
+    if not front or not back:
+        return None
+    return front, back
+
+
 def build_study_prompt(action_type: str, text: Optional[str]) -> Optional[str]:
     """Monta a instrução para uma ação de estudo.
 

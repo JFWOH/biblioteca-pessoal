@@ -1,10 +1,13 @@
-"""Guardas de regressão do ReaderView (checagens estáticas, sem instanciar Qt).
+"""Guardas de regressão do ReaderView (checagens estáticas, sem importar Qt).
 
-Instanciar o ReaderView em teste exige QtWebEngine; estas guardas pegam a
-classe de bug no nível do código-fonte.
+Não importa o módulo: o reader_view puxa QtWebEngineWidgets, que só pode ser
+importado ANTES de existir um QApplication — em suíte cheia (qtbot já criou a
+app) o import falharia. Lê o código-fonte direto do disco.
 """
-import inspect
 import re
+from pathlib import Path
+
+_READER_VIEW = Path(__file__).resolve().parent.parent / "src" / "gui" / "reader_view.py"
 
 
 def test_current_page_text_method_not_shadowed_by_attribute():
@@ -12,9 +15,7 @@ def test_current_page_text_method_not_shadowed_by_attribute():
     sombreava o MÉTODO homônimo e quebrava o menu de estudo com
     "TypeError: 'str' object is not callable" (reader_view._open_study_menu).
     """
-    from src.gui import reader_view
-
-    src = inspect.getsource(reader_view)
+    src = _READER_VIEW.read_text(encoding="utf-8")
     # Método deve existir…
     assert re.search(r"def _current_page_text\(self\)", src)
     # …e nenhum ATRIBUTO homônimo pode ser atribuído ([:=] pega "= x" e ": str = x";

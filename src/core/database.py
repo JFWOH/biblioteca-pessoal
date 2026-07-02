@@ -474,6 +474,18 @@ class LibraryDB:
                        highlight_color="#fbbf24", annotation_type="highlight",
                        position_data="{}", title="") -> int:
         with self._write_lock:
+            # Dedup: cliques repetidos em "Destacar" (ou duplo-emit) criavam
+            # anotações idênticas. Se já existe uma linha exatamente igual,
+            # devolve o id existente em vez de duplicar.
+            existing = self.conn.execute(
+                """SELECT id FROM annotations
+                   WHERE book_id=? AND page_number=? AND content=?
+                     AND annotation_type=? AND position_data=? AND title=?
+                     AND highlight_color=?""",
+                (book_id, page_number, content, annotation_type,
+                 position_data, title, highlight_color)).fetchone()
+            if existing:
+                return existing["id"]
             cur = self.conn.execute(
                 """INSERT INTO annotations (book_id, page_number, content,
                    highlight_color, annotation_type, position_data, title)
@@ -494,10 +506,63 @@ class LibraryDB:
                 (book_id,)).fetchall()
         return [dict(r) for r in rows]
 
+    def update_annotation_title(self, annotation_id: int, title: str) -> None:
+        """Renomeia uma anotação (inclui notas geradas por IA)."""
+        with self._write_lock:
+            self.conn.execute(
+                "UPDATE annotations SET title=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (title, annotation_id))
+            self.conn.commit()
+
     def delete_annotation(self, annotation_id: int) -> None:
         with self._write_lock:
+            row = self.conn.execute(
+                "SELECT book_id FROM annotations WHERE id = ?",
+                (annotation_id,)).fetchone()
             self.conn.execute("DELETE FROM annotations WHERE id = ?", (annotation_id,))
+            if row:
+                # Coerência com o grafo (Fase 2): menções/log da anotação saem junto.
+                ref = f"annotation:{annotation_id}"
+                self.conn.execute(
+                    "DELETE FROM concept_mentions WHERE book_id=? AND origin_ref=?",
+                    (row["book_id"], ref))
+                self.conn.execute(
+                    "DELETE FROM graph_ingest_log WHERE book_id=? AND origin_ref=?",
+                    (row["book_id"], ref))
             self.conn.commit()
+
+    def dedupe_annotations(self) -> int:
+        """Remove anotações exatamente duplicadas (mantém a de menor id).
+
+        Limpeza única para duplicatas históricas (cliques repetidos antes da
+        guarda de dedup no add_annotation). Purga também as entradas do grafo
+        das linhas removidas. Devolve o nº de linhas removidas.
+        """
+        with self._write_lock:
+            dupes = self.conn.execute(
+                """SELECT a.id, a.book_id FROM annotations a
+                   WHERE EXISTS (
+                       SELECT 1 FROM annotations b
+                       WHERE b.book_id = a.book_id
+                         AND b.page_number = a.page_number
+                         AND b.content = a.content
+                         AND b.annotation_type = a.annotation_type
+                         AND b.position_data = a.position_data
+                         AND b.highlight_color = a.highlight_color
+                         AND IFNULL(b.title,'') = IFNULL(a.title,'')
+                         AND b.id < a.id
+                   )""").fetchall()
+            for row in dupes:
+                ref = f"annotation:{row['id']}"
+                self.conn.execute("DELETE FROM annotations WHERE id=?", (row["id"],))
+                self.conn.execute(
+                    "DELETE FROM concept_mentions WHERE book_id=? AND origin_ref=?",
+                    (row["book_id"], ref))
+                self.conn.execute(
+                    "DELETE FROM graph_ingest_log WHERE book_id=? AND origin_ref=?",
+                    (row["book_id"], ref))
+            self.conn.commit()
+            return len(dupes)
 
     # ── Flashcards ─────────────────────────────────────────────────────
 

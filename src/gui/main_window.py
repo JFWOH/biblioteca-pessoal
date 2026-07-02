@@ -46,6 +46,14 @@ class MainWindow(QMainWindow):
         # Inicializa core
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._db = LibraryDB()
+        # Limpeza única de anotações duplicadas históricas (cliques repetidos
+        # antes da guarda de dedup no add_annotation). Nunca bloqueia o start.
+        try:
+            removed = self._db.dedupe_annotations()
+            if removed:
+                logger.info(f"Anotações duplicadas removidas na limpeza: {removed}")
+        except Exception as exc:
+            logger.warning(f"Falha na limpeza de anotações duplicadas (ignorado): {exc}")
         self._config = ConfigManager()
         self._library = LibraryManager(self._db, self._config)
         self._search_engine = SearchEngine(self._db)
@@ -246,6 +254,7 @@ class MainWindow(QMainWindow):
         self._reader_view.progress_changed.connect(self._on_progress)
         self._reader_view.annotation_added.connect(self._on_annotation_added)
         self._reader_view.annotation_deleted.connect(self._on_annotation_deleted)
+        self._reader_view.annotation_renamed.connect(self._on_annotation_renamed)
         self._reader_view.fullscreen_toggled.connect(self._on_fullscreen)
         self._reader_view.reading_context_updated.connect(lambda b, t, p, txt: self._rag_panel.set_reading_context(b, t, p, txt))
         self._reader_view.reading_context_updated.connect(self._graph_service.on_page_context)
@@ -482,6 +491,17 @@ class MainWindow(QMainWindow):
         """Remove uma anotação do banco."""
         self._db.delete_annotation(annotation_id)
         # Recarrega (precisa saber o book_id — pega do reader)
+        book_id = self._reader_view._book_id
+        annotations = self._db.get_annotations(book_id)
+        self._reader_view.load_annotations(annotations)
+
+    def _on_annotation_renamed(self, annotation_id: int, title: str):
+        """Renomeia o título de uma anotação (inclui notas da IA)."""
+        try:
+            self._db.update_annotation_title(annotation_id, title)
+        except Exception as exc:
+            logger.warning(f"Falha ao renomear anotação (ignorado): {exc}")
+            return
         book_id = self._reader_view._book_id
         annotations = self._db.get_annotations(book_id)
         self._reader_view.load_annotations(annotations)
@@ -928,6 +948,10 @@ class MainWindow(QMainWindow):
         elif action_type == "flashcard":
             self._open_anki_export_dialog(front=text, back="")
             return
+        elif action_type == "flashcard_qa":
+            # Insight do proativo → LLM destila em pergunta/resposta (item 1 UX).
+            self._generate_flashcard_qa(text)
+            return
         elif action_type in ("explain_page", "summarize", "glossary", "flashcards"):
             from src.core.study_prompts import build_study_prompt
             question = build_study_prompt(action_type, text)
@@ -955,6 +979,61 @@ class MainWindow(QMainWindow):
             current_book_id = self._reader_view._book_id
         dialog = FlashcardsDialog(self._db, current_book_id=current_book_id, parent=self)
         dialog.exec()
+
+    def _generate_flashcard_qa(self, text: str):
+        """Gera pergunta/resposta a partir de um insight e abre o diálogo do Anki.
+
+        Fallback (Ollama fora / resposta inválida): abre o diálogo com o insight
+        no VERSO e a pergunta em branco — nunca mais o insight como "pergunta".
+        """
+        from src.gui.workers.flashcard_qa_worker import FlashcardQAWorker
+
+        worker = getattr(self, "_flashcard_qa_worker", None)
+        if worker is not None and worker.isRunning():
+            self._statusbar.showMessage("🃏 Já estou gerando um flashcard — aguarde…", 3000)
+            return
+
+        self._statusbar.showMessage("🃏 Gerando flashcard (pergunta/resposta)…", 15000)
+        self._flashcard_qa_worker = FlashcardQAWorker(
+            text,
+            ollama_url=self._config.get("rag.ollama_url", "http://localhost:11434"),
+            parent=self,
+        )
+
+        # Feedback visível: a geração pode levar alguns segundos; o diálogo de
+        # progresso (indeterminado, com Cancelar) deixa claro que algo acontece.
+        from PyQt6.QtWidgets import QProgressDialog
+        progress = QProgressDialog("🃏 Gerando flashcard (pergunta/resposta)…",
+                                   "Cancelar", 0, 0, self)
+        progress.setWindowTitle("Flashcard")
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.canceled.connect(self._flashcard_qa_worker.cancel)
+        progress.show()
+        self._flashcard_qa_progress = progress
+
+        def _close_progress():
+            try:
+                progress.canceled.disconnect(self._flashcard_qa_worker.cancel)
+            except (TypeError, RuntimeError):
+                pass
+            progress.close()
+
+        def _on_generated(front: str, back: str):
+            _close_progress()
+            self._statusbar.clearMessage()
+            self._open_anki_export_dialog(front=front, back=back)
+
+        def _on_failed(reason: str):
+            _close_progress()
+            logger.warning(f"Flashcard P/R indisponível ({reason}); usando fallback.")
+            self._statusbar.showMessage(
+                "⚠️ Sem LLM agora — complete a pergunta manualmente.", 5000)
+            self._open_anki_export_dialog(front="", back=text)
+
+        self._flashcard_qa_worker.generated.connect(_on_generated)
+        self._flashcard_qa_worker.failed.connect(_on_failed)
+        self._flashcard_qa_worker.start()
 
     def _open_anki_export_dialog(self, front: str, back: str):
         """Abre o diálogo de exportação para o Anki."""

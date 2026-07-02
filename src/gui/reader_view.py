@@ -37,6 +37,7 @@ class ReaderView(QWidget):
     progress_changed = pyqtSignal(int, int, int)  # book_id, page, total
     annotation_added = pyqtSignal(int, dict)       # book_id, annotation_data
     annotation_deleted = pyqtSignal(int)            # annotation_id
+    annotation_renamed = pyqtSignal(int, str)       # annotation_id, novo título
     fullscreen_toggled = pyqtSignal(bool)           # is_fullscreen
     reading_context_updated = pyqtSignal(int, str, int, str) # book_id, title, page_number, page_text
     ai_action_requested = pyqtSignal(str, str)      # action_type, text
@@ -442,14 +443,19 @@ class ReaderView(QWidget):
         self._annotation_panel.annotation_deleted.connect(
             lambda ann_id: self.annotation_deleted.emit(ann_id)
         )
+        self._annotation_panel.annotation_renamed.connect(
+            lambda ann_id, title: self.annotation_renamed.emit(ann_id, title)
+        )
         self._annotation_panel.goto_page.connect(self._go_to_page)
 
         left_layout.addWidget(splitter, stretch=1)
 
         # Proactive Footer Widget (starts hidden)
         self._proactive_footer = ProactiveFooterWidget()
+        # "flashcard_qa": o LLM destila o insight em pergunta/resposta antes de
+        # abrir o diálogo do Anki (o insight não vira mais a "pergunta" crua).
         self._proactive_footer.flashcard_requested.connect(
-            lambda text: self.ai_action_requested.emit("flashcard", text)
+            lambda text: self.ai_action_requested.emit("flashcard_qa", text)
         )
         self._proactive_footer.closed.connect(self._on_footer_closed)
         left_layout.addWidget(self._proactive_footer)
@@ -476,7 +482,7 @@ class ReaderView(QWidget):
         # Insights do agente proativo: registro persistente das observações da sessão.
         self._insights_panel = ProactiveInsightsPanel()
         self._insights_panel.flashcard_requested.connect(
-            lambda text: self.ai_action_requested.emit("flashcard", text)
+            lambda text: self.ai_action_requested.emit("flashcard_qa", text)
         )
         self._insights_panel.dismiss_requested.connect(self._on_observation_dismissed)
         self._dock.add_tab("insights", "💡 Insights", self._insights_panel)
