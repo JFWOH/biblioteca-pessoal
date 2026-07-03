@@ -979,6 +979,10 @@ class MainWindow(QMainWindow):
             # Insight do proativo → LLM destila em pergunta/resposta (item 1 UX).
             self._generate_flashcard_qa(text)
             return
+        elif action_type == "read_translated_page":
+            # Página inteira: traduz offline (NLLB) e narra o resultado (item 7 UX).
+            self._read_translated_page(text)
+            return
         elif action_type in ("explain_page", "summarize", "glossary", "flashcards"):
             from src.core.study_prompts import build_study_prompt
             question = build_study_prompt(action_type, text)
@@ -1006,6 +1010,49 @@ class MainWindow(QMainWindow):
             current_book_id = self._reader_view._book_id
         dialog = FlashcardsDialog(self._db, current_book_id=current_book_id, parent=self)
         dialog.exec()
+
+    def _read_translated_page(self, text: str):
+        """Traduz a página em background (NLLB) e narra o resultado em PT.
+
+        Página já em português → narra direto (traduzir seria inútil).
+        Graceful (ADR-005): erro de tradução vira aviso na statusbar.
+        """
+        from src.core.tts.language_detect import detect_language
+
+        if getattr(self, "_page_translation_pending", False):
+            self._statusbar.showMessage("🌐 Já estou traduzindo uma página — aguarde…", 3000)
+            return
+
+        if detect_language(text).lower().startswith("pt"):
+            self._statusbar.showMessage("ℹ️ A página já está em português — narrando o original.", 4000)
+            self._reader_view.narrate_text(text)
+            return
+
+        self._statusbar.showMessage(
+            "🌐 Traduzindo a página para narração… (pode levar um minuto)", 60000)
+        self._page_translation_pending = True
+
+        def _on_success(result: str):
+            self._page_translation_pending = False
+            if not (result or "").strip():
+                self._statusbar.showMessage("⚠️ Tradução vazia — nada a narrar.", 5000)
+                return
+            self._statusbar.showMessage("🔊 Narrando a página traduzida…", 5000)
+            self._reader_view.narrate_text(result)
+
+        def _on_error(err: str):
+            self._page_translation_pending = False
+            self._statusbar.showMessage(f"⚠️ Erro na tradução offline: {err}", 6000)
+
+        try:
+            from src.gui.translation_service import TranslationService
+            TranslationService.get_instance().translate_async(
+                text, src_lang="en", tgt_lang="pt",
+                on_success=_on_success, on_error=_on_error)
+        except Exception as exc:
+            self._page_translation_pending = False
+            logger.warning(f"Falha ao iniciar a tradução da página (ignorado): {exc}")
+            self._statusbar.showMessage("⚠️ Tradução indisponível no momento.", 5000)
 
     def _generate_flashcard_qa(self, text: str):
         """Gera pergunta/resposta a partir de um insight e abre o diálogo do Anki.

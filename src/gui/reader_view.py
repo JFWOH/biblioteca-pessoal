@@ -367,6 +367,9 @@ class ReaderView(QWidget):
             self._continuous_reading = bool(_cfg.get("tts.continuous_reading", False))
         self._act_continuous.setChecked(self._continuous_reading)
         self._act_continuous.triggered.connect(self._toggle_continuous_reading)
+        # Ler a página em português: traduz (NLLB offline) e narra o resultado.
+        self._act_read_translated = QAction("🌐 Ler Página Traduzida (PT)", self)
+        self._act_read_translated.triggered.connect(self._on_read_translated_page)
         self._overflow_menu.addAction(self._act_double_page)
         self._overflow_menu.addAction(self._act_highlight)
         self._overflow_menu.addSeparator()
@@ -384,6 +387,7 @@ class ReaderView(QWidget):
         self._overflow_menu.addSeparator()
         self._overflow_menu.addAction(self._act_tts)
         self._overflow_menu.addAction(self._act_continuous)
+        self._overflow_menu.addAction(self._act_read_translated)
         self._overflow_menu.aboutToShow.connect(self._sync_overflow_menu)
         self._overflow_btn.setMenu(self._overflow_menu)
         tb_layout.addWidget(self._overflow_btn)
@@ -1538,6 +1542,26 @@ class ReaderView(QWidget):
         self._audio_btn.setText("⏸️ Pausar")
         self._audio_btn.setToolTip("Pausar Leitura (TTS)")
         self._audio_stop_btn.setVisible(True)
+
+    def _on_read_translated_page(self):
+        """Narra a página atual traduzida para PT (item 7 do backlog UX).
+
+        O texto vai para o MainWindow (ai_action_requested), que orquestra a
+        tradução NLLB em background e devolve via narrate_text.
+        """
+        if not self._reader:
+            return
+        page = self._reader.current_page
+        page_text = ""
+        if hasattr(self._reader, "get_page_text"):
+            page_text = self._reader.get_page_text(page)
+        elif hasattr(self._reader, "get_chapter_text"):
+            page_text = self._reader.get_chapter_text(page)
+        page_text = (page_text or "").strip()
+        if not page_text:
+            self._show_status("⚠️ Página sem texto para traduzir/narrar.", 4000)
+            return
+        self.ai_action_requested.emit("read_translated_page", page_text)
 
     def _toggle_continuous_reading(self, checked: bool):
         """Liga/desliga a leitura contínua (persiste na config)."""
