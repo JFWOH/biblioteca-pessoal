@@ -560,6 +560,31 @@ class TTSRouter:
             except Exception as e:
                 logger.warning("TTS_ROUTER: Error stopping active player: %s", e)
 
+    def voices_by_language(self, provider_name: str,
+                           languages: tuple[str, ...] = ("pt", "en")) -> dict:
+        """Vozes do provider agrupadas por prefixo de idioma (p/ menu da GUI).
+
+        Devolve {"pt": [VoiceInfo...], "en": [...]}; vazio se o provider não
+        existe ou não lista vozes (graceful — o menu mostra 'automática').
+        """
+        provider = self._providers.get((provider_name or "").lower())
+        if provider is None:
+            return {}
+        try:
+            voices = provider.available_voices()
+        except Exception as e:
+            logger.warning("TTS_ROUTER: available_voices('%s') falhou: %s",
+                           provider_name, e)
+            return {}
+        out: dict = {}
+        for voice in voices or []:
+            lang = (voice.language or "").lower()
+            for prefix in languages:
+                if lang.startswith(prefix):
+                    out.setdefault(prefix, []).append(voice)
+                    break
+        return out
+
     def pause(self) -> None:
         """Pausa a reprodução atual (retomável no mesmo ponto via resume())."""
         if self._active_player:

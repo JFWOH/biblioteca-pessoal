@@ -60,6 +60,10 @@ class ReaderView(QWidget):
         # _current_page_text: colidiria com o MÉTODO homônimo do menu de estudo.
         self._last_page_text: str = ""
         self._audio_paused: bool = False   # narração pausada (retomável no mesmo ponto)
+        # Leitura contínua (item 5 UX): ao fim da página narrada, avança e segue.
+        self._continuous_reading: bool = False
+        self._audio_stopped_by_user: bool = False  # stop manual não encadeia a próxima
+        self._chain_continuous: bool = False       # só narração de página encadeia (tradução não)
         self._footer_obs_id = None
         self._proactive_service = ProactiveReaderService(parent=self)
         self._proactive_service.observation_ready.connect(self._on_proactive_observation)
@@ -356,6 +360,13 @@ class ReaderView(QWidget):
         self._act_highlight.triggered.connect(self._menu_toggle_highlight)
         self._act_tts = QAction("⚙️ Voz / Narração (TTS)", self)
         self._act_tts.triggered.connect(self._on_tts_settings_clicked)
+        # Leitura contínua: narração vira páginas automaticamente até o fim.
+        self._act_continuous = QAction("🔁 Leitura Contínua (vira páginas)", self, checkable=True)
+        _cfg = getattr(self.window(), "_config", None)
+        if _cfg is not None:
+            self._continuous_reading = bool(_cfg.get("tts.continuous_reading", False))
+        self._act_continuous.setChecked(self._continuous_reading)
+        self._act_continuous.triggered.connect(self._toggle_continuous_reading)
         self._overflow_menu.addAction(self._act_double_page)
         self._overflow_menu.addAction(self._act_highlight)
         self._overflow_menu.addSeparator()
@@ -372,6 +383,7 @@ class ReaderView(QWidget):
         self._overflow_menu.addAction(self._act_insights)
         self._overflow_menu.addSeparator()
         self._overflow_menu.addAction(self._act_tts)
+        self._overflow_menu.addAction(self._act_continuous)
         self._overflow_menu.aboutToShow.connect(self._sync_overflow_menu)
         self._overflow_btn.setMenu(self._overflow_menu)
         tb_layout.addWidget(self._overflow_btn)
@@ -762,6 +774,7 @@ class ReaderView(QWidget):
         """Sincroniza os checkmarks do menu de overflow com o estado real."""
         self._act_double_page.setChecked(self._double_page_btn.isChecked())
         self._act_highlight.setChecked(self._highlight_mode_btn.isChecked())
+        self._act_continuous.setChecked(self._continuous_reading)
         current = self._proactive_combo.currentText()
         for level, act in getattr(self, "_proactive_acts", {}).items():
             act.setChecked(level == current)
@@ -1463,13 +1476,19 @@ class ReaderView(QWidget):
         if not page_text:
             return
 
-        self._launch_audio_worker(page_text)
+        self._launch_audio_worker(page_text, chain_continuous=True)
 
-    def _launch_audio_worker(self, text: str) -> None:
-        """Cria, conecta e inicia o AudioWorker para o texto dado (TTS)."""
+    def _launch_audio_worker(self, text: str, chain_continuous: bool = False) -> None:
+        """Cria, conecta e inicia o AudioWorker para o texto dado (TTS).
+
+        ``chain_continuous``: só narração de PÁGINA encadeia a próxima no modo
+        contínuo (uma tradução narrada via narrate_text não vira página).
+        """
         from src.gui.workers.audio_worker import AudioWorker
         from src.core.tts.voice_profile import NarrationRole
 
+        self._audio_stopped_by_user = False
+        self._chain_continuous = chain_continuous
         self._audio_worker = AudioWorker(
             text,
             role=NarrationRole.BOOK_NARRATOR,
@@ -1520,16 +1539,69 @@ class ReaderView(QWidget):
         self._audio_btn.setToolTip("Pausar Leitura (TTS)")
         self._audio_stop_btn.setVisible(True)
 
-    def _on_audio_finished(self, chunks):
-        pass
+    def _toggle_continuous_reading(self, checked: bool):
+        """Liga/desliga a leitura contínua (persiste na config)."""
+        self._continuous_reading = bool(checked)
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            try:
+                config.set("tts.continuous_reading", self._continuous_reading)
+            except Exception:
+                pass
+        self._show_status(
+            "🔁 Leitura contínua ativada — a narração vira as páginas." if checked
+            else "Leitura contínua desativada.", 4000)
 
-    def _on_audio_error(self, err_msg):
+    def _show_status(self, msg: str, ms: int = 4000):
         parent_window = self.window()
         if parent_window and hasattr(parent_window, "_statusbar") and parent_window._statusbar:
-            parent_window._statusbar.showMessage(f"Erro de Áudio: {err_msg}", 5000)
+            parent_window._statusbar.showMessage(msg, ms)
+
+    def _on_audio_finished(self, chunks):
+        """Fim natural da narração: no modo contínuo, encadeia a próxima página."""
+        if not (self._continuous_reading and self._chain_continuous):
+            return
+        if self._audio_stopped_by_user or not self._reader:
+            return
+        # Pequena pausa entre páginas; singleShot também deixa o QThread do
+        # worker atual terminar antes de criarmos o próximo.
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(400, self._continue_narration)
+
+    def _continue_narration(self):
+        """Avança para a próxima página com texto e narra (modo contínuo)."""
+        from src.core.audio.continuous_navigation import find_next_readable_page
+
+        if not self._continuous_reading or not self._reader:
+            return
+        worker = getattr(self, "_audio_worker", None)
+        if worker and worker.isRunning():
+            return  # algo já narra (ex.: usuário deu play manual no meio)
+        if self._audio_stopped_by_user:
+            return
+        get_text = (getattr(self._reader, "get_page_text", None)
+                    or getattr(self._reader, "get_chapter_text", None))
+        if get_text is None:
+            return
+        nxt = find_next_readable_page(
+            get_text, self._reader.current_page, self._reader.total_pages)
+        if nxt is None:
+            self._show_status("🔁 Fim do livro — leitura contínua encerrada.", 5000)
+            return
+        self._go_to_page(nxt)
+        self._toggle_audio()
+
+    def _on_audio_error(self, err_msg):
+        self._show_status(f"Erro de Áudio: {err_msg}", 5000)
 
     def _on_audio_worker_finished(self):
         """Garante a limpeza de referências e restaura o estado visual do botão."""
+        # Modo contínuo: o QThread antigo pode terminar DEPOIS de o próximo
+        # worker já ter sido criado — só limpa a UI se este é o worker atual.
+        finished_worker = self.sender()
+        if finished_worker is not None and finished_worker is not getattr(self, "_audio_worker", None):
+            finished_worker.deleteLater()
+            return
         self._audio_paused = False
         self._audio_btn.setText("🔊 Ouvir")
         self._audio_btn.setToolTip("Ouvir Página (TTS)")
@@ -1541,6 +1613,7 @@ class ReaderView(QWidget):
 
     def _stop_audio_if_running(self):
         """Para a narração por completo (libera o worker) e restaura a UI."""
+        self._audio_stopped_by_user = True
         if hasattr(self, '_audio_worker') and self._audio_worker and self._audio_worker.isRunning():
             self._audio_worker.stop()
             self._audio_worker.wait(2000)
@@ -1610,7 +1683,37 @@ class ReaderView(QWidget):
             action.triggered.connect(lambda checked, k=key: config.set("tts.book_narrator.preferred_provider", k))
             provider_menu.addAction(action)
 
-        # 3. Seleção de Estilo / Voz
+        # 3. Voz específica da narração (por idioma, vinda do provider ativo)
+        voice_menu = menu.addMenu("🎙️ Voz da Narração")
+        current_voice = config.get("tts.book_narrator.voice_id", None)
+        auto_action = QAction("🌐 Automática (por idioma)", voice_menu, checkable=True)
+        auto_action.setChecked(not current_voice)
+        auto_action.triggered.connect(
+            lambda checked: config.set("tts.book_narrator.voice_id", None))
+        voice_menu.addAction(auto_action)
+        voices_by_lang = {}
+        if self._tts_router is not None:
+            try:
+                voices_by_lang = self._tts_router.voices_by_language(current_provider)
+            except Exception:
+                voices_by_lang = {}
+        lang_labels = {"pt": "🇧🇷 Português", "en": "🇺🇸 English"}
+        for lang in sorted(voices_by_lang):
+            sub = voice_menu.addMenu(lang_labels.get(lang, lang.upper()))
+            for voice in voices_by_lang[lang]:
+                gender = getattr(voice, "gender", "") or ""
+                label = f"{voice.name} ({gender})" if gender not in ("", "neutral") else voice.name
+                v_action = QAction(label, sub, checkable=True)
+                v_action.setChecked(current_voice == voice.voice_id)
+                v_action.triggered.connect(
+                    lambda checked, vid=voice.voice_id: config.set("tts.book_narrator.voice_id", vid))
+                sub.addAction(v_action)
+        if not voices_by_lang:
+            none_action = QAction("(motor não lista vozes — usa a automática)", voice_menu)
+            none_action.setEnabled(False)
+            voice_menu.addAction(none_action)
+
+        # 4. Seleção de Estilo / Voz
         style_menu = menu.addMenu("🗣️ Voz / Estilo")
         current_style = config.get("tts.book_narrator.style", "serene")
         

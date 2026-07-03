@@ -62,6 +62,7 @@ DEFAULT_CONFIG = {
             "language": "pt-BR",
         },
         "auto_fallback": True,
+        "continuous_reading": False,  # narração vira páginas automaticamente
     },
     # Auto-indexação RAG: indexa livros pendentes em ocioso (1 por vez).
     "auto_index": {
