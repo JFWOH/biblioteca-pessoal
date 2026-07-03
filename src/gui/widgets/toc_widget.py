@@ -1,8 +1,14 @@
 """Widget de sumário (Table of Contents)."""
 
 from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, QSize
+from PyQt6.QtGui import QPixmap, QIcon
 from src.readers.base_reader import TOCEntry
+
+# Miniaturas: só nos capítulos (nível 0) e com teto — sumários enormes não
+# podem custar segundos de renderização ao abrir o livro.
+_THUMB_MAX = 40
+_THUMB_WIDTH = 110
 
 
 class TOCWidget(QTreeWidget):
@@ -15,6 +21,7 @@ class TOCWidget(QTreeWidget):
         self.setHeaderHidden(True)
         self.setIndentation(20)
         self.setAnimated(True)
+        self.setIconSize(QSize(44, 60))
         self.set_theme("dark")
         self.itemClicked.connect(self._on_item_clicked)
 
@@ -59,15 +66,32 @@ class TOCWidget(QTreeWidget):
             }}
         """)
 
-    def load_toc(self, entries: list[TOCEntry]) -> None:
-        """Carrega o sumário no widget."""
+    def load_toc(self, entries: list[TOCEntry], thumb_provider=None) -> None:
+        """Carrega o sumário no widget.
+
+        ``thumb_provider``: callable(page, width) -> bytes PNG | None. Quando
+        fornecido (PDF), os capítulos de nível 0 ganham miniatura da página.
+        """
         self.clear()
         parent_stack: list[QTreeWidgetItem | None] = [None]
+        thumbs_rendered = 0
 
         for entry in entries:
             item = QTreeWidgetItem()
             item.setText(0, entry.title)
             item.setData(0, 256, entry.page)  # Role customizado para a página
+
+            if (thumb_provider is not None and entry.level == 0
+                    and thumbs_rendered < _THUMB_MAX):
+                try:
+                    png = thumb_provider(entry.page, _THUMB_WIDTH)
+                except Exception:
+                    png = None
+                if png:
+                    pixmap = QPixmap()
+                    if pixmap.loadFromData(png):
+                        item.setIcon(0, QIcon(pixmap))
+                        thumbs_rendered += 1
 
             # Determina o pai baseado no nível
             while len(parent_stack) > entry.level + 1:

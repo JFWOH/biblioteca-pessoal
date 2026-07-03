@@ -207,6 +207,19 @@ class PDFReader(BaseReader):
             for entry in toc
         ]
 
+    def render_thumbnail(self, page: int, width: int = 110) -> bytes | None:
+        """Miniatura PNG da página para o painel de sumário (item 4 UX)."""
+        import fitz
+        if not self._doc or not (0 <= page < self._total_pages):
+            return None
+        try:
+            p = self._doc[page]
+            scale = width / max(p.rect.width, 1)
+            pix = p.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            return pix.tobytes("png")
+        except Exception:
+            return None
+
     def search_text(self, query: str) -> list[dict]:
         if not self._doc:
             return []

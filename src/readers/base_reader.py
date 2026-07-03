@@ -74,6 +74,14 @@ class BaseReader(ABC):
         """Retorna o sumário do documento."""
         ...
 
+    def render_thumbnail(self, page: int, width: int = 110) -> bytes | None:
+        """Miniatura PNG da página (para o painel de sumário).
+
+        Opcional: leitores sem renderização visual (EPUB/TXT) devolvem None e
+        o sumário exibe apenas texto.
+        """
+        return None
+
     @abstractmethod
     def search_text(self, query: str) -> list[dict]:
         """Busca texto dentro do documento. Retorna lista com página e trecho."""

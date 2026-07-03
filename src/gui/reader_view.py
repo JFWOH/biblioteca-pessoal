@@ -624,9 +624,11 @@ class ReaderView(QWidget):
         self._reader = create_reader(filepath)
         self._reader.open()
 
-        # Carrega TOC
-        toc = self._reader.get_toc()
-        self._toc_widget.load_toc(toc)
+        # Carrega TOC — sem entradas órfãs (números soltos) e com miniaturas
+        # de capítulo quando o leitor renderiza páginas (PDF).
+        from src.readers.toc_utils import clean_toc
+        toc = clean_toc(self._reader.get_toc())
+        self._toc_widget.load_toc(toc, thumb_provider=self._reader.render_thumbnail)
 
         # Vai para a página inicial
         self._go_to_page(start_page)
