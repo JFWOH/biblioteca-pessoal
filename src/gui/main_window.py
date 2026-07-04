@@ -923,20 +923,20 @@ class MainWindow(QMainWindow):
     def _on_ai_action_requested(self, action_type: str, text: str) -> None:
         """Processa requisições de IA vindas do menu de contexto de leitura."""
         if action_type == "translate":
-            self._statusbar.showMessage("🌐 Iniciando tradução offline...", 5000)
+            # Cartão no painel do assistente (substitui o antigo QMessageBox — a
+            # tradução fica no mesmo lugar onde o resto da conversa acontece).
+            if self._rag_panel.parentWidget() != self._reader_view:
+                self._reader_view.set_ai_panel(self._rag_panel)
+            self._reader_view.show_ai_panel()
+
+            self._statusbar.showMessage(
+                f"🌐 Traduzindo seleção ({len(text)} caracteres)...", 15000)
             from src.gui.translation_service import TranslationService
-            
+
             def on_success(result):
                 self._statusbar.clearMessage()
-                from PyQt6.QtWidgets import QMessageBox
-                from PyQt6.QtCore import Qt
-                msg = QMessageBox(self)
-                msg.setWindowTitle("Tradução Offline (NLLB-200)")
-                msg.setText(result)
-                msg.setModal(False)
-                msg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-                msg.show()
-                self._translation_msg = msg  # Evitar coleta de lixo prematura
+                self._rag_panel.show_translation_card(
+                    f"Seleção ({len(text)} caracteres)", text, result)
 
             def on_error(err):
                 self._statusbar.showMessage(f"⚠️ Erro na tradução offline: {err}", 5000)

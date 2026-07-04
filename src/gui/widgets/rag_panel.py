@@ -750,6 +750,45 @@ class RAGPanel(QWidget):
         """Retorna o contexto atual de leitura, se houver."""
         return self._reading_context
 
+    def _translation_card_colors(self) -> tuple[str, str, str, str]:
+        """Paleta do cartão de tradução por tema (mesmas cores de 'dicas' do painel)."""
+        theme = getattr(self, "_current_theme", "dark")
+        if theme == "light":
+            return "#f0fdf4", "#bbf7d0", "#166534", "#1A1A1A"
+        if theme == "sepia":
+            return "#EADFCA", "#d4cbb8", "#705E4B", "#433422"
+        return "rgba(16, 185, 129, 0.05)", "rgba(16, 185, 129, 0.2)", "#10b981", "#e5e7eb"
+
+    def show_translation_card(self, source_desc: str, original: str, translated: str) -> None:
+        """Exibe um cartão de tradução na área de resposta do assistente.
+
+        Substitui o antigo QMessageBox: a tradução (por seleção ou página
+        inteira) aparece no mesmo painel onde o resto da conversa acontece.
+        ``source_desc`` já traz a contagem de caracteres processados — é o
+        "aviso do que está sendo processado" (informativo, sem diálogo).
+        """
+        import html as html_lib
+
+        bg, border, header_color, body_color = self._translation_card_colors()
+        header = html_lib.escape(f"🌐 Tradução — {source_desc} ({len(original)} caracteres)")
+        body = html_lib.escape(translated).replace("\n", "<br>")
+
+        cursor = self._response_area.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self._response_area.setTextCursor(cursor)
+        self._response_area.insertHtml(f"""
+            <hr>
+            <table width="100%" cellpadding="8" style="background-color:{bg}; border:1px solid {border};">
+            <tr><td>
+            <p style="color:{header_color}; font-weight:700; font-size:11px; margin:0 0 6px 0;">{header}</p>
+            <p style="color:{body_color}; font-size:13px; margin:0;">{body}</p>
+            </td></tr>
+            </table>
+            <br>
+        """)
+        sb = self._response_area.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
     def on_token_received(self, token: str) -> None:
         """Acrescenta um token à área de resposta (streaming)."""
         cursor = self._response_area.textCursor()
