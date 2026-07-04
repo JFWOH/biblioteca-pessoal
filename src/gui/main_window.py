@@ -983,6 +983,10 @@ class MainWindow(QMainWindow):
             # Página inteira: traduz offline (NLLB) e narra o resultado (item 7 UX).
             self._read_translated_page(text)
             return
+        elif action_type == "translate_page":
+            # Página inteira como TEXTO: cartão no painel, sem narrar.
+            self._translate_page_as_text(text)
+            return
         elif action_type in ("explain_page", "summarize", "glossary", "flashcards"):
             from src.core.study_prompts import build_study_prompt
             question = build_study_prompt(action_type, text)
@@ -1039,6 +1043,58 @@ class MainWindow(QMainWindow):
                 return
             self._statusbar.showMessage("🔊 Narrando a página traduzida…", 5000)
             self._reader_view.narrate_text(result)
+
+        def _on_error(err: str):
+            self._page_translation_pending = False
+            self._statusbar.showMessage(f"⚠️ Erro na tradução offline: {err}", 6000)
+
+        try:
+            from src.gui.translation_service import TranslationService
+            TranslationService.get_instance().translate_async(
+                text, src_lang="en", tgt_lang="pt",
+                on_success=_on_success, on_error=_on_error)
+        except Exception as exc:
+            self._page_translation_pending = False
+            logger.warning(f"Falha ao iniciar a tradução da página (ignorado): {exc}")
+            self._statusbar.showMessage("⚠️ Tradução indisponível no momento.", 5000)
+
+    def _translate_page_as_text(self, text: str):
+        """Traduz a página inteira como TEXTO (cartão no painel), sem narrar.
+
+        Página já em português → mostra o texto original direto no cartão
+        (evita chamar o NLLB à toa). Graceful (ADR-005): erro vira aviso na
+        statusbar. O "aviso do que está sendo processado" é a contagem de
+        caracteres na statusbar + no header do cartão.
+        """
+        from src.core.tts.language_detect import detect_language
+
+        if getattr(self, "_page_translation_pending", False):
+            self._statusbar.showMessage("🌐 Já estou traduzindo uma página — aguarde…", 3000)
+            return
+
+        page = self._reader_view._reader.current_page + 1 if self._reader_view._reader else 0
+        source_desc = f"Página {page} inteira"
+
+        if self._rag_panel.parentWidget() != self._reader_view:
+            self._reader_view.set_ai_panel(self._rag_panel)
+        self._reader_view.show_ai_panel()
+
+        if detect_language(text).lower().startswith("pt"):
+            self._statusbar.showMessage("ℹ️ A página já está em português.", 4000)
+            self._rag_panel.show_translation_card(source_desc, text, text)
+            return
+
+        self._statusbar.showMessage(
+            f"🌐 Traduzindo {source_desc.lower()} ({len(text)} caracteres)…", 60000)
+        self._page_translation_pending = True
+
+        def _on_success(result: str):
+            self._page_translation_pending = False
+            if not (result or "").strip():
+                self._statusbar.showMessage("⚠️ Tradução vazia.", 5000)
+                return
+            self._statusbar.clearMessage()
+            self._rag_panel.show_translation_card(source_desc, text, result)
 
         def _on_error(err: str):
             self._page_translation_pending = False

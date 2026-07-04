@@ -370,6 +370,9 @@ class ReaderView(QWidget):
         # Ler a página em português: traduz (NLLB offline) e narra o resultado.
         self._act_read_translated = QAction("🌐 Ler Página Traduzida (PT)", self)
         self._act_read_translated.triggered.connect(self._on_read_translated_page)
+        # Traduzir a página como TEXTO (cartão no painel), sem narrar.
+        self._act_translate_page = QAction("🌐 Traduzir Página (texto)", self)
+        self._act_translate_page.triggered.connect(self._on_translate_page)
         self._overflow_menu.addAction(self._act_double_page)
         self._overflow_menu.addAction(self._act_highlight)
         self._overflow_menu.addSeparator()
@@ -388,6 +391,7 @@ class ReaderView(QWidget):
         self._overflow_menu.addAction(self._act_tts)
         self._overflow_menu.addAction(self._act_continuous)
         self._overflow_menu.addAction(self._act_read_translated)
+        self._overflow_menu.addAction(self._act_translate_page)
         self._overflow_menu.aboutToShow.connect(self._sync_overflow_menu)
         self._overflow_btn.setMenu(self._overflow_menu)
         tb_layout.addWidget(self._overflow_btn)
@@ -1614,6 +1618,21 @@ class ReaderView(QWidget):
             self._show_status("⚠️ Página sem texto para traduzir/narrar.", 4000)
             return
         self.ai_action_requested.emit("read_translated_page", page_text)
+
+    def _on_translate_page(self):
+        """Traduz a página atual como TEXTO — cartão no painel, sem narrar."""
+        if not self._reader:
+            return
+        page_text = ""
+        if hasattr(self._reader, "get_page_text"):
+            page_text = self._reader.get_page_text(self._reader.current_page)
+        elif hasattr(self._reader, "get_chapter_text"):
+            page_text = self._reader.get_chapter_text(self._reader.current_page)
+        page_text = (page_text or "").strip()
+        if not page_text:
+            self._show_status("⚠️ Página sem texto para traduzir.", 4000)
+            return
+        self.ai_action_requested.emit("translate_page", page_text)
 
     def _toggle_continuous_reading(self, checked: bool):
         """Liga/desliga a leitura contínua (persiste na config)."""
