@@ -551,6 +551,53 @@ class Orchestrator:
         )
         return urllib.request.urlopen(req, timeout=120)
 
+    # ── Tools de grafo (Fase 3) — read-only sobre o GraphStore ────────
+
+    def _graph_store(self):
+        """GraphStore sob demanda (padrão do engine: LibraryDB por db_path)."""
+        from src.core.database import LibraryDB
+        from src.core.graph.graph_store import GraphStore
+        return GraphStore(LibraryDB(str(self.engine._db_path)))
+
+    def execute_graph_concept_lookup(self, concept: str, state=None,
+                                     trace_logger=None) -> ToolOutput:
+        """Onde o conceito aparece na biblioteca (livros + páginas)."""
+        if state:
+            state.called_tools.append("graph_concept_lookup")
+        try:
+            from src.core.rag.tools import graph_tools
+            return graph_tools.graph_concept_lookup(self._graph_store(), concept)
+        except Exception as exc:
+            logger.warning("graph_concept_lookup falhou: %s", exc)
+            return create_tool_output(status="error", data=[],
+                                      error_message=str(exc), confidence=0.0)
+
+    def execute_graph_related_books(self, book_id, state=None,
+                                    trace_logger=None) -> ToolOutput:
+        """Livros conectados a um livro por conceitos compartilhados."""
+        if state:
+            state.called_tools.append("graph_related_books")
+        try:
+            from src.core.rag.tools import graph_tools
+            return graph_tools.graph_related_books(self._graph_store(), book_id)
+        except Exception as exc:
+            logger.warning("graph_related_books falhou: %s", exc)
+            return create_tool_output(status="error", data=[],
+                                      error_message=str(exc), confidence=0.0)
+
+    def execute_graph_book_concepts(self, book_id, state=None,
+                                    trace_logger=None) -> ToolOutput:
+        """Principais conceitos de um livro segundo o grafo."""
+        if state:
+            state.called_tools.append("graph_book_concepts")
+        try:
+            from src.core.rag.tools import graph_tools
+            return graph_tools.graph_book_concepts(self._graph_store(), book_id)
+        except Exception as exc:
+            logger.warning("graph_book_concepts falhou: %s", exc)
+            return create_tool_output(status="error", data=[],
+                                      error_message=str(exc), confidence=0.0)
+
     def _execute_tool_orchestrated(
         self,
         fn_name: str,
@@ -616,6 +663,31 @@ class Orchestrator:
                     for item in out.get("data", [])
                 ]
                 return json.dumps(formatted, ensure_ascii=False)
+
+            elif fn_name == "graph_concept_lookup":
+                out = self.execute_graph_concept_lookup(
+                    args.get("concept", ""), state=state, trace_logger=trace_logger)
+                return json.dumps(out.get("data", []), ensure_ascii=False)
+
+            elif fn_name == "graph_related_books":
+                bid = args.get("book_id")
+                if isinstance(bid, str):
+                    bid = int(bid) if bid.isdigit() else None
+                if bid is None:
+                    bid = book_id
+                out = self.execute_graph_related_books(
+                    bid, state=state, trace_logger=trace_logger)
+                return json.dumps(out.get("data", []), ensure_ascii=False)
+
+            elif fn_name == "graph_book_concepts":
+                bid = args.get("book_id")
+                if isinstance(bid, str):
+                    bid = int(bid) if bid.isdigit() else None
+                if bid is None:
+                    bid = book_id
+                out = self.execute_graph_book_concepts(
+                    bid, state=state, trace_logger=trace_logger)
+                return json.dumps(out.get("data", []), ensure_ascii=False)
 
             elif fn_name == "highlight_book_text":
                 state.ui_mutation_requested = True

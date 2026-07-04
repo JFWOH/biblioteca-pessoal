@@ -20,7 +20,9 @@ class PolicyEngine:
         - Qualquer outra alteração: Bloqueada se vier da web.
         """
         # Ações de leitura/busca local ou web são sempre permitidas
-        if action_type in ("vector_search", "keyword_search", "cross_reference", "search_web"):
+        # (inclui as tools de grafo — read-only sobre o GraphStore, Fase 3).
+        if action_type in ("vector_search", "keyword_search", "cross_reference", "search_web",
+                           "graph_concept_lookup", "graph_related_books", "graph_book_concepts"):
             return True
 
         # Trata mutações visuais da UI

@@ -58,7 +58,9 @@ Você também possui ferramentas visuais para alterar a interface do usuário:
 - highlight_book_text: Use para destacar visualmente um trecho importante na página aberta do livro. Escolha a cor apropriada baseado no tipo de conteúdo: "yellow" para geral ou resumos, "green" para conceitos ou definições, e "red" para pontos complexos ou alertas. Ao usar, informe ao usuário que você destacou o texto.
 - create_ai_bookmark: Use para criar marcadores de página inteligentes com resumos. Ao usar, informe ao usuário que o marcador foi criado.
 
-IMPORTANTE: Para as informações retiradas dos livros, você DEVE citar a fonte usando o formato exato: [Título do Livro, p. X] (por exemplo, [Dom Casmurro, p. 12]). Use o título e a página fornecidos no cabeçalho de cada trecho do contexto ou retornados pelas ferramentas."""
+IMPORTANTE: Para as informações retiradas dos livros, você DEVE citar a fonte usando o formato exato: [Título do Livro, p. X] (por exemplo, [Dom Casmurro, p. 12]). Use o título e a página fornecidos no cabeçalho de cada trecho do contexto ou retornados pelas ferramentas.
+
+Para perguntas sobre conexões entre livros da biblioteca ou sobre onde um conceito aparece em outros livros, prefira as ferramentas graph_* (grafo de conceitos) antes de buscas semânticas."""
 
 _TOOLS_DEF = [
     {
@@ -138,6 +140,57 @@ _TOOLS_DEF = [
                     }
                 },
                 "required": ["topic", "current_book_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "graph_concept_lookup",
+            "description": "Consulta o grafo de conceitos da biblioteca: em quais livros e páginas um conceito aparece. Ideal para 'onde mais este conceito aparece?'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "concept": {
+                        "type": "string",
+                        "description": "Nome do conceito (ex.: 'entropia')."
+                    }
+                },
+                "required": ["concept"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "graph_related_books",
+            "description": "Livros relacionados a um livro por conceitos compartilhados (grafo da biblioteca).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "book_id": {
+                        "type": "integer",
+                        "description": "Opcional. ID do livro. Nulo = livro atual."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "graph_book_concepts",
+            "description": "Principais conceitos de um livro segundo o grafo da biblioteca.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "book_id": {
+                        "type": "integer",
+                        "description": "Opcional. ID do livro. Nulo = livro atual."
+                    }
+                },
+                "required": []
             }
         }
     },
