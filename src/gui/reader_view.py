@@ -62,6 +62,9 @@ class ReaderView(QWidget):
         self._audio_paused: bool = False   # narração pausada (retomável no mesmo ponto)
         # Leitura contínua (item 5 UX): ao fim da página narrada, avança e segue.
         self._continuous_reading: bool = False
+        # Leitura contínua TRADUZIDA: mesma cadeia, mas cada página é traduzida
+        # (NLLB) antes de narrar. Ver docs/agents/traducao_confiavel_execution_contract.md.
+        self._continuous_translate_mode: bool = False
         self._audio_stopped_by_user: bool = False  # stop manual não encadeia a próxima
         self._chain_continuous: bool = False       # só narração de página encadeia (tradução não)
         self._footer_obs_id = None
@@ -367,6 +370,15 @@ class ReaderView(QWidget):
             self._continuous_reading = bool(_cfg.get("tts.continuous_reading", False))
         self._act_continuous.setChecked(self._continuous_reading)
         self._act_continuous.triggered.connect(self._toggle_continuous_reading)
+        # Leitura contínua TRADUZIDA: mesmo mecanismo, cada página passa pelo
+        # NLLB antes de narrar (Commit 5 do contrato de tradução confiável).
+        self._act_continuous_translate = QAction(
+            "🌐🔁 Leitura Contínua Traduzida (PT)", self, checkable=True)
+        if _cfg is not None:
+            self._continuous_translate_mode = bool(
+                _cfg.get("tts.continuous_translate_reading", False))
+        self._act_continuous_translate.setChecked(self._continuous_translate_mode)
+        self._act_continuous_translate.triggered.connect(self._toggle_continuous_translate_reading)
         # Ler a página em português: traduz (NLLB offline) e narra o resultado.
         self._act_read_translated = QAction("🌐 Ler Página Traduzida (PT)", self)
         self._act_read_translated.triggered.connect(self._on_read_translated_page)
@@ -390,6 +402,7 @@ class ReaderView(QWidget):
         self._overflow_menu.addSeparator()
         self._overflow_menu.addAction(self._act_tts)
         self._overflow_menu.addAction(self._act_continuous)
+        self._overflow_menu.addAction(self._act_continuous_translate)
         self._overflow_menu.addAction(self._act_read_translated)
         self._overflow_menu.addAction(self._act_translate_page)
         self._overflow_menu.aboutToShow.connect(self._sync_overflow_menu)
@@ -819,6 +832,7 @@ class ReaderView(QWidget):
         self._act_double_page.setChecked(self._double_page_btn.isChecked())
         self._act_highlight.setChecked(self._highlight_mode_btn.isChecked())
         self._act_continuous.setChecked(self._continuous_reading)
+        self._act_continuous_translate.setChecked(self._continuous_translate_mode)
         current = self._proactive_combo.currentText()
         for level, act in getattr(self, "_proactive_acts", {}).items():
             act.setChecked(level == current)
@@ -1536,6 +1550,13 @@ class ReaderView(QWidget):
         if not page_text:
             return
 
+        if self._continuous_translate_mode:
+            # Modo traduzido: cada página passa pelo NLLB (via MainWindow)
+            # antes de narrar; a cadeia continua em _on_audio_finished igual
+            # ao modo normal (chain_continuous é setado por narrate_text lá).
+            self.ai_action_requested.emit("read_translated_page_chained", page_text)
+            return
+
         self._launch_audio_worker(page_text, chain_continuous=True)
 
     def _launch_audio_worker(self, text: str, chain_continuous: bool = False) -> None:
@@ -1564,16 +1585,21 @@ class ReaderView(QWidget):
 
         self._audio_worker.start()
 
-    def narrate_text(self, text: str) -> None:
+    def narrate_text(self, text: str, chain_continuous: bool = False) -> None:
         """Narra um texto arbitrário (ex.: uma tradução) via TTS.
 
         O idioma é autodetectado pelo AudioWorker: uma tradução em português é lida
         com voz em português; um trecho em inglês, com voz em inglês.
+
+        ``chain_continuous``: True quando esta narração faz parte da leitura
+        contínua traduzida — ao terminar, encadeia a próxima página (ver
+        _on_audio_finished). Por padrão False (uma tradução avulsa não vira
+        página sozinha).
         """
         if not text or not text.strip():
             return
         self._stop_audio_if_running()
-        self._launch_audio_worker(text.strip())
+        self._launch_audio_worker(text.strip(), chain_continuous=chain_continuous)
 
     def _pause_audio(self):
         """Pausa a narração (retomável no mesmo ponto)."""
@@ -1647,14 +1673,33 @@ class ReaderView(QWidget):
             "🔁 Leitura contínua ativada — a narração vira as páginas." if checked
             else "Leitura contínua desativada.", 4000)
 
+    def _toggle_continuous_translate_reading(self, checked: bool):
+        """Liga/desliga a leitura contínua TRADUZIDA (persiste na config)."""
+        self._continuous_translate_mode = bool(checked)
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            try:
+                config.set("tts.continuous_translate_reading", self._continuous_translate_mode)
+            except Exception:
+                pass
+        self._show_status(
+            "🌐🔁 Leitura contínua traduzida ativada — cada página é traduzida antes de narrar."
+            if checked else "Leitura contínua traduzida desativada.", 4000)
+
     def _show_status(self, msg: str, ms: int = 4000):
         parent_window = self.window()
         if parent_window and hasattr(parent_window, "_statusbar") and parent_window._statusbar:
             parent_window._statusbar.showMessage(msg, ms)
 
     def _on_audio_finished(self, chunks):
-        """Fim natural da narração: no modo contínuo, encadeia a próxima página."""
-        if not (self._continuous_reading and self._chain_continuous):
+        """Fim natural da narração: no modo contínuo, encadeia a próxima página.
+
+        Cobre os dois modos (normal e traduzido) — sem o "or", o modo
+        traduzido não encadearia quando a leitura contínua normal está
+        desligada (são toggles independentes).
+        """
+        if not ((self._continuous_reading or self._continuous_translate_mode)
+                and self._chain_continuous):
             return
         if self._audio_stopped_by_user or not self._reader:
             return

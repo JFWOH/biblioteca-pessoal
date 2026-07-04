@@ -981,7 +981,12 @@ class MainWindow(QMainWindow):
             return
         elif action_type == "read_translated_page":
             # Página inteira: traduz offline (NLLB) e narra o resultado (item 7 UX).
-            self._read_translated_page(text)
+            self._translate_and_narrate(text, enable_chaining=False)
+            return
+        elif action_type == "read_translated_page_chained":
+            # Leitura contínua TRADUZIDA (Commit 5): narra e, ao terminar,
+            # encadeia a tradução+narração da próxima página com texto.
+            self._translate_and_narrate(text, enable_chaining=True)
             return
         elif action_type == "translate_page":
             # Página inteira como TEXTO: cartão no painel, sem narrar.
@@ -1015,11 +1020,18 @@ class MainWindow(QMainWindow):
         dialog = FlashcardsDialog(self._db, current_book_id=current_book_id, parent=self)
         dialog.exec()
 
-    def _read_translated_page(self, text: str):
+    def _translate_and_narrate(self, text: str, enable_chaining: bool):
         """Traduz a página em background (NLLB) e narra o resultado em PT.
 
         Página já em português → narra direto (traduzir seria inútil).
-        Graceful (ADR-005): erro de tradução vira aviso na statusbar.
+        Graceful (ADR-005): erro de tradução vira aviso na statusbar E não
+        encadeia a próxima página — o loop contínuo traduzido morre
+        naturalmente em vez de continuar num estado inconsistente.
+
+        ``enable_chaining``: False para a ação avulsa "Ler Página Traduzida"
+        (Commit 4 e anteriores); True para a leitura contínua traduzida
+        (Commit 5) — repassado para narrate_text(chain_continuous=...), que
+        aciona _on_audio_finished → _continue_narration ao terminar.
         """
         from src.core.tts.language_detect import detect_language
 
@@ -1027,13 +1039,16 @@ class MainWindow(QMainWindow):
             self._statusbar.showMessage("🌐 Já estou traduzindo uma página — aguarde…", 3000)
             return
 
+        reader = self._reader_view._reader
+        page_label = f"{reader.current_page + 1}/{reader.total_pages}" if reader else "?"
+
         if detect_language(text).lower().startswith("pt"):
-            self._statusbar.showMessage("ℹ️ A página já está em português — narrando o original.", 4000)
-            self._reader_view.narrate_text(text)
+            self._statusbar.showMessage(
+                f"ℹ️ Página {page_label} já está em português — narrando o original.", 4000)
+            self._reader_view.narrate_text(text, chain_continuous=enable_chaining)
             return
 
-        self._statusbar.showMessage(
-            "🌐 Traduzindo a página para narração… (pode levar um minuto)", 60000)
+        self._statusbar.showMessage(f"🌐 Traduzindo página {page_label}…", 60000)
         self._page_translation_pending = True
 
         def _on_success(result: str):
@@ -1041,12 +1056,14 @@ class MainWindow(QMainWindow):
             if not (result or "").strip():
                 self._statusbar.showMessage("⚠️ Tradução vazia — nada a narrar.", 5000)
                 return
-            self._statusbar.showMessage("🔊 Narrando a página traduzida…", 5000)
-            self._reader_view.narrate_text(result)
+            self._statusbar.showMessage(f"🔊 Narrando página {page_label}…", 5000)
+            self._reader_view.narrate_text(result, chain_continuous=enable_chaining)
 
         def _on_error(err: str):
             self._page_translation_pending = False
             self._statusbar.showMessage(f"⚠️ Erro na tradução offline: {err}", 6000)
+            # Sem encadear: o loop contínuo traduzido morre aqui (ADR-005) em
+            # vez de tentar continuar a partir de um estado de erro.
 
         try:
             from src.gui.translation_service import TranslationService
