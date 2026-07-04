@@ -524,6 +524,9 @@ class ReaderView(QWidget):
         self._dock.tab_changed.connect(lambda _k: self._sync_dock_buttons())
         self._main_splitter.addWidget(self._dock)
         self._dock.hide()
+        # Persiste a proporção do dock quando o usuário arrasta o divisor —
+        # o layout escolhido vira o padrão das próximas aberturas.
+        self._main_splitter.splitterMoved.connect(self._on_dock_splitter_moved)
 
         # O painel do Assistente (RAGPanel) é injetado no dock depois (set_ai_panel).
         self._ai_panel_container = None
@@ -1227,12 +1230,40 @@ class ReaderView(QWidget):
             ai_panel.set_standalone_mode(False)
 
     def _show_dock_tab(self, key: str) -> None:
-        """Exibe o dock e seleciona a aba indicada."""
+        """Exibe o dock e seleciona a aba indicada.
+
+        O dock é uma BARRA LATERAL direita (~1/3 da tela), não meia-tela —
+        a leitura continua dominante. A proporção que o usuário ajustar no
+        divisor é persistida (reader.dock_ratio) e vira o novo padrão.
+        """
         self._dock.show_tab(key)
         self._dock.show()
         w = self.width()
-        self._main_splitter.setSizes([int(w * 0.58), int(w * 0.42)])
+        ratio = 0.32
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            try:
+                ratio = float(config.get("reader.dock_ratio", 0.32))
+            except (TypeError, ValueError):
+                ratio = 0.32
+        ratio = min(max(ratio, 0.15), 0.6)  # sempre sidebar, nunca dominante
+        self._main_splitter.setSizes([int(w * (1 - ratio)), int(w * ratio)])
         self._sync_dock_buttons()
+
+    def _on_dock_splitter_moved(self, _pos: int, _index: int) -> None:
+        """Salva a proporção do dock escolhida pelo usuário (vira o padrão)."""
+        if self._dock.isHidden():
+            return
+        sizes = self._main_splitter.sizes()
+        total = sum(sizes)
+        if total <= 0 or len(sizes) < 2 or sizes[1] <= 0:
+            return
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            try:
+                config.set("reader.dock_ratio", round(sizes[1] / total, 3))
+            except Exception:
+                pass
 
     def hide_dock(self) -> None:
         """Recolhe o dock à direita."""
