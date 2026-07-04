@@ -21,6 +21,9 @@ class TestTranslationWorkerIntegration:
         service.backend._is_loaded = True
         service.backend._device = "cpu"
         service.backend.translate = lambda text, src, tgt: f"Traduzido: {text}"
+        # Hermético: sem revisão via LLM (o caminho da revisão tem testes
+        # próprios mockados em test_translation_quality.py).
+        service.config["revise_with_llm"] = False
 
         results = []
         service.translate_async(
@@ -68,6 +71,7 @@ class TestTranslationWorkerIntegration:
         service.backend._is_loaded = True
         service.backend._device = "cpu"
         service.backend.translate = lambda text, src, tgt: "OK"
+        service.config["revise_with_llm"] = False  # hermético (sem Ollama real)
 
         done = []
         service.translate_async(

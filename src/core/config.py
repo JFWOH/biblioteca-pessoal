@@ -64,6 +64,13 @@ DEFAULT_CONFIG = {
         "auto_fallback": True,
         "continuous_reading": False,  # narração vira páginas automaticamente
     },
+    # Tradução offline (NLLB + revisão pelo LLM local).
+    "translation": {
+        "model": "facebook/nllb-200-distilled-600M",
+        "default_src": "en",
+        "default_tgt": "pt",
+        "revise_with_llm": True,   # gemma4 revisa o rascunho do NLLB (fallback: rascunho)
+    },
     # Auto-indexação RAG: indexa livros pendentes em ocioso (1 por vez).
     "auto_index": {
         "enabled": True,

@@ -158,7 +158,11 @@ class NLLBBackend:
         :param tgt_lang: Código ISO simples de destino (ex: 'pt').
         :return: Texto traduzido (lotes reunidos na ordem original).
         """
-        text = text.strip()
+        # Limpa artefatos de extração de PDF (capitulares "W ELCOME", títulos
+        # "C H A P T E R", hifenização de quebra) — o NLLB "traduz" o ruído e
+        # produz lacunas/trechos em inglês. Inofensivo em texto já limpo.
+        from src.core.translation_backends.text_cleanup import clean_source_text
+        text = clean_source_text(text)
         if not text:
             return ""
 

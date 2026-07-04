@@ -16,16 +16,31 @@ class TranslationWorker(QThread):
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
 
-    def __init__(self, backend: NLLBBackend, text: str, src_lang: str, tgt_lang: str):
+    def __init__(self, backend: NLLBBackend, text: str, src_lang: str, tgt_lang: str,
+                 revise: bool = True):
         super().__init__()
         self.backend = backend
         self.text = text
         self.src_lang = src_lang
         self.tgt_lang = tgt_lang
+        self.revise = revise
 
     def run(self):
         try:
             result = self.backend.translate(self.text, self.src_lang, self.tgt_lang)
+            # Pós-edição pelo agente principal (gemma4): corrige trechos não
+            # traduzidos, repetições e lacunas do NLLB. Falha na revisão →
+            # mantém o rascunho (nunca piora; ADR-005).
+            if self.revise and (result or "").strip():
+                try:
+                    from src.core.translation_backends.translation_reviser import (
+                        revise_translation,
+                    )
+                    revised = revise_translation(self.text, result)
+                    if revised:
+                        result = revised
+                except Exception as exc:
+                    logger.debug(f"Revisão da tradução indisponível: {exc}")
             self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))
@@ -53,15 +68,16 @@ class TranslationService(QObject):
         self.backend = NLLBBackend(model_id=model_id)
         self._active_workers = []
 
-    def translate_async(self, text: str, src_lang: str = None, tgt_lang: str = None, 
+    def translate_async(self, text: str, src_lang: str = None, tgt_lang: str = None,
                         on_success=None, on_error=None):
         """
         Dispara uma tradução em background (worker).
         """
         src = src_lang or self.default_src
         tgt = tgt_lang or self.default_tgt
-        
-        worker = TranslationWorker(self.backend, text, src, tgt)
+        revise = bool(self.config.get("revise_with_llm", True))
+
+        worker = TranslationWorker(self.backend, text, src, tgt, revise=revise)
         
         if on_success:
             worker.finished.connect(on_success)
