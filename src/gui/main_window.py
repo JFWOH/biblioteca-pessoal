@@ -844,6 +844,11 @@ class MainWindow(QMainWindow):
             models = self._rag_engine.list_local_models()
             installed_names = [m["name"] for m in models]
             self._rag_panel.update_model_list(installed_names)
+            # Daemon presente mas SEM modelos (instalado por fora / wizard
+            # pulado): puxa em background os recomendados pelo hardware —
+            # o usuário nunca precisa abrir terminal para baixar modelo.
+            if not installed_names:
+                self._start_model_pull()
 
         model = self._config.get("rag.llm_model", "gemma4:e4b")
         self._rag_panel.set_ollama_status(available, model if available else "")
@@ -873,6 +878,41 @@ class MainWindow(QMainWindow):
         self._rag_panel.set_standalone_mode(True)
         self._main_stack.setCurrentIndex(3)
         self._check_ollama_status()
+
+    def _start_model_pull(self) -> None:
+        """Baixa em background os modelos de IA recomendados pelo hardware."""
+        worker = getattr(self, "_model_pull_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        try:
+            from src.core.hardware_capability_service import HardwareCapabilityService
+            from src.gui.workers.install_worker import OllamaModelPullWorker
+
+            hw = HardwareCapabilityService()
+            models = [hw.get_recommended_llm_model(), HardwareCapabilityService.EMBED_MODEL]
+            self._statusbar.showMessage(
+                f"🤖 Baixando modelos de IA recomendados ({', '.join(models)})…", 10000)
+            self._model_pull_worker = OllamaModelPullWorker(models, parent=self)
+            self._model_pull_worker.progress_updated.connect(
+                lambda msg: self._statusbar.showMessage(msg, 10000))
+            self._model_pull_worker.finished_pull.connect(self._on_model_pull_finished)
+            self._model_pull_worker.start()
+        except Exception as exc:
+            logger.warning(f"Falha ao iniciar o download de modelos (ignorado): {exc}")
+
+    def _on_model_pull_finished(self, all_ok: bool) -> None:
+        if all_ok:
+            self._statusbar.showMessage("✅ Modelos de IA prontos — assistente disponível.", 6000)
+        else:
+            self._statusbar.showMessage(
+                "⚠️ Download de modelos incompleto — verifique a conexão e reabra o app.", 8000)
+        # Atualiza a lista de modelos no painel com o que chegou.
+        try:
+            if self._rag_engine is not None:
+                models = self._rag_engine.list_local_models()
+                self._rag_panel.update_model_list([m["name"] for m in models])
+        except Exception as exc:
+            logger.warning(f"Falha ao atualizar lista de modelos (ignorado): {exc}")
 
     def _on_rag_query(self, question: str) -> None:
         """Inicia uma consulta RAG em background."""

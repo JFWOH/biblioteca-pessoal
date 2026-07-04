@@ -130,6 +130,82 @@ class OllamaInstaller:
             return False
 
     @classmethod
+    def pull_model(
+        cls,
+        model: str,
+        progress_cb: Callable[[int, str], None] | None = None,
+        timeout: int = 3600,
+    ) -> bool:
+        """Baixa um modelo via API do daemon (/api/pull) com progresso streaming.
+
+        O onboarding instala o RUNTIME, mas sem modelos o assistente não
+        funciona — este método fecha o ciclo: o app puxa o modelo recomendado
+        pelo hardware sem o usuário abrir terminal.
+
+        Args:
+            model: nome do modelo (ex.: 'gemma4:e4b', 'bge-m3').
+            progress_cb: Callback(percent 0-100, mensagem). Sem total conhecido,
+                o percent repete o último valor (só a mensagem muda).
+            timeout: limite em segundos (modelos têm GB; padrão 1h).
+
+        Returns:
+            True se o download concluiu (ou o modelo já existia localmente).
+        """
+        import json
+
+        payload = json.dumps({"model": model}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{OLLAMA_URL}/api/pull",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        last_pct = 0
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                for raw_line in resp:
+                    if not raw_line.strip():
+                        continue
+                    try:
+                        chunk = json.loads(raw_line)
+                    except json.JSONDecodeError:
+                        continue
+                    if chunk.get("error"):
+                        logger.error("Pull de '%s' falhou: %s", model, chunk["error"])
+                        return False
+                    status = chunk.get("status", "")
+                    total = chunk.get("total") or 0
+                    completed = chunk.get("completed") or 0
+                    if progress_cb:
+                        if total and completed:
+                            last_pct = int(completed / total * 100)
+                            mb_done = completed / 1_048_576
+                            mb_total = total / 1_048_576
+                            progress_cb(
+                                last_pct,
+                                f"Modelo {model}: {mb_done:.0f} / {mb_total:.0f} MB",
+                            )
+                        elif status:
+                            progress_cb(last_pct, f"Modelo {model}: {status}")
+                    if status == "success":
+                        return True
+            return True  # stream terminou sem erro explícito
+        except Exception as exc:
+            logger.error("Falha no pull do modelo '%s': %s", model, exc)
+            return False
+
+    @classmethod
+    def list_installed_models(cls) -> list[str]:
+        """Nomes dos modelos instalados no daemon (vazio em caso de falha)."""
+        import json
+        try:
+            req = urllib.request.Request(f"{OLLAMA_URL}/api/tags")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read())
+            return [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+        except Exception:
+            return []
+
+    @classmethod
     def verify(cls) -> bool:
         """Verifica se o Ollama está instalado e acessível."""
         # 1. Tenta via HTTP (daemon rodando)
