@@ -10,6 +10,14 @@ from src.core.rag.trace_logger import TraceLogger
 
 logger = logging.getLogger(__name__)
 
+# Ferramentas de efeito colateral (mutação de UI) que não exigem mais nenhuma
+# rodada de raciocínio depois de executadas — ao contrário de vector_search/
+# keyword_search/cross_reference, cujo resultado o modelo ainda precisa
+# incorporar numa resposta. Usado para encerrar o loop sem pedir ao modelo
+# para "responder de novo" quando ele já escreveu a explicação nesta rodada
+# (ver Orchestrator.query_rag, Caso 2).
+_ACTION_ONLY_TOOLS = frozenset({"highlight_book_text", "create_ai_bookmark"})
+
 # Lista de Stopwords em Português e Inglês para Heurística Determinística Offline
 PORTUGUESE_STOPWORDS = {
     "a", "o", "os", "as", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas",
@@ -522,6 +530,22 @@ class Orchestrator:
         trace_logger.emit("query_completed", step=state.current_round + 1, payload=final_result)
         return final_result
 
+    def _finalize_success(self, question: str, book_id: Optional[int], answer_acc: list,
+                         state: AgentState, trace_logger: TraceLogger) -> None:
+        """Persiste o turno e emite o trace de encerramento de uma resposta bem-sucedida."""
+        if hasattr(self.engine, "append_chat_turn"):
+            self.engine.append_chat_turn(book_id, question, "".join(answer_acc))
+        payload = {
+            "sources_used": list(state.sources_used),
+            "books_consulted": list(state.books_consulted),
+            "repeated_result_count": state.repeated_result_count,
+            "errors": state.errors,
+            "web_seen": state.web_seen,
+            "ui_mutation_requested": state.ui_mutation_requested,
+            "called_tools": state.called_tools,
+        }
+        trace_logger.emit("query_completed", step=state.current_round + 1, payload=payload)
+
     def _call_chat_api(self, msgs: list, stream: bool = False, temperature: float | None = None) -> Any:
         """Helper para chamar o Ollama Chat API."""
         import urllib.request
@@ -529,6 +553,13 @@ class Orchestrator:
         options = {
             "num_predict": 4096,
             "num_ctx": 8192,
+            # Mitiga repetição literal de parágrafos inteiros em respostas longas
+            # (modelos locais menores tendem a "reiniciar" a mesma explicação).
+            # repeat_last_n amplo o bastante para enxergar parágrafos anteriores,
+            # não só as últimas palavras; não mexe em num_predict/num_ctx, então
+            # a profundidade de raciocínio dos modelos gemma4 é preservada.
+            "repeat_penalty": 1.15,
+            "repeat_last_n": 512,
         }
         if temperature is not None:
             options["temperature"] = temperature
@@ -786,9 +817,13 @@ class Orchestrator:
 
         n = n_context or self.engine._n_context
         
+        vector_error: str | None = None
         try:
             similar = self.engine.search_similar(question, n_results=n, book_id=book_id)
         except Exception as e:
+            # Guarda o motivo real: mascará-lo com "nenhum documento encontrado"
+            # já induziu reindexações inúteis da biblioteca inteira.
+            vector_error = str(e)
             try:
                 hits = self.engine.keyword_search_db(question, book_id=book_id)
                 similar = [
@@ -807,7 +842,10 @@ class Orchestrator:
                 similar = []
 
         if not similar:
-            err_msg = "Nenhum documento foi encontrado na biblioteca indexada. Indexe seus livros primeiro usando o botão 'Reindexar Biblioteca'."
+            if vector_error:
+                err_msg = f"A busca na biblioteca falhou: {vector_error}"
+            else:
+                err_msg = "Nenhum documento foi encontrado na biblioteca indexada. Indexe seus livros primeiro usando o botão 'Reindexar Biblioteca'."
             trace_logger.emit("error", step=1, error_type="EmptyContext", error_message=err_msg)
             trace_logger.emit("query_completed", step=2, error_message=err_msg)
             yield err_msg
@@ -905,24 +943,13 @@ class Orchestrator:
                     continue  # Nova chamada no loop while budget_ok
 
                 # Memória por livro: grava o turno concluído.
-                if hasattr(self.engine, "append_chat_turn"):
-                    self.engine.append_chat_turn(book_id, question, "".join(answer_acc))
-
-                payload = {
-                    "sources_used": list(state.sources_used),
-                    "books_consulted": list(state.books_consulted),
-                    "repeated_result_count": state.repeated_result_count,
-                    "errors": state.errors,
-                    "web_seen": state.web_seen,
-                    "ui_mutation_requested": state.ui_mutation_requested,
-                    "called_tools": state.called_tools
-                }
-                trace_logger.emit("query_completed", step=state.current_round + 1, payload=payload)
+                self._finalize_success(question, book_id, answer_acc, state, trace_logger)
                 return
 
             # Caso 2: o modelo solicitou ferramentas nesta rodada.
             messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
             round_outputs = []
+            fn_names_this_round: list[str] = []
 
             for tool_call in tool_calls:
                 if self.engine._cancelled:
@@ -932,6 +959,7 @@ class Orchestrator:
 
                 fn = tool_call.get("function", {})
                 fn_name = fn.get("name", "")
+                fn_names_this_round.append(fn_name)
                 args = fn.get("arguments", {})
                 if isinstance(args, str):
                     try:
@@ -957,6 +985,21 @@ class Orchestrator:
                     data=[{"raw_result": tool_result_str}],
                     provenance="web" if fn_name == "search_web" else "local"
                 ))
+
+            # Se o modelo já escreveu uma explicação completa NESTA rodada e as
+            # únicas ferramentas chamadas são de efeito colateral (destaque/
+            # marcador — que não exigem incorporar resultado numa resposta
+            # futura, ao contrário de vector_search/keyword_search/
+            # cross_reference), a rodada JÁ É a resposta final: os efeitos
+            # colaterais acima já foram aplicados, então encerra aqui. Sem
+            # isto, o loop pedia ao modelo para "responder de novo" e ele
+            # reescrevia (às vezes quase palavra por palavra) a explicação
+            # que já tinha dado — o texto duplicado relatado pelo usuário.
+            if content.strip() and fn_names_this_round and all(
+                name in _ACTION_ONLY_TOOLS for name in fn_names_this_round
+            ):
+                self._finalize_success(question, book_id, answer_acc, state, trace_logger)
+                return
 
             digest = self.compute_results_digest(round_outputs)
             if state.last_result_hash and state.last_result_hash == digest:
