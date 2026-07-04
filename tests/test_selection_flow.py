@@ -34,8 +34,8 @@ def _word_center_pct(reader, word: str, occurrence: int = 0) -> tuple[float, flo
     """Centro (em %) da n-ésima ocorrência da palavra na página 0."""
     page = reader._doc[0]
     pw, ph = page.rect.width, page.rect.height
-    hits = [w for w in sorted(page.get_text("words"), key=lambda w: (w[5], w[6], w[7]))
-            if w[4] == word]
+    # sort=True: mesma ordem de leitura visual usada por get_selection_flow.
+    hits = [w for w in page.get_text("words", sort=True) if w[4] == word]
     w = hits[occurrence]
     return ((w[0] + w[2]) / 2 / pw, (w[1] + w[3]) / 2 / ph)
 
@@ -88,6 +88,37 @@ def test_flow_empty_area_returns_none(reader):
 
 def test_flow_invalid_page_returns_none(reader):
     assert reader.get_selection_flow(99, (0.5, 0.5), (0.6, 0.6)) is None
+
+
+def test_flow_ignores_footer_stored_before_body(tmp_path):
+    """Regressão do bug relatado: selecionar um parágrafo traduzia a página
+    inteira, começando pelo número do rodapé ("22 A Mente..."). Causa: o
+    rodapé fica em um bloco anterior ao corpo no PDF; ordenar por
+    (block, line, word) — ordem de ARMAZENAMENTO — faz o rodapé "vazar"
+    para dentro de qualquer seleção do corpo. Fix: get_text(..., sort=True)
+    usa a ordem visual (topo→baixo). Este PDF insere o RODAPÉ PRIMEIRO
+    (block_no menor) e o corpo DEPOIS, replicando a condição do bug.
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=500, height=300)
+    page.insert_text((50, 280), "22", fontsize=9)  # rodapé: 1º bloco, no fim visual
+    for i, line in enumerate((LINE1, LINE2, LINE3)):  # corpo: blocos depois, no topo
+        page.insert_text((50, 100 + i * 20), line, fontsize=11)
+    pdf_path = tmp_path / "footer_first.pdf"
+    doc.save(str(pdf_path))
+    doc.close()
+
+    r = PDFReader(pdf_path)
+    r.open()
+    try:
+        start = _word_center_pct(r, "diz", 0)      # meio da linha 1 do corpo
+        end = _word_center_pct(r, "importa", 0)    # fim da linha 1 do corpo
+        flow = r.get_selection_flow(0, start, end)
+        assert flow is not None
+        assert "22" not in flow["text"].split()  # rodapé não vaza para a seleção
+        assert flow["text"] == "diz que o inconsciente importa"
+    finally:
+        r.close()
 
 
 def test_render_highlight_with_quads(reader):

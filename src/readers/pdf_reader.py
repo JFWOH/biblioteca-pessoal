@@ -265,8 +265,15 @@ class PDFReader(BaseReader):
         sx, sy = start_pct[0] * pw, start_pct[1] * ph
         ex, ey = end_pct[0] * pw, end_pct[1] * ph
 
-        # (x0, y0, x1, y1, palavra, block, line, word_no) em ordem de leitura
-        words = sorted(page.get_text("words"), key=lambda w: (w[5], w[6], w[7]))
+        # (x0, y0, x1, y1, palavra, block, line, word_no). sort=True pede ao
+        # PyMuPDF a ordem de leitura VISUAL (topo→baixo, esq→dir) em vez da
+        # ordem de armazenamento no documento — sem isso, um rodapé/cabeçalho
+        # guardado em bloco anterior ao corpo da página "vazava" para dentro
+        # de qualquer seleção (bug relatado: selecionar um parágrafo traduzia
+        # a página inteira, começando pelo número de página do rodapé).
+        # Limitação conhecida: PDFs de duas colunas com bandas sobrepostas
+        # ainda podem ordenar de forma imperfeita mesmo com sort=True.
+        words = page.get_text("words", sort=True)
         if not words:
             return None
 
