@@ -433,6 +433,7 @@ class ReaderView(QWidget):
         self._origin = QPoint()
         self._is_selecting = False
         self._last_selection_coords: tuple | None = None  # Últimas coords normalizadas salvas
+        self._last_selection_flow: dict | None = None  # {"text", "quads"} — seleção por fluxo
 
         # Visualizador HTML (para EPUB, TXT, DOCX)
         self._web_view = QWebEngineView()
@@ -551,7 +552,10 @@ class ReaderView(QWidget):
                     self._zoom_out()
                 return True
         elif event.type() == QEvent.Type.MouseButtonPress:
-            if event.button() == Qt.MouseButton.LeftButton:
+            # No _image_label a SELEÇÃO tem prioridade: a virada por clique na
+            # margem é decidida no RELEASE (clique sem arrasto). Antes, pressionar
+            # perto da margem direita para selecionar uma palavra virava a página.
+            if event.button() == Qt.MouseButton.LeftButton and obj is not self._image_label:
                 width = obj.width()
                 if hasattr(event, "scenePosition"):
                     x = event.scenePosition().x()
@@ -574,6 +578,7 @@ class ReaderView(QWidget):
                 self._rubber_band.show()
                 self._is_selecting = True
                 self._last_selection_coords = None  # Reseta coords ao iniciar
+                self._last_selection_flow = None
                 if hasattr(self, "_selection_popover"):
                     self._selection_popover.hide()
                 return True
@@ -584,6 +589,20 @@ class ReaderView(QWidget):
                 self._is_selecting = False
                 # Calcula e armazena as coords normalizadas da seleção atual
                 rect = self._rubber_band.geometry()
+                # CLIQUE (sem arrasto) nas margens laterais vira a página —
+                # decidido aqui, e não no press, para não engolir seleções
+                # que começam perto da margem.
+                origin = getattr(self, "_origin", None)
+                if origin is not None and rect.width() < 6 and rect.height() < 6:
+                    width = obj.width()
+                    if origin.x() < width * 0.15:
+                        self._rubber_band.hide()
+                        self._go_prev()
+                        return True
+                    elif origin.x() > width * 0.85:
+                        self._rubber_band.hide()
+                        self._go_next()
+                        return True
                 label_size = self._image_label.size()
                 pixmap = self._image_label.pixmap()
                 if pixmap and pixmap.width() > 0:
@@ -599,6 +618,21 @@ class ReaderView(QWidget):
                     py1 = min(1.0, y1 / pixmap.height())
                     if (px1 - px0) > 0.005 and (py1 - py0) > 0.005:  # Seleção mínima 0.5%
                         self._last_selection_coords = (px0, py0, px1, py1)
+                        # Seleção por fluxo de texto: usa os PONTOS de início e
+                        # fim do arrasto (não o retângulo) — frases que começam/
+                        # terminam no meio da linha viram quads por linha.
+                        self._last_selection_flow = None
+                        if self._reader and hasattr(self._reader, "get_selection_flow"):
+                            release_pt = event.position().toPoint()
+                            spx = min(max((self._origin.x() - offset_x) / pixmap.width(), 0.0), 1.0)
+                            spy = min(max((self._origin.y() - offset_y) / pixmap.height(), 0.0), 1.0)
+                            epx = min(max((release_pt.x() - offset_x) / pixmap.width(), 0.0), 1.0)
+                            epy = min(max((release_pt.y() - offset_y) / pixmap.height(), 0.0), 1.0)
+                            try:
+                                self._last_selection_flow = self._reader.get_selection_flow(
+                                    self._reader.current_page, (spx, spy), (epx, epy))
+                            except Exception:
+                                self._last_selection_flow = None
                         self._show_selection_popover(rect)
                 # Mantém rubber band visível para clique direito
                 return True
@@ -1382,12 +1416,7 @@ class ReaderView(QWidget):
             if clicked_highlight is not None:
                 menu.addSeparator()
 
-            text = ""
-            if self._reader and hasattr(self._reader, "get_text_from_rect"):
-                try:
-                    text = self._reader.get_text_from_rect(self._reader.current_page, coords) or ""
-                except Exception:
-                    text = ""
+            text = self._selection_text(coords)
 
             action_highlight = QAction("🖍️ Destacar", self)
             action_highlight.triggered.connect(
@@ -1405,11 +1434,37 @@ class ReaderView(QWidget):
         # Limpa a seleção armazenada após usar o menu
         self._last_selection_coords = None
 
+    def _selection_text(self, coords: tuple[float, float, float, float]) -> str:
+        """Texto da seleção atual: fluxo de texto quando disponível, senão rect.
+
+        O fluxo (get_selection_flow) respeita frases que começam/terminam no
+        meio da linha; o rect legado captura pedaços de linhas vizinhas.
+        """
+        flow = getattr(self, "_last_selection_flow", None)
+        if flow and flow.get("text"):
+            return flow["text"].strip()
+        text = ""
+        if self._reader and hasattr(self._reader, "get_text_from_rect"):
+            try:
+                text = (self._reader.get_text_from_rect(self._reader.current_page, coords) or "").strip()
+            except Exception:
+                text = ""
+        return text
+
     def _highlight_selection(self, coords: tuple[float, float, float, float], text: str):
         """Salva o destaque no banco de dados e limpa a rubber band."""
         import json
-        position_data = json.dumps({"coords": list(coords)})
-        
+        payload = {"coords": list(coords)}
+        # Seleção por fluxo: grava um rect por LINHA (quads) e o bounding box
+        # em coords (compatibilidade + hit-test do "Remover Destaque").
+        flow = getattr(self, "_last_selection_flow", None)
+        if flow and flow.get("quads"):
+            qs = flow["quads"]
+            payload["coords"] = [min(q[0] for q in qs), min(q[1] for q in qs),
+                                 max(q[2] for q in qs), max(q[3] for q in qs)]
+            payload["quads"] = qs
+        position_data = json.dumps(payload)
+
         # Emite sinal para adicionar a anotação
         data = {
             "page_number": self._reader.current_page,
@@ -1440,12 +1495,7 @@ class ReaderView(QWidget):
         coords = self._last_selection_coords
         if coords is None:
             return
-        text = ""
-        if self._reader and hasattr(self._reader, "get_text_from_rect"):
-            try:
-                text = (self._reader.get_text_from_rect(self._reader.current_page, coords) or "").strip()
-            except Exception:
-                text = ""
+        text = self._selection_text(coords)
         if action == "highlight":
             self._highlight_selection(coords, text)
         elif text:
