@@ -3,9 +3,14 @@
 Responsável por carregar o modelo de forma lazy e traduzir textos curtos/seleções.
 """
 import logging
+import re
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Fim de sentença (. ! ? … ) seguido de espaço, ou quebra de linha — heurística
+# simples e suficiente para não depender de bibliotecas de NLP.
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+|\n+")
 
 class NLLBBackend:
     """Wrapper para inferência local com NLLB-200."""
@@ -91,13 +96,67 @@ class NLLBBackend:
             else:
                 os.environ["HF_HUB_OFFLINE"] = prev_offline
 
+    @staticmethod
+    def _split_sentences(text: str) -> list[str]:
+        """Quebra o texto em sentenças (heurística: pontuação final + quebra de linha).
+
+        Sem isso, textos longos (uma página inteira) vão numa única chamada ao
+        modelo com truncation=True/max_length=512 — o texto trunca e o NLLB
+        degenera em repetição (bug relatado: tradução de página inteira virava
+        loop de texto repetido).
+        """
+        parts = _SENTENCE_SPLIT_RE.split(text.strip())
+        return [p.strip() for p in parts if p and p.strip()]
+
+    @staticmethod
+    def _batch_sentences(sentences: list[str], max_chars: int = 1400) -> list[str]:
+        """Empacota sentenças em lotes sob um orçamento de caracteres.
+
+        Guloso: acumula sentenças num lote até estourar o orçamento, então
+        fecha o lote e começa outro. Uma sentença sozinha maior que o
+        orçamento vira seu próprio lote (nunca quebra no meio da sentença —
+        isso reintroduziria o problema de truncamento no meio da frase).
+        """
+        batches: list[str] = []
+        current: list[str] = []
+        current_len = 0
+        for sent in sentences:
+            sent_len = len(sent)
+            if current and current_len + 1 + sent_len > max_chars:
+                batches.append(" ".join(current))
+                current, current_len = [], 0
+            current.append(sent)
+            current_len += sent_len + (1 if len(current) > 1 else 0)
+        if current:
+            batches.append(" ".join(current))
+        return batches
+
+    def _translate_one_batch(self, batch: str, src_nllb: str, tgt_nllb: str) -> str:
+        """Traduz UM lote (já dentro do orçamento de caracteres) via NLLB.
+
+        max_length=512 permanece como rede de segurança (defesa em
+        profundidade) — o chunking por sentenças evita estourá-lo na prática.
+        """
+        self._tokenizer.src_lang = src_nllb
+        inputs = self._tokenizer(batch, return_tensors="pt", truncation=True, max_length=512)
+        inputs = {k: v.to(self._device) for k, v in inputs.items()}
+
+        forced_bos_token_id = self._tokenizer.convert_tokens_to_ids(tgt_nllb)
+        outputs = self._model.generate(
+            **inputs,
+            forced_bos_token_id=forced_bos_token_id,
+            max_length=512,
+        )
+        return self._tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
+
     def translate(self, text: str, src_lang: str = "en", tgt_lang: str = "pt") -> str:
         """
-        Traduz um trecho de texto.
-        :param text: Texto original a traduzir.
+        Traduz um trecho de texto, fatiado por sentenças em lotes menores.
+
+        :param text: Texto original a traduzir (pode ser uma página inteira).
         :param src_lang: Código ISO simples de origem (ex: 'en').
         :param tgt_lang: Código ISO simples de destino (ex: 'pt').
-        :return: Texto traduzido.
+        :return: Texto traduzido (lotes reunidos na ordem original).
         """
         text = text.strip()
         if not text:
@@ -112,25 +171,16 @@ class NLLBBackend:
         src_nllb = self.LANG_MAP.get(src_lang, "eng_Latn")
         tgt_nllb = self.LANG_MAP.get(tgt_lang, "por_Latn")
 
+        sentences = self._split_sentences(text)
+        if not sentences:
+            return ""
+        batches = self._batch_sentences(sentences)
+
         try:
-            # O NLLB requer que mudemos a lingua fonte no tokenizer antes
-            self._tokenizer.src_lang = src_nllb
-            
-            inputs = self._tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
-            inputs = {k: v.to(self._device) for k, v in inputs.items()}
-            
-            # Obtém o token ID de idioma destino corretamente para o NLLB
-            forced_bos_token_id = self._tokenizer.convert_tokens_to_ids(tgt_nllb)
-            
-            outputs = self._model.generate(
-                **inputs,
-                forced_bos_token_id=forced_bos_token_id,
-                max_length=512
-            )
-            
-            translated_text = self._tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
-            return translated_text
-            
+            translated_batches = [
+                self._translate_one_batch(batch, src_nllb, tgt_nllb) for batch in batches
+            ]
+            return " ".join(translated_batches)
         except Exception as e:
             logger.error(f"Erro durante a inferência da tradução: {e}")
             raise RuntimeError(f"Erro na tradução: {e}") from e
