@@ -366,12 +366,12 @@ encadeamento (não continua narrando a próxima página).
 
 | Item | Status | Commit | Observações |
 |---|---|---|---|
-| WIP finalizado (seleção por fluxo + margem) | ⬜ | | |
-| Branch `feature/reliable-translation` criada | ⬜ | | |
-| Commit 1 — sort=True | ⬜ | | |
-| Commit 2 — NLLB chunking | ⬜ | | |
-| Commit 3 — cartão de tradução | ⬜ | | |
-| Commit 4 — traduzir página inteira | ⬜ | | |
-| Commit 5 — leitura contínua traduzida | ⬜ | | |
-| Suíte completa final | ⬜ | | |
+| WIP finalizado (seleção por fluxo + margem) | ✅ 2026-07-03 | `98d6be5` (em feature/graph-mvp, pushado) | Suíte 620 passed antes do commit |
+| Branch `feature/reliable-translation` criada | ✅ | a partir de `98d6be5` | Local, sem push ainda |
+| Commit 1 — sort=True | ✅ | `9cd2153` | Regressão do rodapé confirmada: teste FALHA com a ordenação antiga, passa com o fix |
+| Commit 2 — NLLB chunking | ✅ | `2c73e38` | +11 testes (split/batch puros + orquestração mockada) |
+| Commit 3 — cartão de tradução | ✅ | `c23e59c` | +5 testes qtbot (inclui escape de HTML); _translation_msg removido |
+| Commit 4 — traduzir página inteira | ✅ | `83e4828` | +4 guardas estruturais (GUI não instancia na suíte) |
+| Commit 5 — leitura contínua traduzida | ✅ | `88a99e3` | +11 guardas estruturais; regressão dos anteriores verde |
+| Suíte completa final | ✅ | — | **652 passed** (620 baseline + 32 novos) |
 | Validação manual | ⬜ | | Requer o usuário — ver Seção 8.3 |
