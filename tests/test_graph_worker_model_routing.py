@@ -1,7 +1,8 @@
 """Roteamento de modelo por tarefa no GraphWorker (Sprint A3, revisão de
 engenharia 2026-07-05 §1.3): refino de conceitos do grafo é tarefa
-rápida/estruturada e deve preferir o modelo leve quando não há override
-explícito em config (``graph.llm_model``).
+rápida/estruturada e usa o modelo "fast" do tier (gemma4:e4b, com thinking
+desligado no ConceptExtractor) quando não há override explícito em config
+(``graph.llm_model``).
 """
 from unittest.mock import patch
 
@@ -34,7 +35,7 @@ def test_annotation_task_prefers_fast_model_without_config_override(tmp_path):
          patch("urllib.request.urlopen", side_effect=OSError("sem rede no teste")):
         GraphWorker(task, db, rag_engine=None, cfg=cfg)._execute()
 
-    assert captured["preferred"] == "gemma3:4b"
+    assert captured["preferred"] == "gemma4:e4b"
 
 
 def test_annotation_task_respects_explicit_config_override(tmp_path):

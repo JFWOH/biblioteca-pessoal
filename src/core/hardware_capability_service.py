@@ -105,10 +105,12 @@ class HardwareCapabilityService:
     EMBED_MODEL = "bge-m3"
 
     # Tarefas rápidas/estruturadas (flashcard P/R, refino de conceitos do
-    # grafo) não precisam do raciocínio profundo do gemma4 — um modelo leve
-    # não-thinking responde em 1-3s em vez de dezenas de segundos (revisão
-    # de engenharia 2026-07-05, §1.3).
-    FAST_TASK_MODEL = "gemma3:4b"
+    # grafo) não precisam do raciocínio do gemma4 — o custo dominante é a
+    # fase de thinking, não o tamanho do modelo (benchmark 2026-07-06:
+    # e4b 9,8s→3,3s com think=false; 12b 65s→3,9s; gemma3:4b 3,3s).
+    # Mantém a MESMA família do padrão do app (e4b roda em qualquer tier)
+    # e os chamadores desligam o thinking via ollama_client (think=False).
+    FAST_TASK_MODEL = "gemma4:e4b"
 
     def get_model_for_task(self, task: str) -> str:
         """Modelo preferido por perfil de tarefa: ``"fast"`` ou ``"deep"``.

@@ -43,6 +43,15 @@ class TestBuildChatPayload:
         assert payload["options"]["repeat_penalty"] == 1.15
         assert payload["options"]["repeat_last_n"] == 512
 
+    def test_think_false_included_default_absent(self):
+        """think=False desliga o raciocínio (tarefas estruturadas); None
+        não envia o campo — o default do modelo prevalece (tarefas profundas)."""
+        with_think = ollama_client.build_chat_payload(
+            "gemma4:e4b", [], think=False)
+        assert with_think["think"] is False
+        default = ollama_client.build_chat_payload("gemma4:e4b", [])
+        assert "think" not in default
+
 
 class TestChatOnce:
     def test_returns_stripped_content(self):
@@ -74,11 +83,12 @@ class TestChatOnce:
                 "http://localhost:11434/", "gemma4:e4b",
                 [{"role": "user", "content": "oi"}],
                 response_format="json", temperature=0.1, num_predict=512,
-                timeout_s=20)
+                timeout_s=20, think=False)
 
         assert captured["url"] == "http://localhost:11434/api/chat"
         assert captured["payload"]["stream"] is False
         assert captured["payload"]["format"] == "json"
+        assert captured["payload"]["think"] is False
         assert captured["payload"]["options"]["temperature"] == 0.1
         assert captured["payload"]["options"]["num_predict"] == 512
         assert captured["timeout"] == 20

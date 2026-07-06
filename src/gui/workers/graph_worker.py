@@ -70,8 +70,8 @@ class GraphWorker(QThread):
         if needs_llm:
             # Resolução na thread do worker (rede) — nunca na thread da GUI.
             # Refino de conceitos é tarefa rápida/estruturada (§1.3 da revisão
-            # de engenharia): sem override explícito em config, prefere o
-            # modelo leve não-thinking em vez do gemma4 de raciocínio.
+            # de engenharia): usa o modelo "fast" do tier; o thinking é
+            # desligado dentro do ConceptExtractor (think=False no chat).
             from src.core.hardware_capability_service import HardwareCapabilityService
             preferred = self._cfg.get("llm_model") or HardwareCapabilityService().get_model_for_task("fast")
             llm_model = resolve_llm_model(

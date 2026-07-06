@@ -110,8 +110,9 @@ def test_worker_empty_text_fails_fast(qtbot):
 
 
 def test_worker_without_explicit_model_prefers_fast_task_model(qtbot, monkeypatch):
-    """Sem model= explícito, o worker roteia para o modelo leve (§1.3 da revisão:
-    flashcard P/R é tarefa rápida/estruturada, não precisa do gemma4 thinking)."""
+    """Sem model= explícito, o worker roteia para o modelo "fast" do tier e
+    desliga o thinking (§1.3 da revisão: flashcard P/R é tarefa estruturada;
+    benchmark 2026-07-06: e4b 9,8s → 3,3s com think=false)."""
     from src.gui.workers.flashcard_qa_worker import FlashcardQAWorker
 
     captured = {}
@@ -120,16 +121,21 @@ def test_worker_without_explicit_model_prefers_fast_task_model(qtbot, monkeypatc
         captured["preferred"] = preferred
         return preferred or "gemma4:e4b"
 
+    def fake_urlopen(req, timeout=0):
+        captured["payload"] = json.loads(req.data.decode("utf-8"))
+        body = json.dumps({"message": {
+            "content": '{"pergunta": "Q?", "resposta": "A."}'}}).encode()
+        return _FakeResp(body)
+
     monkeypatch.setattr(
         "src.core.graph.concept_extractor.resolve_llm_model", fake_resolve)
-    monkeypatch.setattr(
-        "urllib.request.urlopen",
-        _fake_urlopen('{"pergunta": "Q?", "resposta": "A."}'))
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
 
     w = FlashcardQAWorker("insight sobre X")  # model=None (default)
     got = []
     w.generated.connect(lambda f, b: got.append((f, b)))
     w.run()
 
-    assert captured["preferred"] == "gemma3:4b"
+    assert captured["preferred"] == "gemma4:e4b"
+    assert captured["payload"]["think"] is False
     assert got == [("Q?", "A.")]

@@ -176,11 +176,13 @@ class ConceptExtractor:
             max_concepts=max_concepts,
         )
         from src.core import ollama_client
+        # think=False: o refino só FILTRA/REPONDERA candidatos já extraídos —
+        # tarefa estruturada, sem raciocínio (benchmark 2026-07-06).
         content = ollama_client.chat_once(
             self.ollama_url, self.llm_model,
             [{"role": "user", "content": prompt}],
             response_format="json", temperature=0.1, num_predict=512,
-            timeout_s=self.llm_timeout_s,
+            timeout_s=self.llm_timeout_s, think=False,
         )
         # Saneamento (padrão do proactive_worker): pega do primeiro { ao último }.
         start, end = content.find("{"), content.rfind("}")
