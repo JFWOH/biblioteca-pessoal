@@ -1212,32 +1212,37 @@ class MainWindow(QMainWindow):
             parent=self,
         )
 
-        # Feedback visível: a geração pode levar alguns segundos; o diálogo de
-        # progresso (indeterminado, com Cancelar) deixa claro que algo acontece.
-        from PyQt6.QtWidgets import QProgressDialog
-        progress = QProgressDialog("🃏 Gerando flashcard (pergunta/resposta)…",
-                                   "Cancelar", 0, 0, self)
+        # Feedback visível: a geração pode levar alguns segundos; o cartão
+        # padronizado de resposta de IA (B1) num diálogo leve substitui o
+        # antigo QProgressDialog — mesmo visual das demais features de IA.
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout
+        from src.gui.widgets.ai_response_card import AIResponseCard
+        progress = QDialog(self)
         progress.setWindowTitle("Flashcard")
-        progress.setMinimumDuration(0)
-        progress.setAutoClose(False)
-        progress.canceled.connect(self._flashcard_qa_worker.cancel)
+        progress.setFixedWidth(380)
+        progress.setStyleSheet("QDialog { background-color: #0f1115; }")
+        card = AIResponseCard(progress)
+        card.start("🃏 Gerando flashcard (pergunta/resposta)…")
+        lay = QVBoxLayout(progress)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.addWidget(card)
+
+        def _on_stop():
+            self._flashcard_qa_worker.cancel()
+            progress.close()
+            self._statusbar.showMessage("🃏 Geração de flashcard cancelada.", 3000)
+
+        card.stop_requested.connect(_on_stop)
         progress.show()
         self._flashcard_qa_progress = progress
 
-        def _close_progress():
-            try:
-                progress.canceled.disconnect(self._flashcard_qa_worker.cancel)
-            except (TypeError, RuntimeError):
-                pass
-            progress.close()
-
         def _on_generated(front: str, back: str):
-            _close_progress()
+            progress.close()
             self._statusbar.clearMessage()
             self._open_anki_export_dialog(front=front, back=back)
 
         def _on_failed(reason: str):
-            _close_progress()
+            progress.close()
             logger.warning(f"Flashcard P/R indisponível ({reason}); usando fallback.")
             self._statusbar.showMessage(
                 "⚠️ Sem LLM agora — complete a pergunta manualmente.", 5000)

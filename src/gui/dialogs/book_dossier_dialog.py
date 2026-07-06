@@ -22,6 +22,7 @@ from src.core.book_dossier import (
     save_synthesis_cache,
 )
 from src.core.graph.graph_store import GraphStore
+from src.gui.widgets.ai_response_card import AIResponseCard
 
 _HEADER_STYLE = "color: #71717a; font-size: 11px; font-weight: 600;"
 _BODY_STYLE = "color: #cbd5e1; font-size: 12px;"
@@ -41,7 +42,7 @@ class BookDossierDialog(QDialog):
         self._ollama_url = ollama_url
         self._model = model
         self._worker = None
-        self._synthesis_label: QLabel | None = None
+        self._synthesis_card: AIResponseCard | None = None
 
         self.setWindowTitle("📋 Dossiê do Livro")
         self.resize(560, 680)
@@ -147,16 +148,13 @@ class BookDossierDialog(QDialog):
 
     def _build_synthesis(self, lay: QVBoxLayout):
         lay.addWidget(self._label("🤖 Síntese", _HEADER_STYLE))
-        self._synthesis_label = self._label(
-            "Gerando síntese…", _BODY_STYLE + " font-style: italic;")
-        card = QFrame()
-        card.setStyleSheet(
-            "QFrame { background-color: #20242d; border: 1px solid #2d333f;"
-            " border-radius: 8px; }")
-        card_lay = QVBoxLayout(card)
-        card_lay.setContentsMargins(12, 10, 12, 10)
-        card_lay.addWidget(self._synthesis_label)
-        lay.addWidget(card)
+        # Cartão padronizado de resposta de IA (B1): estados pensando →
+        # concluído/erro, com Parar e Tentar de novo — substitui o label
+        # inline que ficava mudo em erro e não oferecia retry.
+        self._synthesis_card = AIResponseCard()
+        self._synthesis_card.stop_requested.connect(self._on_synthesis_stop)
+        self._synthesis_card.retry_requested.connect(self._start_synthesis)
+        lay.addWidget(self._synthesis_card)
 
     def _build_concepts(self, lay: QVBoxLayout):
         lay.addWidget(self._label("💡 Mapa conceitual", _HEADER_STYLE))
@@ -207,16 +205,19 @@ class BookDossierDialog(QDialog):
 
     def _start_synthesis(self):
         prompt = build_dossier_synthesis_prompt(self._data)
-        if not prompt or self._synthesis_label is None:
+        if not prompt or self._synthesis_card is None:
+            return
+        if self._worker is not None and self._worker.isRunning():
             return
 
         graph_store = GraphStore(self._db)
         cached = get_cached_synthesis(self._db, graph_store, self._book_id)
         if cached:
-            self._synthesis_label.setStyleSheet(_BODY_STYLE)
-            self._synthesis_label.setText(cached)
+            self._synthesis_card.set_text(cached)
+            self._synthesis_card.finish()
             return
 
+        self._synthesis_card.start("Gerando síntese…")
         from src.gui.workers.dossier_synthesis_worker import DossierSynthesisWorker
         self._worker = DossierSynthesisWorker(
             prompt, ollama_url=self._ollama_url, model=self._model, parent=self)
@@ -225,14 +226,20 @@ class BookDossierDialog(QDialog):
         self._worker.start()
 
     def _on_synthesis_ready(self, text: str):
-        if self._synthesis_label is not None:
-            self._synthesis_label.setStyleSheet(_BODY_STYLE)
-            self._synthesis_label.setText(text)
+        if self._synthesis_card is not None:
+            self._synthesis_card.set_text(text)
+            self._synthesis_card.finish()
         save_synthesis_cache(self._db, GraphStore(self._db), self._book_id, text)
 
     def _on_synthesis_failed(self, _reason: str):
-        if self._synthesis_label is not None:
-            self._synthesis_label.setText("Síntese indisponível (IA offline).")
+        if self._synthesis_card is not None:
+            self._synthesis_card.fail("Síntese indisponível (IA offline).")
+
+    def _on_synthesis_stop(self):
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.cancel()
+        if self._synthesis_card is not None:
+            self._synthesis_card.fail("Síntese cancelada.")
 
     def _open_related(self, book_id: int):
         self.open_book_requested.emit(book_id)

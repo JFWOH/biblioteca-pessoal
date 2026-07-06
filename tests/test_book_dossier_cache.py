@@ -82,7 +82,8 @@ def test_dialog_uses_cache_and_skips_worker(qtbot, db, store, no_worker_start):
     dialog = BookDossierDialog(db, bid)
     qtbot.addWidget(dialog)
 
-    assert dialog._synthesis_label.text() == "Síntese pronta em cache."
+    assert dialog._synthesis_card.text() == "Síntese pronta em cache."
+    assert dialog._synthesis_card.state == dialog._synthesis_card.STATE_DONE
     assert no_worker_start == []
 
 
@@ -94,7 +95,8 @@ def test_dialog_starts_worker_on_cache_miss(qtbot, db, store, no_worker_start):
     dialog = BookDossierDialog(db, bid)
     qtbot.addWidget(dialog)
 
-    assert dialog._synthesis_label.text() == "Gerando síntese…"
+    assert "Gerando síntese" in dialog._synthesis_card.status_text()
+    assert dialog._synthesis_card.state == dialog._synthesis_card.STATE_THINKING
     assert len(no_worker_start) == 1
 
 

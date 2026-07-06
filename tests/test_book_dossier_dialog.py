@@ -50,8 +50,10 @@ def test_renders_sections_with_data(qtbot, db):
     assert "25%" in text and "(1 de 4)" in text             # confiança
     assert "A entropia sempre cresce." in text              # anotações
     assert "Página 2 de 4" in text                          # progresso
-    assert dialog._synthesis_label is not None
-    assert "Gerando síntese" in dialog._synthesis_label.text()
+    # _start_synthesis é patchado pelo fixture no_network: o cartão existe
+    # mas ainda não foi iniciado.
+    assert dialog._synthesis_card is not None
+    assert dialog._synthesis_card.state == dialog._synthesis_card.STATE_IDLE
 
 
 def test_empty_graph_shows_notice(qtbot, db):
@@ -60,7 +62,7 @@ def test_empty_graph_shows_notice(qtbot, db):
     qtbot.addWidget(dialog)
     text = _all_label_text(dialog)
     assert "ainda não foi processado pelo grafo" in text
-    assert dialog._synthesis_label is None  # sem seção de síntese
+    assert dialog._synthesis_card is None  # sem seção de síntese
 
 
 def test_missing_book(qtbot, db):
@@ -92,7 +94,9 @@ def test_synthesis_ready_updates_label(qtbot, db):
     qtbot.addWidget(dialog)
 
     dialog._on_synthesis_ready("Este livro trata de entropia.")
-    assert dialog._synthesis_label.text() == "Este livro trata de entropia."
+    assert dialog._synthesis_card.text() == "Este livro trata de entropia."
+    assert dialog._synthesis_card.state == dialog._synthesis_card.STATE_DONE
 
     dialog._on_synthesis_failed("timeout")
-    assert "indisponível" in dialog._synthesis_label.text()
+    assert "indisponível" in dialog._synthesis_card.status_text()
+    assert dialog._synthesis_card.state == dialog._synthesis_card.STATE_ERROR
