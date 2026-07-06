@@ -789,6 +789,15 @@ class RAGPanel(QWidget):
         sb = self._response_area.verticalScrollBar()
         sb.setValue(sb.maximum())
 
+    def on_status_updated(self, status: str) -> None:
+        """Atualiza o estado efêmero da geração (raciocínio/escrita).
+
+        Vem do stream do modelo thinking via RAGWorker.status_updated; usa o
+        mesmo label do "Consultando…" e some junto com ele ao fim da geração.
+        """
+        if self._is_generating and status:
+            self._gen_status.setText(status)
+
     def on_token_received(self, token: str) -> None:
         """Acrescenta um token à área de resposta (streaming)."""
         cursor = self._response_area.textCursor()

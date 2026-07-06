@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import time
 import uuid
 from typing import List, Dict, Any, Optional, Generator
 
@@ -50,6 +51,50 @@ PORTUGUESE_STOPWORDS = {
 # AgentState.continuation_count) — uma resposta longa pode precisar de uma
 # retomada em cada um dos dois pontos.
 _MAX_CONTINUATIONS = 2
+
+
+class _ThinkingStatusTracker:
+    """Feedback de raciocínio dos modelos thinking (gemma4) durante o stream.
+
+    Modelos thinking gastam dezenas de segundos emitindo ``message.thinking``
+    antes do primeiro token de ``content`` — janela em que a UI ficava muda e
+    parecia travada. O tracker converte esses chunks num status legível
+    ("Raciocinando… Ns", com throttle de 1s) entregue via callback puro
+    (ADR-006: nenhum PyQt6 aqui; a GUI decide como exibir).
+    """
+
+    _THROTTLE_S = 1.0
+
+    def __init__(self, status_callback: Optional[callable],
+                 trace_logger: Optional[TraceLogger] = None,
+                 round_num: int = 0) -> None:
+        self._cb = status_callback
+        self._trace = trace_logger
+        self._round = round_num
+        self._started = time.monotonic()
+        self._last_emit = 0.0
+        self._announced = False
+
+    def on_chunk(self, msg: dict) -> None:
+        """Processa um chunk do stream; emite status se houver thinking."""
+        if not msg.get("thinking"):
+            return
+        if not self._announced:
+            self._announced = True
+            if self._trace:
+                self._trace.emit("thinking_started", step=self._round,
+                                 round_num=self._round)
+        if not self._cb:
+            return
+        now = time.monotonic()
+        if now - self._last_emit >= self._THROTTLE_S:
+            self._last_emit = now
+            self._cb(f"🤔 Raciocinando… {int(now - self._started)}s")
+
+    def on_content_started(self) -> None:
+        """Primeiro token de content chegou — troca o status para escrita."""
+        if self._cb:
+            self._cb("✍️ Escrevendo resposta…")
 
 
 class Orchestrator:
@@ -809,8 +854,14 @@ class Orchestrator:
         n_context: Optional[int] = None,
         book_id: Optional[int] = None,
         ui_mutation_callback: Optional[callable] = None,
+        status_callback: Optional[callable] = None,
     ) -> Generator[str, None, None]:
-        """Pipeline RAG Agentic com streaming de tokens e controle por AgentState + PolicyEngine."""
+        """Pipeline RAG Agentic com streaming de tokens e controle por AgentState + PolicyEngine.
+
+        ``status_callback(str)`` recebe atualizações efêmeras de estado
+        (raciocínio do modelo thinking, início da escrita) que NÃO fazem
+        parte da resposta — a GUI as exibe fora do texto do chat.
+        """
         # Limpa qualquer sinal de cancelamento remanescente de uma operação anterior.
         # O engine é singleton; sem este reset, um único "Stop" deixaria toda query
         # seguinte abortando imediatamente até reiniciar o aplicativo.
@@ -904,6 +955,8 @@ class Orchestrator:
             tool_calls: list = []
             done_reason = ""
             answer_streaming_started = False
+            thinking = _ThinkingStatusTracker(status_callback, trace_logger,
+                                              round_num=state.current_round)
             try:
                 with self._call_chat_api(messages, stream=True, temperature=0.1) as resp:
                     for line in resp:
@@ -919,6 +972,7 @@ class Orchestrator:
                             continue
 
                         msg = chunk.get("message", {}) or {}
+                        thinking.on_chunk(msg)
                         if msg.get("tool_calls"):
                             tool_calls.extend(msg["tool_calls"])
 
@@ -928,6 +982,7 @@ class Orchestrator:
                             if not answer_streaming_started:
                                 trace_logger.emit("final_answer_started", step=state.current_round, round_num=state.current_round)
                                 answer_streaming_started = True
+                                thinking.on_content_started()
                             content_parts.append(token)
                             answer_acc.append(token)
                             yield token
@@ -1032,6 +1087,9 @@ class Orchestrator:
         yield "\n[⚠️ Orçamento do agente esgotado — gerando resposta final...]\n"
         trace_logger.emit("early_exit", step=state.current_round, reason="max_rounds_reached", round_num=state.current_round)
         trace_logger.emit("final_answer_started", step=state.current_round, round_num=state.current_round)
+        thinking = _ThinkingStatusTracker(status_callback, trace_logger,
+                                          round_num=state.current_round)
+        fallback_content_started = False
         try:
             with self._call_chat_api(messages, stream=True) as resp:
                 accumulated_content = []
@@ -1044,8 +1102,13 @@ class Orchestrator:
                         continue
                     try:
                         chunk = json.loads(line.decode("utf-8"))
-                        token = chunk.get("message", {}).get("content", "")
+                        msg = chunk.get("message", {}) or {}
+                        thinking.on_chunk(msg)
+                        token = msg.get("content", "")
                         if token:
+                            if not fallback_content_started:
+                                fallback_content_started = True
+                                thinking.on_content_started()
                             accumulated_content.append(token)
                             yield token
                         if chunk.get("done", False):
@@ -1057,16 +1120,27 @@ class Orchestrator:
                                 messages.append({"role": "assistant", "content": "".join(accumulated_content)})
                                 messages.append({"role": "user", "content": "Continue exatamente de onde parou."})
                                 try:
+                                    thinking_cont = _ThinkingStatusTracker(
+                                        status_callback, trace_logger,
+                                        round_num=state.current_round)
+                                    cont_started = False
                                     with self._call_chat_api(messages, stream=True) as resp_cont:
                                         for line_cont in resp_cont:
-                                            if not line_cont: continue
+                                            if not line_cont:
+                                                continue
                                             try:
                                                 c = json.loads(line_cont.decode("utf-8"))
-                                                t = c.get("message", {}).get("content", "")
+                                                m = c.get("message", {}) or {}
+                                                thinking_cont.on_chunk(m)
+                                                t = m.get("content", "")
                                                 if t:
+                                                    if not cont_started:
+                                                        cont_started = True
+                                                        thinking_cont.on_content_started()
                                                     accumulated_content.append(t)
                                                     yield t
-                                            except json.JSONDecodeError: continue
+                                            except json.JSONDecodeError:
+                                                continue
                                 except Exception:
                                     pass
                             if hasattr(self.engine, "append_chat_turn"):
