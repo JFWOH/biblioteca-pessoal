@@ -679,7 +679,12 @@ class Orchestrator:
         try:
             if fn_name == "search_web":
                 out = self.execute_search_web(args.get("query", ""), state, trace_logger)
-                return json.dumps(out.get("data", []), ensure_ascii=False)
+                # Demarcação anti-injeção (§2.2): o PolicyEngine já bloqueia
+                # mutações de UI por proveniência web; os delimitadores fecham
+                # a outra metade — o system prompt instrui o modelo a tratar
+                # este bloco como dado não confiável, nunca como instrução.
+                payload = json.dumps(out.get("data", []), ensure_ascii=False)
+                return f"<web-result>\n{payload}\n</web-result>"
 
             elif fn_name == "vector_search":
                 bid = args.get("book_id")
