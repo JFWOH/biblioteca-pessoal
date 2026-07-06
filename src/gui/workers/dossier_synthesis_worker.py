@@ -46,10 +46,12 @@ class DossierSynthesisWorker(QThread):
                 self.failed.emit("nenhum modelo do Ollama disponível")
                 return
 
+            from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
             payload = {
                 "model": model,
                 "messages": [{"role": "user", "content": self._prompt}],
                 "stream": False,
+                "keep_alive": OLLAMA_KEEP_ALIVE,
                 # gemma4 é modelo de raciocínio: consome tokens "pensando" antes
                 # do content — teto folgado evita resposta vazia. Nunca think=False.
                 "options": {"num_predict": 4096, "temperature": 0.2},

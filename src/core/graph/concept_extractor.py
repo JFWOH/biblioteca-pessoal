@@ -175,11 +175,13 @@ class ConceptExtractor:
             excerpt=text[:1200],
             max_concepts=max_concepts,
         )
+        from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
         payload = {
             "model": self.llm_model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
             "format": "json",
+            "keep_alive": OLLAMA_KEEP_ALIVE,
             "options": {"num_predict": 512, "temperature": 0.1},
         }
         req = urllib.request.Request(

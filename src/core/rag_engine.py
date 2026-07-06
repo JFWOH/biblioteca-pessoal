@@ -436,9 +436,11 @@ class RAGEngine:
                 self._embed_model = exact_embed
 
         # Tenta o endpoint novo: /api/embed
+        from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
         payload = json.dumps({
             "model": self._embed_model,
             "input": text,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
         }).encode()
         req = urllib.request.Request(
             f"{self._ollama_url}/api/embed",
@@ -459,6 +461,7 @@ class RAGEngine:
                 payload_legacy = json.dumps({
                     "model": self._embed_model,
                     "prompt": text,
+                    "keep_alive": OLLAMA_KEEP_ALIVE,
                 }).encode()
                 req_legacy = urllib.request.Request(
                     f"{self._ollama_url}/api/embeddings",
@@ -506,9 +509,11 @@ class RAGEngine:
             if exact_embed:
                 self._embed_model = exact_embed
 
+        from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
         payload = json.dumps({
             "model": self._embed_model,
             "input": texts,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
         }).encode()
 
         for attempt in range(1, _EMBED_MAX_ATTEMPTS + 1):

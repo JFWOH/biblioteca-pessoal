@@ -49,11 +49,13 @@ class FlashcardQAWorker(QThread):
                 self.failed.emit("nenhum modelo do Ollama disponível")
                 return
 
+            from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
             payload = {
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "stream": False,
                 "format": "json",
+                "keep_alive": OLLAMA_KEEP_ALIVE,
                 "options": {"num_predict": 512, "temperature": 0.2},
             }
             req = urllib.request.Request(

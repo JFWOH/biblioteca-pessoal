@@ -572,11 +572,13 @@ class Orchestrator:
         if temperature is not None:
             options["temperature"] = temperature
 
+        from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
         payload_dict = {
             "model": self.engine._llm_model.strip(),
             "messages": msgs,
             "stream": stream,
             "tools": _TOOLS_DEF,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
             "options": options,
         }
 

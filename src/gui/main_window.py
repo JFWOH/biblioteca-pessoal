@@ -837,6 +837,22 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
             self._rag_engine = None
 
+        # Warmup dos modelos alguns segundos após a UI abrir (não compete com
+        # o startup). Gracioso: Ollama fora do ar vira log debug, nunca erro.
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(3000, self._start_llm_warmup)
+
+    def _start_llm_warmup(self) -> None:
+        """Pré-carrega LLM e embeddings na VRAM para a 1ª ação de IA ser quente."""
+        from src.gui.workers.warmup_worker import WarmupWorker
+        self._warmup_worker = WarmupWorker(
+            ollama_url=self._config.get("rag.ollama_url", "http://localhost:11434"),
+            llm_model=self._config.get("rag.llm_model", "gemma4:e4b"),
+            embed_model=self._config.get("rag.embed_model", "bge-m3"),
+            parent=self,
+        )
+        self._warmup_worker.start()
+
     def _check_ollama_status(self) -> None:
         """Verifica status do Ollama, aciona o wizard se ausente, e atualiza o painel RAG."""
         if self._rag_engine is None:

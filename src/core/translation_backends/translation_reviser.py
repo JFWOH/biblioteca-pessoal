@@ -55,10 +55,12 @@ def revise_translation(original: str, draft: str,
         return None
 
     prompt = _REVISION_PROMPT.format(original=original[:6000], draft=draft[:6000])
+    from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
+        "keep_alive": OLLAMA_KEEP_ALIVE,
         "options": {"temperature": 0.2, "num_predict": 2048},
     }
     try:
