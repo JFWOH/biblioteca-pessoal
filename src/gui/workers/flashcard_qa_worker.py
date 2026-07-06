@@ -40,9 +40,14 @@ class FlashcardQAWorker(QThread):
 
             model = self._model
             if not model:
-                # Resolução na thread do worker (rede) — mesma preferência do grafo.
+                # Resolução na thread do worker (rede). Flashcard P/R é tarefa
+                # rápida/estruturada (§1.3 da revisão de engenharia): prefere
+                # o modelo leve não-thinking em vez do gemma4 de raciocínio.
                 from src.core.graph.concept_extractor import resolve_llm_model
-                model = resolve_llm_model(self._ollama_url)
+                from src.core.hardware_capability_service import HardwareCapabilityService
+                model = resolve_llm_model(
+                    self._ollama_url,
+                    preferred=HardwareCapabilityService().get_model_for_task("fast"))
             if not model:
                 self.failed.emit("nenhum modelo do Ollama disponível")
                 return

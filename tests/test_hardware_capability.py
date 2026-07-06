@@ -54,3 +54,18 @@ def test_recommended_llm_model_by_tier():
 
 def test_embed_model_constant():
     assert HardwareCapabilityService.EMBED_MODEL == "bge-m3"
+
+
+def test_get_model_for_task_fast_is_light_non_thinking():
+    """Tarefas rápidas/estruturadas preferem um modelo leve (§1.3 da revisão)."""
+    svc = HardwareCapabilityService()
+    assert svc.get_model_for_task("fast") == "gemma3:4b"
+
+
+def test_get_model_for_task_deep_matches_recommended_llm_model():
+    svc = HardwareCapabilityService()
+    svc._cached_tier = "Tier A"
+    assert svc.get_model_for_task("deep") == svc.get_recommended_llm_model() == "gemma4:12b"
+
+    svc._cached_tier = "Tier B"
+    assert svc.get_model_for_task("deep") == svc.get_recommended_llm_model() == "gemma4:e4b"

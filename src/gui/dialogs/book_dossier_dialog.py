@@ -18,6 +18,8 @@ from src.core.book_dossier import (
     build_dossier_data,
     build_dossier_synthesis_prompt,
     format_coverage_label,
+    get_cached_synthesis,
+    save_synthesis_cache,
 )
 from src.core.graph.graph_store import GraphStore
 
@@ -207,6 +209,14 @@ class BookDossierDialog(QDialog):
         prompt = build_dossier_synthesis_prompt(self._data)
         if not prompt or self._synthesis_label is None:
             return
+
+        graph_store = GraphStore(self._db)
+        cached = get_cached_synthesis(self._db, graph_store, self._book_id)
+        if cached:
+            self._synthesis_label.setStyleSheet(_BODY_STYLE)
+            self._synthesis_label.setText(cached)
+            return
+
         from src.gui.workers.dossier_synthesis_worker import DossierSynthesisWorker
         self._worker = DossierSynthesisWorker(
             prompt, ollama_url=self._ollama_url, model=self._model, parent=self)
@@ -218,6 +228,7 @@ class BookDossierDialog(QDialog):
         if self._synthesis_label is not None:
             self._synthesis_label.setStyleSheet(_BODY_STYLE)
             self._synthesis_label.setText(text)
+        save_synthesis_cache(self._db, GraphStore(self._db), self._book_id, text)
 
     def _on_synthesis_failed(self, _reason: str):
         if self._synthesis_label is not None:

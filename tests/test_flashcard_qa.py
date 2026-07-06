@@ -107,3 +107,29 @@ def test_worker_empty_text_fails_fast(qtbot):
     w.failed.connect(fails.append)
     w.run()
     assert fails == ["insight vazio"]
+
+
+def test_worker_without_explicit_model_prefers_fast_task_model(qtbot, monkeypatch):
+    """Sem model= explícito, o worker roteia para o modelo leve (§1.3 da revisão:
+    flashcard P/R é tarefa rápida/estruturada, não precisa do gemma4 thinking)."""
+    from src.gui.workers.flashcard_qa_worker import FlashcardQAWorker
+
+    captured = {}
+
+    def fake_resolve(url, preferred=None, timeout=3):
+        captured["preferred"] = preferred
+        return preferred or "gemma4:e4b"
+
+    monkeypatch.setattr(
+        "src.core.graph.concept_extractor.resolve_llm_model", fake_resolve)
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _fake_urlopen('{"pergunta": "Q?", "resposta": "A."}'))
+
+    w = FlashcardQAWorker("insight sobre X")  # model=None (default)
+    got = []
+    w.generated.connect(lambda f, b: got.append((f, b)))
+    w.run()
+
+    assert captured["preferred"] == "gemma3:4b"
+    assert got == [("Q?", "A.")]

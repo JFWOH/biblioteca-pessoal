@@ -103,3 +103,24 @@ class HardwareCapabilityService:
 
     # Modelo de embeddings do RAG — obrigatório para indexação/busca vetorial.
     EMBED_MODEL = "bge-m3"
+
+    # Tarefas rápidas/estruturadas (flashcard P/R, refino de conceitos do
+    # grafo) não precisam do raciocínio profundo do gemma4 — um modelo leve
+    # não-thinking responde em 1-3s em vez de dezenas de segundos (revisão
+    # de engenharia 2026-07-05, §1.3).
+    FAST_TASK_MODEL = "gemma3:4b"
+
+    def get_model_for_task(self, task: str) -> str:
+        """Modelo preferido por perfil de tarefa: ``"fast"`` ou ``"deep"``.
+
+        ``"deep"`` (padrão) cobre ações que exigem raciocínio — explicar
+        página, síntese do dossiê, chat RAG — e usa o mesmo modelo do
+        assistente principal (por tier de hardware). ``"fast"`` cobre ações
+        rápidas/estruturadas. Chamadores com seu próprio mecanismo de
+        override (ex.: config ``graph.llm_model``, parâmetro ``model=`` do
+        worker) continuam tendo prioridade — isto só decide o padrão
+        quando nada foi configurado explicitamente.
+        """
+        if task == "fast":
+            return self.FAST_TASK_MODEL
+        return self.get_recommended_llm_model()
