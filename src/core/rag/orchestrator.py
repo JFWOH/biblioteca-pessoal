@@ -44,9 +44,17 @@ PORTUGUESE_STOPWORDS = {
 }
 
 
+# Nº máximo de vezes que uma resposta truncada por num_predict (done_reason
+# "length") é retomada com "Continue exatamente de onde parou.". Compartilhado
+# entre o loop principal e o fallback de final de orçamento (mesmo contador em
+# AgentState.continuation_count) — uma resposta longa pode precisar de uma
+# retomada em cada um dos dois pontos.
+_MAX_CONTINUATIONS = 2
+
+
 class Orchestrator:
     """Orquestrador do loop de agente RAG resiliente e tolerante a falhas.
-    
+
     Gerencia a execução de ferramentas com tratamento de exceções, fallbacks elegantes
     e heurísticas de encerramento precoce (Early-Exit).
     """
@@ -877,7 +885,12 @@ class Orchestrator:
         ]
 
         answer_acc: list[str] = []
-        state = AgentState(session_id=session_id, max_rounds=5, max_time_ms=25000)
+        # 25s (valor anterior) já era estourado por uma ÚNICA rodada de modelos
+        # locais de raciocínio (gemma4 gasta tokens "pensando" antes do
+        # content — uma explicação de página observada em produção levou 49s
+        # só na 1ª rodada). Orçamento maior evita que is_budget_ok() aborte a
+        # retomada de uma resposta truncada por comprimento no meio do caminho.
+        state = AgentState(session_id=session_id, max_rounds=5, max_time_ms=150000)
 
         while state.is_budget_ok():
             state.current_round += 1
@@ -935,7 +948,7 @@ class Orchestrator:
                     trace_logger.emit("final_answer_completed", step=state.current_round, round_num=state.current_round, payload={"length": len(content)})
 
                 # Tratamento de continuação (resposta truncada por limite de tokens)
-                if done_reason == "length" and getattr(state, "continuation_count", 0) < 1:
+                if done_reason == "length" and getattr(state, "continuation_count", 0) < _MAX_CONTINUATIONS:
                     state.continuation_count = getattr(state, "continuation_count", 0) + 1
                     messages.append({"role": "assistant", "content": content})
                     messages.append({"role": "user", "content": "Continue exatamente de onde parou."})
@@ -1010,7 +1023,11 @@ class Orchestrator:
 
             state.last_result_hash = digest
 
-        yield "\n[⚠️ Limite de rodadas de ferramentas atingido — gerando resposta final...]\n"
+        # Alcançado tanto por esgotar as rodadas de ferramentas quanto pelo
+        # orçamento de tempo — inclusive no meio de uma retomada de resposta
+        # truncada por comprimento (sem nenhuma ferramenta chamada). A mensagem
+        # não presume qual dos dois motivos ocorreu.
+        yield "\n[⚠️ Orçamento do agente esgotado — gerando resposta final...]\n"
         trace_logger.emit("early_exit", step=state.current_round, reason="max_rounds_reached", round_num=state.current_round)
         trace_logger.emit("final_answer_started", step=state.current_round, round_num=state.current_round)
         try:
@@ -1032,7 +1049,7 @@ class Orchestrator:
                         if chunk.get("done", False):
                             done_reason = chunk.get("done_reason", "")
                             trace_logger.emit("final_answer_completed", step=state.current_round, round_num=state.current_round)
-                            if done_reason == "length" and getattr(state, "continuation_count", 0) < 1:
+                            if done_reason == "length" and getattr(state, "continuation_count", 0) < _MAX_CONTINUATIONS:
                                 state.continuation_count = getattr(state, "continuation_count", 0) + 1
                                 yield "\n[⚠️ A resposta foi interrompida pelo limite de tokens. Retomando...]\n"
                                 messages.append({"role": "assistant", "content": "".join(accumulated_content)})
@@ -1044,7 +1061,9 @@ class Orchestrator:
                                             try:
                                                 c = json.loads(line_cont.decode("utf-8"))
                                                 t = c.get("message", {}).get("content", "")
-                                                if t: yield t
+                                                if t:
+                                                    accumulated_content.append(t)
+                                                    yield t
                                             except json.JSONDecodeError: continue
                                 except Exception:
                                     pass
