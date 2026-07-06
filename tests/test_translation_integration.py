@@ -4,7 +4,6 @@ Valida que o worker assíncrono dispara callbacks corretamente via Qt event loop
 usando backend mockado (sem download do modelo real).
 """
 import pytest
-from unittest.mock import MagicMock
 
 
 @pytest.mark.integration

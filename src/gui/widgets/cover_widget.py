@@ -1,8 +1,8 @@
 """Widget de capa de livro com efeitos visuais."""
 
 from PyQt6.QtWidgets import QLabel, QGraphicsDropShadowEffect
-from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QPixmap, QColor, QPainter, QLinearGradient, QBrush
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap, QColor
 
 
 class CoverWidget(QLabel):
@@ -19,12 +19,12 @@ class CoverWidget(QLabel):
         self._apply_default_style()
 
     def _apply_default_style(self):
-        self.setStyleSheet(f"""
-            QLabel {{
+        self.setStyleSheet("""
+            QLabel {
                 border-radius: 8px;
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                     stop:0 #312e81, stop:0.5 #1e1b4b, stop:1 #0f172a);
-            }}
+            }
         """)
 
     def set_cover(self, cover_path: str) -> bool:

@@ -1,6 +1,5 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-from src.core.rag.policy_engine import PolicyEngine
 from src.core.rag.agent_state import AgentState
 from src.core.rag.orchestrator import Orchestrator
 

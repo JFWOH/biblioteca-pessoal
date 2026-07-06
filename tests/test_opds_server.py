@@ -2,7 +2,6 @@ import pytest
 from fastapi.testclient import TestClient
 import os
 import tempfile
-from pathlib import Path
 from src.core.opds_server import app, db
 
 client = TestClient(app)

@@ -1,5 +1,4 @@
 import pytest
-from PyQt6.QtCore import Qt
 from src.gui.library_view import LibraryView
 
 @pytest.fixture

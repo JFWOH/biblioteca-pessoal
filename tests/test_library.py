@@ -1,6 +1,5 @@
 """Testes do módulo library (gerenciamento)."""
 
-from pathlib import Path
 
 import pytest
 

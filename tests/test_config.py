@@ -1,7 +1,6 @@
 """Testes do módulo de configurações."""
 
 import json
-from pathlib import Path
 import pytest
 
 from src.core.config import ConfigManager, DEFAULT_CONFIG

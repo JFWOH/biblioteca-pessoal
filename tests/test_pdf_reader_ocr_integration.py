@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from src.core.rag_engine import RAGEngine

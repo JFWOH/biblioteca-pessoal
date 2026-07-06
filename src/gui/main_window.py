@@ -6,7 +6,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QStackedWidget, QSplitter, QFileDialog, QMessageBox,
-    QStatusBar, QMenuBar, QApplication,
+    QStatusBar,
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QAction, QKeySequence
@@ -27,7 +27,6 @@ from src.gui.workers.metadata_worker import MetadataWorker
 from src.gui.workers.opds_worker import OPDSWorker
 from src.gui.workers.rag_worker import RAGWorker
 import os
-from PyQt6.QtGui import QPixmap
 from src.gui.widgets.stats_panel import StatsPanel
 from src.gui.widgets.rag_panel import RAGPanel
 from src.utils.constants import FILE_FILTER, DATA_DIR
@@ -704,7 +703,6 @@ class MainWindow(QMainWindow):
 
     def _add_book_to_collection(self, book_id: int):
         """Abre diálogo para adicionar livro a uma coleção."""
-        from src.gui.collection_dialog import AddToCollectionDialog
         dialog = AddToCollectionDialog(self._db, book_id, self)
         if dialog.exec():
             self._load_collections()
@@ -743,13 +741,9 @@ class MainWindow(QMainWindow):
         
     def _on_metadata_found(self, book_id: int, md: dict):
         # Atualiza apenas os campos importantes e ignora os vazios
-        updates = {}
-        if md.get("title"): updates["title"] = md["title"]
-        if md.get("author"): updates["author"] = md["author"]
-        if md.get("publisher"): updates["publisher"] = md["publisher"]
-        if md.get("published_year"): updates["published_year"] = md["published_year"]
-        if md.get("description"): updates["description"] = md["description"]
-        if md.get("isbn"): updates["isbn"] = md["isbn"]
+        fields = ("title", "author", "publisher", "published_year",
+                  "description", "isbn")
+        updates = {k: md[k] for k in fields if md.get(k)}
         
         if updates:
             self._db.update_book(book_id, **updates)

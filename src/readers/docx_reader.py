@@ -74,7 +74,6 @@ class DOCXReader(BaseReader):
 
     def get_toc(self) -> list[TOCEntry]:
         entries = []
-        para_idx = 0
         for i, p in enumerate(self._paragraphs):
             for level, tag in enumerate(["<h1>", "<h2>", "<h3>"]):
                 if p.startswith(tag):

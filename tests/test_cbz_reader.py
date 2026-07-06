@@ -3,7 +3,6 @@
 import zipfile
 from pathlib import Path
 
-import pytest
 
 from src.readers.cbz_reader import CBZReader
 from src.readers.reader_factory import create_reader

@@ -7,23 +7,30 @@ import numpy as np
 import time
 from unittest.mock import MagicMock, patch
 
-from src.core.tts.tts_router import TTSRouter
 from src.core.tts.kokoro_provider import KokoroProvider
 from src.core.tts.piper_provider import PiperProvider
 from src.core.audio.continuous_player import ContinuousAudioPlayer
-from src.core.tts.voice_profile import VoiceProfile, NarrationRole
 
 try:
-    import kokoro
+    import kokoro  # noqa: F401 — só testa disponibilidade
     HAS_KOKORO = True
 except ImportError:
     HAS_KOKORO = False
 
 try:
-    import piper
+    import piper  # noqa: F401 — só testa disponibilidade
     HAS_PIPER = True
 except ImportError:
     HAS_PIPER = False
+
+# KokoroProvider() exige os ARQUIVOS do modelo no cache HF local (não basta a
+# lib instalada) — numa máquina limpa/CI o construtor levanta
+# TTSProviderUnavailable. Testes que instanciam o provider real pulam sem cache.
+try:
+    from src.core.tts.kokoro_provider import check_kokoro_cache_materialized
+    KOKORO_MODEL_CACHED = check_kokoro_cache_materialized()
+except Exception:
+    KOKORO_MODEL_CACHED = False
 
 
 
@@ -88,7 +95,8 @@ class TestTTSIntegrationOptimizations:
             provider._synthesize_python("Olá novamente", voice_id="pt_BR-faber-medium", rate=1.0, volume=1.0)
             assert mock_load.call_count == 1
 
-    @pytest.mark.skipif(not (HAS_KOKORO and HAS_PIPER), reason="kokoro and/or piper library not installed")
+    @pytest.mark.skipif(not (HAS_KOKORO and HAS_PIPER and KOKORO_MODEL_CACHED),
+                        reason="kokoro/piper não instalados ou modelo Kokoro fora do cache HF")
     def test_provider_format_metadata(self):
         """Test that Kokoro and Piper providers expose format properties correctly."""
         kokoro = KokoroProvider()
@@ -102,7 +110,8 @@ class TestTTSIntegrationOptimizations:
         assert piper.dtype == 'int16'
         assert piper.channels == 1
 
-    @pytest.mark.skipif(not HAS_KOKORO, reason="kokoro library not installed")
+    @pytest.mark.skipif(not (HAS_KOKORO and KOKORO_MODEL_CACHED),
+                        reason="kokoro não instalado ou modelo fora do cache HF")
     def test_kokoro_streaming_generator(self):
         """Test that KokoroProvider's synthesize_stream yields segments correctly."""
         provider = KokoroProvider()

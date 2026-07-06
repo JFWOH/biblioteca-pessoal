@@ -776,13 +776,17 @@ class LibraryDB:
                      author=None) -> list[dict]:
         conds, params = [], []
         if format:
-            conds.append("file_format = ?"); params.append(format)
+            conds.append("file_format = ?")
+            params.append(format)
         if status:
-            conds.append("read_status = ?"); params.append(status)
+            conds.append("read_status = ?")
+            params.append(status)
         if min_rating is not None:
-            conds.append("rating >= ?"); params.append(min_rating)
+            conds.append("rating >= ?")
+            params.append(min_rating)
         if author:
-            conds.append("author LIKE ?"); params.append(f"%{author}%")
+            conds.append("author LIKE ?")
+            params.append(f"%{author}%")
         where = " AND ".join(conds) if conds else "1=1"
         rows = self.conn.execute(
             f"SELECT * FROM books WHERE {where} ORDER BY title", params).fetchall()

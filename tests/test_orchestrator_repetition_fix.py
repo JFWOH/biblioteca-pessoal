@@ -45,9 +45,13 @@ def fake_embedding() -> list[float]:
 @pytest.fixture
 def mock_engine(test_db, chroma_path, fake_embedding):
     from src.core.rag_engine import RAGEngine
+    # is_model_available/is_ollama_available: hermético mesmo sem Ollama (CI) —
+    # sem eles o index_book entrava no pull do modelo e vazava rede real.
     with patch.object(RAGEngine, "_get_embedding", return_value=fake_embedding), \
          patch.object(RAGEngine, "_get_embeddings_batch",
-                      side_effect=lambda texts: [fake_embedding for _ in texts]):
+                      side_effect=lambda texts: [fake_embedding for _ in texts]), \
+         patch.object(RAGEngine, "is_model_available", return_value=True), \
+         patch.object(RAGEngine, "is_ollama_available", return_value=True):
         engine = RAGEngine(db_path=test_db, chroma_path=chroma_path,
                            ollama_url="http://localhost:11434")
         yield engine

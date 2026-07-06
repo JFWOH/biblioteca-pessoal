@@ -1,8 +1,6 @@
 """Testes do módulo de metadados."""
 
-from pathlib import Path
 
-import pytest
 
 from src.core.metadata import BookMetadata, extract_metadata
 

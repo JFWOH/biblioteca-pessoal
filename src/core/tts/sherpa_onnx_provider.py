@@ -16,7 +16,6 @@ from src.core.tts.base_tts_provider import (
     SynthesisResult,
     TTSCapability,
     TTSProviderError,
-    TTSProviderUnavailable,
     VoiceInfo,
 )
 

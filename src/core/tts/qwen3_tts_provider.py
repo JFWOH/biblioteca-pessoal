@@ -17,7 +17,6 @@ from src.core.tts.base_tts_provider import (
     SynthesisResult,
     TTSCapability,
     TTSProviderError,
-    TTSProviderUnavailable,
     VoiceInfo,
 )
 
@@ -78,10 +77,9 @@ class Qwen3TTSProvider(BaseTTSProvider):
             return
 
         try:
-            # Model name is a placeholder for the advanced tier architecture.
-            # Avoid hitting the HuggingFace API during auto-registration.
-            model_name = "Qwen/Qwen2-Audio-7B-Instruct"  # Placeholder
-            
+            # Model name placeholder for the advanced tier architecture:
+            # "Qwen/Qwen2-Audio-7B-Instruct". Avoid hitting the HuggingFace
+            # API during auto-registration.
             # TODO: Only load this heavy model if explicitly configured by the user.
             # For Phase 13, this is an architectural stub.
             self._model = None
@@ -110,7 +108,6 @@ class Qwen3TTSProvider(BaseTTSProvider):
 
         try:
             import torch
-            import struct
 
             # Build instruction prompt for expressiveness
             instruction = self._build_instruction(voice_id, rate)
@@ -259,7 +256,8 @@ class Qwen3TTSProvider(BaseTTSProvider):
         except ImportError:
             pass
 
-        import tempfile, os
+        import tempfile
+        import os
         tmp_path = None
         try:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:

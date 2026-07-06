@@ -17,9 +17,7 @@ from typing import Optional
 
 from src.core.tts.base_tts_provider import (
     BaseTTSProvider,
-    SynthesisResult,
     TTSProviderError,
-    TTSProviderUnavailable,
 )
 from src.core.tts.voice_profile import VoiceProfile, NarrationRole
 from src.core.tts.text_preprocessor import TTSTextPreprocessor
@@ -299,7 +297,6 @@ class TTSRouter:
             voice_id = self._resolve_voice(provider, effective_language, profile.style)
 
         # Chunk the text for interruptible playback
-        from src.core.audio.text_chunker import split_text_for_tts
         # Use the already-preprocessed text. Chunk sizes adapted for role and provider latency.
         is_high_latency = provider.latency_profile() == "high"
         max_chars = 200 if is_high_latency else (400 if role == NarrationRole.ASSISTANT else 800)

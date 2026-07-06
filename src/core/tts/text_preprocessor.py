@@ -18,7 +18,6 @@ ADR-006 compliance: No PyQt6 imports.
 
 import re
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

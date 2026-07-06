@@ -4,7 +4,6 @@ Responsável por carregar o modelo de forma lazy e traduzir textos curtos/seleç
 """
 import logging
 import re
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +66,13 @@ class NLLBBackend:
         # travas de rede no load dele), o que bloqueava o download do NLLB na primeira
         # vez — quebrando a tradução. Liberamos a rede apenas ao redor deste load e
         # restauramos o valor anterior em seguida (não vaza o modo online).
+        # NOTA: o huggingface_hub lê HF_HUB_OFFLINE numa CONSTANTE de módulo no
+        # import; mudar só os.environ depois NÃO tem efeito — é preciso patchar
+        # constants.HF_HUB_OFFLINE (mesmo padrão do KokoroProvider._ensure_voice).
+        import huggingface_hub.constants as hf_const
+        prev_const = hf_const.HF_HUB_OFFLINE
         prev_offline = os.environ.get("HF_HUB_OFFLINE")
+        hf_const.HF_HUB_OFFLINE = False
         os.environ["HF_HUB_OFFLINE"] = "0"
         try:
             from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
@@ -91,6 +96,7 @@ class NLLBBackend:
             logger.error(f"Falha ao carregar modelo NLLB: {e}")
             raise RuntimeError(f"Falha ao carregar modelo de tradução: {e}") from e
         finally:
+            hf_const.HF_HUB_OFFLINE = prev_const
             if prev_offline is None:
                 os.environ.pop("HF_HUB_OFFLINE", None)
             else:

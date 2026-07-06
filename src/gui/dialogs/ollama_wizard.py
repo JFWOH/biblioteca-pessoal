@@ -6,7 +6,7 @@ Guia o usuário pelo processo de instalação em 3 páginas, sem abrir terminal.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QDesktopServices
 from PyQt6.QtCore import QUrl
 from PyQt6.QtWidgets import (

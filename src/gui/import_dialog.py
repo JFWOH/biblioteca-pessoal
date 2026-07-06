@@ -5,12 +5,12 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QProgressBar, QTextEdit, QCheckBox, QGroupBox,
-    QListWidget, QListWidgetItem, QSizePolicy,
+    QListWidget, QListWidgetItem,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtCore import QThread, pyqtSignal, QSize
+from PyQt6.QtGui import QFont
 
-from src.utils.constants import FILE_FILTER, SUPPORTED_EXTENSIONS
+from src.utils.constants import FILE_FILTER
 from src.utils.file_utils import format_file_size, get_file_extension
 
 

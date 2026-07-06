@@ -112,7 +112,7 @@ class TestTags:
         assert len(db.get_book_tags(book_id)) == 1
 
     def test_tag_colors(self, db):
-        tid = db.create_tag("Vermelho", "#ff0000")
+        db.create_tag("Vermelho", "#ff0000")
         tags = db.get_all_tags()
         assert tags[0]["color"] == "#ff0000"
 

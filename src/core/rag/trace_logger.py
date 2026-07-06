@@ -2,7 +2,7 @@ import json
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -62,15 +62,20 @@ class TraceLogger:
             "provenance": provenance,
         }
 
-        if query is not None: event["query"] = query
-        if book_id is not None: event["book_id"] = book_id
-        if confidence is not None: event["confidence"] = confidence
-        if tool_name is not None: event["tool_name"] = tool_name
-        if allowed is not None: event["allowed"] = allowed
-        if reason is not None: event["reason"] = reason
-        if round_num is not None: event["round"] = round_num
-        if error_type is not None: event["error_type"] = error_type
-        if error_message is not None: event["error_message"] = error_message
+        optional_fields = {
+            "query": query,
+            "book_id": book_id,
+            "confidence": confidence,
+            "tool_name": tool_name,
+            "allowed": allowed,
+            "reason": reason,
+            "round": round_num,
+            "error_type": error_type,
+            "error_message": error_message,
+        }
+        for key, value in optional_fields.items():
+            if value is not None:
+                event[key] = value
         
         if payload is not None:
             event["payload"] = self._truncate_payload(payload)

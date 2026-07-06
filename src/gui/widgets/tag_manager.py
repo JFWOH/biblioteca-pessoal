@@ -2,8 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
-    QFrame, QDialog, QLineEdit, QMessageBox,
-    QListWidget, QListWidgetItem,
+    QFrame, QDialog, QLineEdit, QListWidget, QListWidgetItem,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QFont
