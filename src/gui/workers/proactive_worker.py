@@ -3,7 +3,6 @@ Worker assíncrono para buscar observações proativas via API do Ollama.
 """
 import json
 import logging
-import urllib.request
 from PyQt6.QtCore import QThread, pyqtSignal
 
 logger = logging.getLogger(__name__)
@@ -68,25 +67,20 @@ class ProactiveWorker(QThread):
             self.error.emit("Nenhum modelo suportado pelo hardware.")
             return
 
-        payload = json.dumps(self._build_payload()).encode("utf-8")
-        endpoint = f"{self.ollama_url.rstrip('/')}/api/chat"
+        payload = self._build_payload()
 
         try:
-            req = urllib.request.Request(
-                endpoint,
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
+            from src.core import ollama_client
+            content = ollama_client.chat_once(
+                self.ollama_url, payload["model"], payload["messages"],
+                response_format=payload.get("format"),
+                temperature=payload["options"].get("temperature"),
+                num_predict=payload["options"].get("num_predict", 4096),
+                timeout_s=45,
             )
-            with urllib.request.urlopen(req, timeout=45) as resp:
-                raw_resp = resp.read()
-                data = json.loads(raw_resp)
 
-            content = data.get("message", {}).get("content", "").strip()
-
-            # DEBUG
             if not content:
-                logger.error(f"Ollama Raw Response: {raw_resp.decode('utf-8', errors='ignore')}")
+                logger.error("Ollama respondeu com content vazio para o proativo.")
 
             # Rede de segurança: limpa formatação markdown caso o modelo a inclua
             # mesmo com format=json.

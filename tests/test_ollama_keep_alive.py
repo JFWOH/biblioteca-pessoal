@@ -41,14 +41,26 @@ def test_keep_alive_constant():
 
 
 def test_orchestrator_chat_payload(monkeypatch):
+    """Orchestrator._stream_chat delega ao cliente unificado (src/core/ollama_client)."""
     from src.core.rag.orchestrator import Orchestrator
     engine = MagicMock()
     engine._llm_model = "gemma4:e4b"
     engine._ollama_url = "http://localhost:11434"
     captured = []
-    with patch("urllib.request.urlopen",
-               side_effect=_capture_urlopen(captured, {"/api/chat": {}})):
-        Orchestrator(engine)._call_chat_api([{"role": "user", "content": "oi"}])
+
+    def fake_urlopen(req, timeout=None):
+        payload = json.loads(req.data.decode("utf-8")) if req.data else {}
+        captured.append((req.full_url, payload))
+        resp = MagicMock()
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        resp.__iter__ = lambda s: iter([
+            json.dumps({"message": {"content": "ok"}, "done": True}).encode("utf-8"),
+        ])
+        return resp
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        list(Orchestrator(engine)._stream_chat([{"role": "user", "content": "oi"}]))
     assert captured[0][1]["keep_alive"] == OLLAMA_KEEP_ALIVE
 
 

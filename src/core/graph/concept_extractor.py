@@ -175,23 +175,13 @@ class ConceptExtractor:
             excerpt=text[:1200],
             max_concepts=max_concepts,
         )
-        from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
-        payload = {
-            "model": self.llm_model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "format": "json",
-            "keep_alive": OLLAMA_KEEP_ALIVE,
-            "options": {"num_predict": 512, "temperature": 0.1},
-        }
-        req = urllib.request.Request(
-            f"{self.ollama_url}/api/chat",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+        from src.core import ollama_client
+        content = ollama_client.chat_once(
+            self.ollama_url, self.llm_model,
+            [{"role": "user", "content": prompt}],
+            response_format="json", temperature=0.1, num_predict=512,
+            timeout_s=self.llm_timeout_s,
         )
-        with urllib.request.urlopen(req, timeout=self.llm_timeout_s) as resp:
-            data = json.loads(resp.read())
-        content = (data.get("message", {}) or {}).get("content", "").strip()
         # Saneamento (padrão do proactive_worker): pega do primeiro { ao último }.
         start, end = content.find("{"), content.rfind("}")
         if start < 0 or end <= start:

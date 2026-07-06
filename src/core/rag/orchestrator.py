@@ -5,6 +5,7 @@ import time
 import uuid
 from typing import List, Dict, Any, Optional, Generator
 
+from src.core import ollama_client
 from src.core.rag.agent_state import AgentState
 from src.core.rag.tools.base import ToolOutput, create_tool_output
 from src.core.rag.trace_logger import TraceLogger
@@ -599,43 +600,20 @@ class Orchestrator:
         }
         trace_logger.emit("query_completed", step=state.current_round + 1, payload=payload)
 
-    def _call_chat_api(self, msgs: list, stream: bool = False, temperature: float | None = None) -> Any:
-        """Helper para chamar o Ollama Chat API."""
-        import urllib.request
-        from src.core.rag_engine import _TOOLS_DEF
-        options = {
-            "num_predict": 4096,
-            "num_ctx": 8192,
-            # Mitiga repetição literal de parágrafos inteiros em respostas longas
-            # (modelos locais menores tendem a "reiniciar" a mesma explicação).
-            # repeat_last_n amplo o bastante para enxergar parágrafos anteriores,
-            # não só as últimas palavras; não mexe em num_predict/num_ctx, então
-            # a profundidade de raciocínio dos modelos gemma4 é preservada.
-            "repeat_penalty": 1.15,
-            "repeat_last_n": 512,
-        }
-        if temperature is not None:
-            options["temperature"] = temperature
+    def _stream_chat(self, msgs: list, temperature: float | None = None,
+                     tools: Optional[list] = None) -> Generator[dict, None, None]:
+        """Streaming do Ollama Chat API via cliente unificado (src/core/ollama_client).
 
-        from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
-        payload_dict = {
-            "model": self.engine._llm_model.strip(),
-            "messages": msgs,
-            "stream": stream,
-            "tools": _TOOLS_DEF,
-            "keep_alive": OLLAMA_KEEP_ALIVE,
-            "options": options,
-        }
-
-        payload = json.dumps(payload_dict).encode("utf-8")
-        endpoint = f"{self.engine._ollama_url.rstrip('/')}/api/chat"
-        req = urllib.request.Request(
-            endpoint,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        Opções (num_predict/num_ctx/repeat_penalty/repeat_last_n) calibradas
+        para mitigar repetição literal de parágrafos em respostas longas sem
+        cortar a profundidade de raciocínio dos modelos gemma4.
+        """
+        return ollama_client.stream_chat(
+            self.engine._ollama_url, self.engine._llm_model.strip(), msgs,
+            tools=tools, temperature=temperature,
+            num_predict=4096, num_ctx=8192,
+            repeat_penalty=1.15, repeat_last_n=512,
         )
-        return urllib.request.urlopen(req, timeout=120)
 
     # ── Tools de grafo (Fase 3) — read-only sobre o GraphStore ────────
 
@@ -958,38 +936,30 @@ class Orchestrator:
             thinking = _ThinkingStatusTracker(status_callback, trace_logger,
                                               round_num=state.current_round)
             try:
-                with self._call_chat_api(messages, stream=True, temperature=0.1) as resp:
-                    for line in resp:
-                        if self.engine._cancelled:
-                            trace_logger.emit("early_exit", step=state.current_round, reason="cancelled")
-                            trace_logger.emit("query_completed", step=state.current_round + 1, reason="cancelled")
-                            return
-                        if not line:
-                            continue
-                        try:
-                            chunk = json.loads(line.decode("utf-8"))
-                        except (json.JSONDecodeError, AttributeError, UnicodeDecodeError):
-                            continue
+                for msg in self._stream_chat(messages, temperature=0.1, tools=_TOOLS_DEF):
+                    if self.engine._cancelled:
+                        trace_logger.emit("early_exit", step=state.current_round, reason="cancelled")
+                        trace_logger.emit("query_completed", step=state.current_round + 1, reason="cancelled")
+                        return
 
-                        msg = chunk.get("message", {}) or {}
-                        thinking.on_chunk(msg)
-                        if msg.get("tool_calls"):
-                            tool_calls.extend(msg["tool_calls"])
+                    thinking.on_chunk(msg)
+                    if msg.get("tool_calls"):
+                        tool_calls.extend(msg["tool_calls"])
 
-                        token = msg.get("content", "")
-                        # Só transmite conteúdo enquanto a rodada não for de ferramenta.
-                        if token and not tool_calls:
-                            if not answer_streaming_started:
-                                trace_logger.emit("final_answer_started", step=state.current_round, round_num=state.current_round)
-                                answer_streaming_started = True
-                                thinking.on_content_started()
-                            content_parts.append(token)
-                            answer_acc.append(token)
-                            yield token
+                    token = msg.get("content", "")
+                    # Só transmite conteúdo enquanto a rodada não for de ferramenta.
+                    if token and not tool_calls:
+                        if not answer_streaming_started:
+                            trace_logger.emit("final_answer_started", step=state.current_round, round_num=state.current_round)
+                            answer_streaming_started = True
+                            thinking.on_content_started()
+                        content_parts.append(token)
+                        answer_acc.append(token)
+                        yield token
 
-                        if chunk.get("done"):
-                            done_reason = chunk.get("done_reason", "")
-                            break
+                    if msg.get("done"):
+                        done_reason = msg.get("done_reason", "")
+                        break
             except Exception as exc:
                 err_msg = f"Falha ao contactar o assistente: {exc}"
                 trace_logger.emit("error", step=state.current_round, error_type="LLMError", error_message=err_msg, round_num=state.current_round)
@@ -1091,64 +1061,49 @@ class Orchestrator:
                                           round_num=state.current_round)
         fallback_content_started = False
         try:
-            with self._call_chat_api(messages, stream=True) as resp:
-                accumulated_content = []
-                for line in resp:
-                    if self.engine._cancelled:
-                        trace_logger.emit("early_exit", step=state.current_round, reason="cancelled")
-                        trace_logger.emit("query_completed", step=state.current_round + 1, reason="cancelled")
-                        return
-                    if not line:
-                        continue
-                    try:
-                        chunk = json.loads(line.decode("utf-8"))
-                        msg = chunk.get("message", {}) or {}
-                        thinking.on_chunk(msg)
-                        token = msg.get("content", "")
-                        if token:
-                            if not fallback_content_started:
-                                fallback_content_started = True
-                                thinking.on_content_started()
-                            accumulated_content.append(token)
-                            yield token
-                        if chunk.get("done", False):
-                            done_reason = chunk.get("done_reason", "")
-                            trace_logger.emit("final_answer_completed", step=state.current_round, round_num=state.current_round)
-                            if done_reason == "length" and getattr(state, "continuation_count", 0) < _MAX_CONTINUATIONS:
-                                state.continuation_count = getattr(state, "continuation_count", 0) + 1
-                                yield "\n[⚠️ A resposta foi interrompida pelo limite de tokens. Retomando...]\n"
-                                messages.append({"role": "assistant", "content": "".join(accumulated_content)})
-                                messages.append({"role": "user", "content": "Continue exatamente de onde parou."})
-                                try:
-                                    thinking_cont = _ThinkingStatusTracker(
-                                        status_callback, trace_logger,
-                                        round_num=state.current_round)
-                                    cont_started = False
-                                    with self._call_chat_api(messages, stream=True) as resp_cont:
-                                        for line_cont in resp_cont:
-                                            if not line_cont:
-                                                continue
-                                            try:
-                                                c = json.loads(line_cont.decode("utf-8"))
-                                                m = c.get("message", {}) or {}
-                                                thinking_cont.on_chunk(m)
-                                                t = m.get("content", "")
-                                                if t:
-                                                    if not cont_started:
-                                                        cont_started = True
-                                                        thinking_cont.on_content_started()
-                                                    accumulated_content.append(t)
-                                                    yield t
-                                            except json.JSONDecodeError:
-                                                continue
-                                except Exception:
-                                    pass
-                            if hasattr(self.engine, "append_chat_turn"):
-                                self.engine.append_chat_turn(book_id, question, "".join(accumulated_content))
-                            trace_logger.emit("query_completed", step=state.current_round + 1)
-                            return
-                    except json.JSONDecodeError:
-                        continue
+            accumulated_content = []
+            for msg in self._stream_chat(messages, tools=_TOOLS_DEF):
+                if self.engine._cancelled:
+                    trace_logger.emit("early_exit", step=state.current_round, reason="cancelled")
+                    trace_logger.emit("query_completed", step=state.current_round + 1, reason="cancelled")
+                    return
+
+                thinking.on_chunk(msg)
+                token = msg.get("content", "")
+                if token:
+                    if not fallback_content_started:
+                        fallback_content_started = True
+                        thinking.on_content_started()
+                    accumulated_content.append(token)
+                    yield token
+                if msg.get("done", False):
+                    done_reason = msg.get("done_reason", "")
+                    trace_logger.emit("final_answer_completed", step=state.current_round, round_num=state.current_round)
+                    if done_reason == "length" and getattr(state, "continuation_count", 0) < _MAX_CONTINUATIONS:
+                        state.continuation_count = getattr(state, "continuation_count", 0) + 1
+                        yield "\n[⚠️ A resposta foi interrompida pelo limite de tokens. Retomando...]\n"
+                        messages.append({"role": "assistant", "content": "".join(accumulated_content)})
+                        messages.append({"role": "user", "content": "Continue exatamente de onde parou."})
+                        try:
+                            thinking_cont = _ThinkingStatusTracker(
+                                status_callback, trace_logger,
+                                round_num=state.current_round)
+                            cont_started = False
+                            for m in self._stream_chat(messages, tools=_TOOLS_DEF):
+                                thinking_cont.on_chunk(m)
+                                t = m.get("content", "")
+                                if t:
+                                    if not cont_started:
+                                        cont_started = True
+                                        thinking_cont.on_content_started()
+                                    accumulated_content.append(t)
+                                    yield t
+                        except Exception:
+                            pass
+                    if hasattr(self.engine, "append_chat_turn"):
+                        self.engine.append_chat_turn(book_id, question, "".join(accumulated_content))
+                    trace_logger.emit("query_completed", step=state.current_round + 1)
+                    return
         except Exception as exc:
             err_msg = f"Falha ao gerar resposta final: {exc}"
             trace_logger.emit("error", step=state.current_round, error_type="LLMError", error_message=err_msg)
