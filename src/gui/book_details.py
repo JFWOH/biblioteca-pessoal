@@ -26,6 +26,7 @@ class BookDetails(QWidget):
     remove_from_collection_requested = pyqtSignal(int)  # book_id
     fetch_metadata_requested = pyqtSignal(int)  # book_id
     related_book_clicked = pyqtSignal(int)  # book_id de um livro relacionado (grafo)
+    dossier_requested = pyqtSignal(int)  # book_id — abrir o dossiê do livro (Fase 4)
 
     def __init__(self, db: LibraryDB = None, parent=None):
         super().__init__(parent)
@@ -132,6 +133,12 @@ class BookDetails(QWidget):
         self._open_btn.setObjectName("primaryBtn")
         self._open_btn.clicked.connect(lambda: self._emit_action("open"))
         btn_layout.addWidget(self._open_btn)
+
+        self._dossier_btn = QPushButton("📋  Dossiê do Livro")
+        self._dossier_btn.setObjectName("secondaryBtn")
+        self._dossier_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._dossier_btn.clicked.connect(lambda: self._emit_action("dossier"))
+        btn_layout.addWidget(self._dossier_btn)
 
         self._fav_btn = QPushButton("⭐  Favoritar")
         self._fav_btn.setObjectName("secondaryBtn")
@@ -291,6 +298,8 @@ class BookDetails(QWidget):
             self.remove_from_collection_requested.emit(book_id)
         elif action == "fetch_metadata":
             self.fetch_metadata_requested.emit(book_id)
+        elif action == "dossier":
+            self.dossier_requested.emit(book_id)
         elif action == "delete":
             self.delete_requested.emit(book_id)
 

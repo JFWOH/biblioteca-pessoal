@@ -251,6 +251,7 @@ class MainWindow(QMainWindow):
         self._book_details.remove_from_collection_requested.connect(self._remove_from_collection)
         self._book_details.fetch_metadata_requested.connect(self._on_fetch_metadata)
         self._book_details.related_book_clicked.connect(self._on_book_selected)
+        self._book_details.dossier_requested.connect(self._open_book_dossier)
         self._graph_service.graph_updated.connect(self._on_graph_updated)
         lib_splitter.addWidget(self._book_details)
 
@@ -400,6 +401,19 @@ class MainWindow(QMainWindow):
         book = self._db.get_book(book_id)
         if book:
             self._book_details.show_book(book)
+
+    def _open_book_dossier(self, book_id: int):
+        """Abre o dossiê do livro (Fase 4 — grafo). Só lê dados já ingeridos."""
+        from src.gui.dialogs.book_dossier_dialog import BookDossierDialog
+
+        dialog = BookDossierDialog(
+            self._db, book_id,
+            ollama_url=self._config.get("rag.ollama_url", "http://localhost:11434"),
+            model=self._config.get("rag.llm_model", "gemma4:e4b"),
+            parent=self,
+        )
+        dialog.open_book_requested.connect(self._on_book_selected)
+        dialog.exec()
 
     def _on_book_open(self, book_id: int):
         if book_id == -1:
