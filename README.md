@@ -50,17 +50,47 @@ Gerenciador de biblioteca pessoal e leitor multi-formato sofisticado, desenvolvi
 
 ## 🚀 Instalação
 
+Pré-requisito: **Python 3.11** instalado ([python.org](https://www.python.org/downloads/)).
+O app roda em Windows (plataforma primária, testada), com código preparado para Linux e macOS.
+
 ```bash
-# Clone o repositório
-git clone <repo-url>
-cd Biblioteca-pessoal
+# Clone o repositório (qualquer pasta/drive)
+git clone https://github.com/JFWOH/biblioteca-pessoal.git
+cd biblioteca-pessoal
 
-# Crie o ambiente virtual (use o Python 3.11 do sistema)
-C:\Users\jefer\AppData\Local\Programs\Python\Python311\python.exe -m venv venv
+# Crie o ambiente virtual com o Python 3.11
+python -m venv venv
+#   (se o comando "python" não for o 3.11 na sua máquina, use:
+#    Windows:  py -3.11 -m venv venv
+#    Linux/Mac: python3.11 -m venv venv)
 
-# Instale as dependências
-venv\Scripts\python.exe -m pip install -r requirements.txt
+# Instale as dependências (sempre pelo python do venv)
+venv\Scripts\python.exe -m pip install -r requirements.txt      # Windows
+# ./venv/bin/python -m pip install -r requirements.txt          # Linux/Mac
 ```
+
+> **Dica — múltiplos Pythons instalados:** nunca rode o app com o `python` "solto"
+> do sistema. Use sempre o interpretador do venv do projeto
+> (`venv\Scripts\python.exe` no Windows, `./venv/bin/python` no Linux/Mac).
+> Para conferir qual está ativo: `python -c "import sys; print(sys.executable)"`.
+
+### 🤖 Assistente de IA (Ollama) — instalação automática
+
+O assistente local usa o **Ollama**. **Você não precisa instalar nada manualmente**:
+na primeira execução, se o Ollama não for detectado, o app abre um assistente de
+configuração que baixa e instala o Ollama sozinho (Windows/Linux/macOS) e, em
+seguida, **baixa os modelos de IA adequados ao seu hardware**:
+
+- **`gemma4:e4b`** (leve) — padrão universal, roda até em notebook básico;
+- **`gemma4:12b`** — usado automaticamente apenas se a GPU comportar (>10 GB VRAM);
+- **`bge-m3`** — embeddings para a busca semântica nos livros.
+
+Se o Ollama já estiver instalado mas sem modelos, o app detecta e baixa os
+modelos em segundo plano no próximo início (aviso na barra de status).
+
+O mesmo vale para os demais modelos locais (tradução NLLB-200, vozes do TTS
+Kokoro): são baixados **sob demanda no primeiro uso** — por isso a primeira
+execução de cada recurso exige internet; depois, tudo roda 100% offline.
 
 ### ⚡ Aceleração por GPU (NVIDIA)
 
@@ -84,39 +114,38 @@ venv\Scripts\python.exe -m pip install torch==2.11.0+cu128 --index-url https://d
 
 ## ▶️ Inicialização
 
-A forma mais simples é usar o script de inicialização na raiz do projeto:
+**Windows** — a forma mais simples é o script na raiz do projeto (usa o caminho
+relativo do próprio clone, funciona em qualquer pasta):
 
 ```
 iniciar.bat
 ```
 
-Ou manualmente no PowerShell:
+Ou manualmente, em qualquer sistema:
 
-```powershell
-cd "G:\PROGRAMAS PYTHON\Biblioteca-pessoal"
-.\venv\Scripts\Activate.ps1
-python -m src.main
+```bash
+# Windows
+venv\Scripts\python.exe -m src.main
+
+# Linux / macOS
+./venv/bin/python -m src.main
 ```
 
-> **Importante — múltiplos interpretadores no sistema**
->
-> Esta máquina tem 5 instalações de Python no PATH:
->
-> | # | Caminho | Status |
-> |---|---------|--------|
-> | 1 | `G:\PROGRAMAS PYTHON\Biblioteca-pessoal\venv\Scripts\python.exe` | ✅ correto — venv do projeto |
-> | 2 | `H:\PYTHON\assistente-virtual\venv\Scripts\python.exe` | ❌ torch corrompido (WinError 193) |
-> | 3 | `C:\Users\jefer\AppData\Local\Programs\Python\Python311\python.exe` | base do sistema |
-> | 4 | `H:\ANACONDA\python.exe` | Anaconda |
-> | 5 | `C:\Users\jefer\AppData\Local\Microsoft\WindowsApps\python.exe` | stub da Store |
->
-> **Nunca** rodar `python -m src.main` sem ativar o venv do projeto primeiro — o intérprete de `H:\PYTHON\assistente-virtual\venv` aparece em 2º no PATH global e travará o app com erro de DLL ao importar `torch`.
->
-> Para verificar qual intérprete está ativo:
-> ```powershell
-> python -c "import sys; print(sys.executable)"
-> # deve retornar: G:\PROGRAMAS PYTHON\Biblioteca-pessoal\venv\Scripts\python.exe
-> ```
+Os dados do usuário (biblioteca, capas, índice de busca, configurações) ficam
+na pasta `data/` dentro do próprio clone — nada é gravado fora do projeto.
+
+### 🧩 Adaptação automática ao hardware
+
+O app detecta o hardware no início e se ajusta sozinho — não há configuração
+obrigatória:
+
+| Recurso | Como se adapta |
+|---|---|
+| Modelo de IA do assistente | GPU >10 GB VRAM → `gemma4:12b`; caso contrário → `gemma4:e4b` (leve) |
+| Agente proativo de leitura | Desligado automaticamente em máquinas com <8 GB de RAM |
+| Tradução (NLLB) e TTS (Kokoro) | GPU CUDA compatível → acelera; senão → CPU, sem travar |
+| TTS (voz) | Cadeia de fallback: Kokoro → Piper → pyttsx3, conforme a máquina |
+| OCR de PDFs escaneados | RapidOCR via ONNX, roda em CPU em qualquer máquina |
 
 ## 📦 Dependências Principais
 
@@ -210,12 +239,17 @@ O projeto conta com ferramentas dedicadas via linha de comando para governança 
 
 ## 🧪 Testes
 
+Sempre pelo python do venv do projeto:
+
 ```bash
-# Executar todos os testes
-python -m pytest tests/ -v
+# Windows
+venv\Scripts\python.exe -m pytest tests/ -q
+
+# Linux / macOS
+./venv/bin/python -m pytest tests/ -q
 
 # Com coverage
-python -m pytest tests/ --cov=src --cov-report=html
+venv\Scripts\python.exe -m pytest tests/ --cov=src --cov-report=html
 ```
 
 ## 📄 Licença

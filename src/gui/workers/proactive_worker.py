@@ -46,10 +46,12 @@ class ProactiveWorker(QThread):
             f"Trecho para análise:\n{self.page_text}"
         )
 
+        from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
         return {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
             # Structured output do Ollama: garante JSON válido na resposta,
             # tornando o parsing robusto sem depender de limpeza de markdown.
             "format": "json",

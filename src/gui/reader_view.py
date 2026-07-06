@@ -37,6 +37,7 @@ class ReaderView(QWidget):
     progress_changed = pyqtSignal(int, int, int)  # book_id, page, total
     annotation_added = pyqtSignal(int, dict)       # book_id, annotation_data
     annotation_deleted = pyqtSignal(int)            # annotation_id
+    annotation_renamed = pyqtSignal(int, str)       # annotation_id, novo título
     fullscreen_toggled = pyqtSignal(bool)           # is_fullscreen
     reading_context_updated = pyqtSignal(int, str, int, str) # book_id, title, page_number, page_text
     ai_action_requested = pyqtSignal(str, str)      # action_type, text
@@ -55,8 +56,17 @@ class ReaderView(QWidget):
         # Página 1-based da última observação proativa e id da obs no rodapé
         # (para persistir/dispensar em ai_observations — Fase 1b).
         self._current_proactive_page: int = 0
-        self._current_page_text: str = ""  # texto da página atual (p/ avaliar ao ligar o proativo)
+        # Texto da página atual (p/ avaliar ao ligar o proativo). NÃO usar o nome
+        # _current_page_text: colidiria com o MÉTODO homônimo do menu de estudo.
+        self._last_page_text: str = ""
         self._audio_paused: bool = False   # narração pausada (retomável no mesmo ponto)
+        # Leitura contínua (item 5 UX): ao fim da página narrada, avança e segue.
+        self._continuous_reading: bool = False
+        # Leitura contínua TRADUZIDA: mesma cadeia, mas cada página é traduzida
+        # (NLLB) antes de narrar. Ver docs/agents/traducao_confiavel_execution_contract.md.
+        self._continuous_translate_mode: bool = False
+        self._audio_stopped_by_user: bool = False  # stop manual não encadeia a próxima
+        self._chain_continuous: bool = False       # só narração de página encadeia (tradução não)
         self._footer_obs_id = None
         self._proactive_service = ProactiveReaderService(parent=self)
         self._proactive_service.observation_ready.connect(self._on_proactive_observation)
@@ -353,6 +363,28 @@ class ReaderView(QWidget):
         self._act_highlight.triggered.connect(self._menu_toggle_highlight)
         self._act_tts = QAction("⚙️ Voz / Narração (TTS)", self)
         self._act_tts.triggered.connect(self._on_tts_settings_clicked)
+        # Leitura contínua: narração vira páginas automaticamente até o fim.
+        self._act_continuous = QAction("🔁 Leitura Contínua (vira páginas)", self, checkable=True)
+        _cfg = getattr(self.window(), "_config", None)
+        if _cfg is not None:
+            self._continuous_reading = bool(_cfg.get("tts.continuous_reading", False))
+        self._act_continuous.setChecked(self._continuous_reading)
+        self._act_continuous.triggered.connect(self._toggle_continuous_reading)
+        # Leitura contínua TRADUZIDA: mesmo mecanismo, cada página passa pelo
+        # NLLB antes de narrar (Commit 5 do contrato de tradução confiável).
+        self._act_continuous_translate = QAction(
+            "🌐🔁 Leitura Contínua Traduzida (PT)", self, checkable=True)
+        if _cfg is not None:
+            self._continuous_translate_mode = bool(
+                _cfg.get("tts.continuous_translate_reading", False))
+        self._act_continuous_translate.setChecked(self._continuous_translate_mode)
+        self._act_continuous_translate.triggered.connect(self._toggle_continuous_translate_reading)
+        # Ler a página em português: traduz (NLLB offline) e narra o resultado.
+        self._act_read_translated = QAction("🌐 Ler Página Traduzida (PT)", self)
+        self._act_read_translated.triggered.connect(self._on_read_translated_page)
+        # Traduzir a página como TEXTO (cartão no painel), sem narrar.
+        self._act_translate_page = QAction("🌐 Traduzir Página (texto)", self)
+        self._act_translate_page.triggered.connect(self._on_translate_page)
         self._overflow_menu.addAction(self._act_double_page)
         self._overflow_menu.addAction(self._act_highlight)
         self._overflow_menu.addSeparator()
@@ -369,6 +401,10 @@ class ReaderView(QWidget):
         self._overflow_menu.addAction(self._act_insights)
         self._overflow_menu.addSeparator()
         self._overflow_menu.addAction(self._act_tts)
+        self._overflow_menu.addAction(self._act_continuous)
+        self._overflow_menu.addAction(self._act_continuous_translate)
+        self._overflow_menu.addAction(self._act_read_translated)
+        self._overflow_menu.addAction(self._act_translate_page)
         self._overflow_menu.aboutToShow.connect(self._sync_overflow_menu)
         self._overflow_btn.setMenu(self._overflow_menu)
         tb_layout.addWidget(self._overflow_btn)
@@ -414,6 +450,7 @@ class ReaderView(QWidget):
         self._origin = QPoint()
         self._is_selecting = False
         self._last_selection_coords: tuple | None = None  # Últimas coords normalizadas salvas
+        self._last_selection_flow: dict | None = None  # {"text", "quads"} — seleção por fluxo
 
         # Visualizador HTML (para EPUB, TXT, DOCX)
         self._web_view = QWebEngineView()
@@ -440,14 +477,19 @@ class ReaderView(QWidget):
         self._annotation_panel.annotation_deleted.connect(
             lambda ann_id: self.annotation_deleted.emit(ann_id)
         )
+        self._annotation_panel.annotation_renamed.connect(
+            lambda ann_id, title: self.annotation_renamed.emit(ann_id, title)
+        )
         self._annotation_panel.goto_page.connect(self._go_to_page)
 
         left_layout.addWidget(splitter, stretch=1)
 
         # Proactive Footer Widget (starts hidden)
         self._proactive_footer = ProactiveFooterWidget()
+        # "flashcard_qa": o LLM destila o insight em pergunta/resposta antes de
+        # abrir o diálogo do Anki (o insight não vira mais a "pergunta" crua).
         self._proactive_footer.flashcard_requested.connect(
-            lambda text: self.ai_action_requested.emit("flashcard", text)
+            lambda text: self.ai_action_requested.emit("flashcard_qa", text)
         )
         self._proactive_footer.closed.connect(self._on_footer_closed)
         left_layout.addWidget(self._proactive_footer)
@@ -474,7 +516,7 @@ class ReaderView(QWidget):
         # Insights do agente proativo: registro persistente das observações da sessão.
         self._insights_panel = ProactiveInsightsPanel()
         self._insights_panel.flashcard_requested.connect(
-            lambda text: self.ai_action_requested.emit("flashcard", text)
+            lambda text: self.ai_action_requested.emit("flashcard_qa", text)
         )
         self._insights_panel.dismiss_requested.connect(self._on_observation_dismissed)
         self._dock.add_tab("insights", "💡 Insights", self._insights_panel)
@@ -482,6 +524,9 @@ class ReaderView(QWidget):
         self._dock.tab_changed.connect(lambda _k: self._sync_dock_buttons())
         self._main_splitter.addWidget(self._dock)
         self._dock.hide()
+        # Persiste a proporção do dock quando o usuário arrasta o divisor —
+        # o layout escolhido vira o padrão das próximas aberturas.
+        self._main_splitter.splitterMoved.connect(self._on_dock_splitter_moved)
 
         # O painel do Assistente (RAGPanel) é injetado no dock depois (set_ai_panel).
         self._ai_panel_container = None
@@ -527,7 +572,10 @@ class ReaderView(QWidget):
                     self._zoom_out()
                 return True
         elif event.type() == QEvent.Type.MouseButtonPress:
-            if event.button() == Qt.MouseButton.LeftButton:
+            # No _image_label a SELEÇÃO tem prioridade: a virada por clique na
+            # margem é decidida no RELEASE (clique sem arrasto). Antes, pressionar
+            # perto da margem direita para selecionar uma palavra virava a página.
+            if event.button() == Qt.MouseButton.LeftButton and obj is not self._image_label:
                 width = obj.width()
                 if hasattr(event, "scenePosition"):
                     x = event.scenePosition().x()
@@ -550,6 +598,7 @@ class ReaderView(QWidget):
                 self._rubber_band.show()
                 self._is_selecting = True
                 self._last_selection_coords = None  # Reseta coords ao iniciar
+                self._last_selection_flow = None
                 if hasattr(self, "_selection_popover"):
                     self._selection_popover.hide()
                 return True
@@ -560,6 +609,20 @@ class ReaderView(QWidget):
                 self._is_selecting = False
                 # Calcula e armazena as coords normalizadas da seleção atual
                 rect = self._rubber_band.geometry()
+                # CLIQUE (sem arrasto) nas margens laterais vira a página —
+                # decidido aqui, e não no press, para não engolir seleções
+                # que começam perto da margem.
+                origin = getattr(self, "_origin", None)
+                if origin is not None and rect.width() < 6 and rect.height() < 6:
+                    width = obj.width()
+                    if origin.x() < width * 0.15:
+                        self._rubber_band.hide()
+                        self._go_prev()
+                        return True
+                    elif origin.x() > width * 0.85:
+                        self._rubber_band.hide()
+                        self._go_next()
+                        return True
                 label_size = self._image_label.size()
                 pixmap = self._image_label.pixmap()
                 if pixmap and pixmap.width() > 0:
@@ -575,6 +638,21 @@ class ReaderView(QWidget):
                     py1 = min(1.0, y1 / pixmap.height())
                     if (px1 - px0) > 0.005 and (py1 - py0) > 0.005:  # Seleção mínima 0.5%
                         self._last_selection_coords = (px0, py0, px1, py1)
+                        # Seleção por fluxo de texto: usa os PONTOS de início e
+                        # fim do arrasto (não o retângulo) — frases que começam/
+                        # terminam no meio da linha viram quads por linha.
+                        self._last_selection_flow = None
+                        if self._reader and hasattr(self._reader, "get_selection_flow"):
+                            release_pt = event.position().toPoint()
+                            spx = min(max((self._origin.x() - offset_x) / pixmap.width(), 0.0), 1.0)
+                            spy = min(max((self._origin.y() - offset_y) / pixmap.height(), 0.0), 1.0)
+                            epx = min(max((release_pt.x() - offset_x) / pixmap.width(), 0.0), 1.0)
+                            epy = min(max((release_pt.y() - offset_y) / pixmap.height(), 0.0), 1.0)
+                            try:
+                                self._last_selection_flow = self._reader.get_selection_flow(
+                                    self._reader.current_page, (spx, spy), (epx, epy))
+                            except Exception:
+                                self._last_selection_flow = None
                         self._show_selection_popover(rect)
                 # Mantém rubber band visível para clique direito
                 return True
@@ -600,9 +678,11 @@ class ReaderView(QWidget):
         self._reader = create_reader(filepath)
         self._reader.open()
 
-        # Carrega TOC
-        toc = self._reader.get_toc()
-        self._toc_widget.load_toc(toc)
+        # Carrega TOC — sem entradas órfãs (números soltos) e com miniaturas
+        # de capítulo quando o leitor renderiza páginas (PDF).
+        from src.readers.toc_utils import clean_toc
+        toc = clean_toc(self._reader.get_toc())
+        self._toc_widget.load_toc(toc, thumb_provider=self._reader.render_thumbnail)
 
         # Vai para a página inicial
         self._go_to_page(start_page)
@@ -650,7 +730,7 @@ class ReaderView(QWidget):
             # Página 1-based passada ao serviço proativo; guardada para persistir
             # a observação resultante em ai_observations.
             self._current_proactive_page = page + 1
-            self._current_page_text = page_text[:1500]
+            self._last_page_text = page_text[:1500]
             self.reading_context_updated.emit(
                 self._book_id,
                 self._title_label.text(),
@@ -754,6 +834,8 @@ class ReaderView(QWidget):
         """Sincroniza os checkmarks do menu de overflow com o estado real."""
         self._act_double_page.setChecked(self._double_page_btn.isChecked())
         self._act_highlight.setChecked(self._highlight_mode_btn.isChecked())
+        self._act_continuous.setChecked(self._continuous_reading)
+        self._act_continuous_translate.setChecked(self._continuous_translate_mode)
         current = self._proactive_combo.currentText()
         for level, act in getattr(self, "_proactive_acts", {}).items():
             act.setChecked(level == current)
@@ -774,11 +856,11 @@ class ReaderView(QWidget):
         active = level != "Desligado"
         if hasattr(self, "_insights_panel"):
             self._insights_panel.set_agent_active(active)
-        if active and self._current_page_text:
+        if active and self._last_page_text:
             # set_intensity (conectado antes) já resetou o trigger engine, então
             # a página atual passa no critério de distância.
             self._proactive_service.process_page_context(
-                self._current_page_text, self._current_proactive_page, self._book_id
+                self._last_page_text, self._current_proactive_page, self._book_id
             )
 
     def _zoom_in(self):
@@ -1148,12 +1230,40 @@ class ReaderView(QWidget):
             ai_panel.set_standalone_mode(False)
 
     def _show_dock_tab(self, key: str) -> None:
-        """Exibe o dock e seleciona a aba indicada."""
+        """Exibe o dock e seleciona a aba indicada.
+
+        O dock é uma BARRA LATERAL direita (~1/3 da tela), não meia-tela —
+        a leitura continua dominante. A proporção que o usuário ajustar no
+        divisor é persistida (reader.dock_ratio) e vira o novo padrão.
+        """
         self._dock.show_tab(key)
         self._dock.show()
         w = self.width()
-        self._main_splitter.setSizes([int(w * 0.58), int(w * 0.42)])
+        ratio = 0.32
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            try:
+                ratio = float(config.get("reader.dock_ratio", 0.32))
+            except (TypeError, ValueError):
+                ratio = 0.32
+        ratio = min(max(ratio, 0.15), 0.6)  # sempre sidebar, nunca dominante
+        self._main_splitter.setSizes([int(w * (1 - ratio)), int(w * ratio)])
         self._sync_dock_buttons()
+
+    def _on_dock_splitter_moved(self, _pos: int, _index: int) -> None:
+        """Salva a proporção do dock escolhida pelo usuário (vira o padrão)."""
+        if self._dock.isHidden():
+            return
+        sizes = self._main_splitter.sizes()
+        total = sum(sizes)
+        if total <= 0 or len(sizes) < 2 or sizes[1] <= 0:
+            return
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            try:
+                config.set("reader.dock_ratio", round(sizes[1] / total, 3))
+            except Exception:
+                pass
 
     def hide_dock(self) -> None:
         """Recolhe o dock à direita."""
@@ -1355,12 +1465,7 @@ class ReaderView(QWidget):
             if clicked_highlight is not None:
                 menu.addSeparator()
 
-            text = ""
-            if self._reader and hasattr(self._reader, "get_text_from_rect"):
-                try:
-                    text = self._reader.get_text_from_rect(self._reader.current_page, coords) or ""
-                except Exception:
-                    text = ""
+            text = self._selection_text(coords)
 
             action_highlight = QAction("🖍️ Destacar", self)
             action_highlight.triggered.connect(
@@ -1378,11 +1483,37 @@ class ReaderView(QWidget):
         # Limpa a seleção armazenada após usar o menu
         self._last_selection_coords = None
 
+    def _selection_text(self, coords: tuple[float, float, float, float]) -> str:
+        """Texto da seleção atual: fluxo de texto quando disponível, senão rect.
+
+        O fluxo (get_selection_flow) respeita frases que começam/terminam no
+        meio da linha; o rect legado captura pedaços de linhas vizinhas.
+        """
+        flow = getattr(self, "_last_selection_flow", None)
+        if flow and flow.get("text"):
+            return flow["text"].strip()
+        text = ""
+        if self._reader and hasattr(self._reader, "get_text_from_rect"):
+            try:
+                text = (self._reader.get_text_from_rect(self._reader.current_page, coords) or "").strip()
+            except Exception:
+                text = ""
+        return text
+
     def _highlight_selection(self, coords: tuple[float, float, float, float], text: str):
         """Salva o destaque no banco de dados e limpa a rubber band."""
         import json
-        position_data = json.dumps({"coords": list(coords)})
-        
+        payload = {"coords": list(coords)}
+        # Seleção por fluxo: grava um rect por LINHA (quads) e o bounding box
+        # em coords (compatibilidade + hit-test do "Remover Destaque").
+        flow = getattr(self, "_last_selection_flow", None)
+        if flow and flow.get("quads"):
+            qs = flow["quads"]
+            payload["coords"] = [min(q[0] for q in qs), min(q[1] for q in qs),
+                                 max(q[2] for q in qs), max(q[3] for q in qs)]
+            payload["quads"] = qs
+        position_data = json.dumps(payload)
+
         # Emite sinal para adicionar a anotação
         data = {
             "page_number": self._reader.current_page,
@@ -1413,12 +1544,7 @@ class ReaderView(QWidget):
         coords = self._last_selection_coords
         if coords is None:
             return
-        text = ""
-        if self._reader and hasattr(self._reader, "get_text_from_rect"):
-            try:
-                text = (self._reader.get_text_from_rect(self._reader.current_page, coords) or "").strip()
-            except Exception:
-                text = ""
+        text = self._selection_text(coords)
         if action == "highlight":
             self._highlight_selection(coords, text)
         elif text:
@@ -1455,13 +1581,26 @@ class ReaderView(QWidget):
         if not page_text:
             return
 
-        self._launch_audio_worker(page_text)
+        if self._continuous_translate_mode:
+            # Modo traduzido: cada página passa pelo NLLB (via MainWindow)
+            # antes de narrar; a cadeia continua em _on_audio_finished igual
+            # ao modo normal (chain_continuous é setado por narrate_text lá).
+            self.ai_action_requested.emit("read_translated_page_chained", page_text)
+            return
 
-    def _launch_audio_worker(self, text: str) -> None:
-        """Cria, conecta e inicia o AudioWorker para o texto dado (TTS)."""
+        self._launch_audio_worker(page_text, chain_continuous=True)
+
+    def _launch_audio_worker(self, text: str, chain_continuous: bool = False) -> None:
+        """Cria, conecta e inicia o AudioWorker para o texto dado (TTS).
+
+        ``chain_continuous``: só narração de PÁGINA encadeia a próxima no modo
+        contínuo (uma tradução narrada via narrate_text não vira página).
+        """
         from src.gui.workers.audio_worker import AudioWorker
         from src.core.tts.voice_profile import NarrationRole
 
+        self._audio_stopped_by_user = False
+        self._chain_continuous = chain_continuous
         self._audio_worker = AudioWorker(
             text,
             role=NarrationRole.BOOK_NARRATOR,
@@ -1477,16 +1616,21 @@ class ReaderView(QWidget):
 
         self._audio_worker.start()
 
-    def narrate_text(self, text: str) -> None:
+    def narrate_text(self, text: str, chain_continuous: bool = False) -> None:
         """Narra um texto arbitrário (ex.: uma tradução) via TTS.
 
         O idioma é autodetectado pelo AudioWorker: uma tradução em português é lida
         com voz em português; um trecho em inglês, com voz em inglês.
+
+        ``chain_continuous``: True quando esta narração faz parte da leitura
+        contínua traduzida — ao terminar, encadeia a próxima página (ver
+        _on_audio_finished). Por padrão False (uma tradução avulsa não vira
+        página sozinha).
         """
         if not text or not text.strip():
             return
         self._stop_audio_if_running()
-        self._launch_audio_worker(text.strip())
+        self._launch_audio_worker(text.strip(), chain_continuous=chain_continuous)
 
     def _pause_audio(self):
         """Pausa a narração (retomável no mesmo ponto)."""
@@ -1512,16 +1656,123 @@ class ReaderView(QWidget):
         self._audio_btn.setToolTip("Pausar Leitura (TTS)")
         self._audio_stop_btn.setVisible(True)
 
-    def _on_audio_finished(self, chunks):
-        pass
+    def _on_read_translated_page(self):
+        """Narra a página atual traduzida para PT (item 7 do backlog UX).
 
-    def _on_audio_error(self, err_msg):
+        O texto vai para o MainWindow (ai_action_requested), que orquestra a
+        tradução NLLB em background e devolve via narrate_text.
+        """
+        if not self._reader:
+            return
+        page = self._reader.current_page
+        page_text = ""
+        if hasattr(self._reader, "get_page_text"):
+            page_text = self._reader.get_page_text(page)
+        elif hasattr(self._reader, "get_chapter_text"):
+            page_text = self._reader.get_chapter_text(page)
+        page_text = (page_text or "").strip()
+        if not page_text:
+            self._show_status("⚠️ Página sem texto para traduzir/narrar.", 4000)
+            return
+        self.ai_action_requested.emit("read_translated_page", page_text)
+
+    def _on_translate_page(self):
+        """Traduz a página atual como TEXTO — cartão no painel, sem narrar."""
+        if not self._reader:
+            return
+        page_text = ""
+        if hasattr(self._reader, "get_page_text"):
+            page_text = self._reader.get_page_text(self._reader.current_page)
+        elif hasattr(self._reader, "get_chapter_text"):
+            page_text = self._reader.get_chapter_text(self._reader.current_page)
+        page_text = (page_text or "").strip()
+        if not page_text:
+            self._show_status("⚠️ Página sem texto para traduzir.", 4000)
+            return
+        self.ai_action_requested.emit("translate_page", page_text)
+
+    def _toggle_continuous_reading(self, checked: bool):
+        """Liga/desliga a leitura contínua (persiste na config)."""
+        self._continuous_reading = bool(checked)
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            try:
+                config.set("tts.continuous_reading", self._continuous_reading)
+            except Exception:
+                pass
+        self._show_status(
+            "🔁 Leitura contínua ativada — a narração vira as páginas." if checked
+            else "Leitura contínua desativada.", 4000)
+
+    def _toggle_continuous_translate_reading(self, checked: bool):
+        """Liga/desliga a leitura contínua TRADUZIDA (persiste na config)."""
+        self._continuous_translate_mode = bool(checked)
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            try:
+                config.set("tts.continuous_translate_reading", self._continuous_translate_mode)
+            except Exception:
+                pass
+        self._show_status(
+            "🌐🔁 Leitura contínua traduzida ativada — cada página é traduzida antes de narrar."
+            if checked else "Leitura contínua traduzida desativada.", 4000)
+
+    def _show_status(self, msg: str, ms: int = 4000):
         parent_window = self.window()
         if parent_window and hasattr(parent_window, "_statusbar") and parent_window._statusbar:
-            parent_window._statusbar.showMessage(f"Erro de Áudio: {err_msg}", 5000)
+            parent_window._statusbar.showMessage(msg, ms)
+
+    def _on_audio_finished(self, chunks):
+        """Fim natural da narração: no modo contínuo, encadeia a próxima página.
+
+        Cobre os dois modos (normal e traduzido) — sem o "or", o modo
+        traduzido não encadearia quando a leitura contínua normal está
+        desligada (são toggles independentes).
+        """
+        if not ((self._continuous_reading or self._continuous_translate_mode)
+                and self._chain_continuous):
+            return
+        if self._audio_stopped_by_user or not self._reader:
+            return
+        # Pequena pausa entre páginas; singleShot também deixa o QThread do
+        # worker atual terminar antes de criarmos o próximo.
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(400, self._continue_narration)
+
+    def _continue_narration(self):
+        """Avança para a próxima página com texto e narra (modo contínuo)."""
+        from src.core.audio.continuous_navigation import find_next_readable_page
+
+        if not self._continuous_reading or not self._reader:
+            return
+        worker = getattr(self, "_audio_worker", None)
+        if worker and worker.isRunning():
+            return  # algo já narra (ex.: usuário deu play manual no meio)
+        if self._audio_stopped_by_user:
+            return
+        get_text = (getattr(self._reader, "get_page_text", None)
+                    or getattr(self._reader, "get_chapter_text", None))
+        if get_text is None:
+            return
+        nxt = find_next_readable_page(
+            get_text, self._reader.current_page, self._reader.total_pages)
+        if nxt is None:
+            self._show_status("🔁 Fim do livro — leitura contínua encerrada.", 5000)
+            return
+        self._go_to_page(nxt)
+        self._toggle_audio()
+
+    def _on_audio_error(self, err_msg):
+        self._show_status(f"Erro de Áudio: {err_msg}", 5000)
 
     def _on_audio_worker_finished(self):
         """Garante a limpeza de referências e restaura o estado visual do botão."""
+        # Modo contínuo: o QThread antigo pode terminar DEPOIS de o próximo
+        # worker já ter sido criado — só limpa a UI se este é o worker atual.
+        finished_worker = self.sender()
+        if finished_worker is not None and finished_worker is not getattr(self, "_audio_worker", None):
+            finished_worker.deleteLater()
+            return
         self._audio_paused = False
         self._audio_btn.setText("🔊 Ouvir")
         self._audio_btn.setToolTip("Ouvir Página (TTS)")
@@ -1533,6 +1784,7 @@ class ReaderView(QWidget):
 
     def _stop_audio_if_running(self):
         """Para a narração por completo (libera o worker) e restaura a UI."""
+        self._audio_stopped_by_user = True
         if hasattr(self, '_audio_worker') and self._audio_worker and self._audio_worker.isRunning():
             self._audio_worker.stop()
             self._audio_worker.wait(2000)
@@ -1602,7 +1854,37 @@ class ReaderView(QWidget):
             action.triggered.connect(lambda checked, k=key: config.set("tts.book_narrator.preferred_provider", k))
             provider_menu.addAction(action)
 
-        # 3. Seleção de Estilo / Voz
+        # 3. Voz específica da narração (por idioma, vinda do provider ativo)
+        voice_menu = menu.addMenu("🎙️ Voz da Narração")
+        current_voice = config.get("tts.book_narrator.voice_id", None)
+        auto_action = QAction("🌐 Automática (por idioma)", voice_menu, checkable=True)
+        auto_action.setChecked(not current_voice)
+        auto_action.triggered.connect(
+            lambda checked: config.set("tts.book_narrator.voice_id", None))
+        voice_menu.addAction(auto_action)
+        voices_by_lang = {}
+        if self._tts_router is not None:
+            try:
+                voices_by_lang = self._tts_router.voices_by_language(current_provider)
+            except Exception:
+                voices_by_lang = {}
+        lang_labels = {"pt": "🇧🇷 Português", "en": "🇺🇸 English"}
+        for lang in sorted(voices_by_lang):
+            sub = voice_menu.addMenu(lang_labels.get(lang, lang.upper()))
+            for voice in voices_by_lang[lang]:
+                gender = getattr(voice, "gender", "") or ""
+                label = f"{voice.name} ({gender})" if gender not in ("", "neutral") else voice.name
+                v_action = QAction(label, sub, checkable=True)
+                v_action.setChecked(current_voice == voice.voice_id)
+                v_action.triggered.connect(
+                    lambda checked, vid=voice.voice_id: config.set("tts.book_narrator.voice_id", vid))
+                sub.addAction(v_action)
+        if not voices_by_lang:
+            none_action = QAction("(motor não lista vozes — usa a automática)", voice_menu)
+            none_action.setEnabled(False)
+            voice_menu.addAction(none_action)
+
+        # 4. Seleção de Estilo / Voz
         style_menu = menu.addMenu("🗣️ Voz / Estilo")
         current_style = config.get("tts.book_narrator.style", "serene")
         

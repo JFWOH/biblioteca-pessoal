@@ -46,6 +46,14 @@ class MainWindow(QMainWindow):
         # Inicializa core
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self._db = LibraryDB()
+        # Limpeza única de anotações duplicadas históricas (cliques repetidos
+        # antes da guarda de dedup no add_annotation). Nunca bloqueia o start.
+        try:
+            removed = self._db.dedupe_annotations()
+            if removed:
+                logger.info(f"Anotações duplicadas removidas na limpeza: {removed}")
+        except Exception as exc:
+            logger.warning(f"Falha na limpeza de anotações duplicadas (ignorado): {exc}")
         self._config = ConfigManager()
         self._library = LibraryManager(self._db, self._config)
         self._search_engine = SearchEngine(self._db)
@@ -61,6 +69,23 @@ class MainWindow(QMainWindow):
         self._rag_engine = None
         self._rag_worker = None
         self._setup_rag_engine()
+
+        # Grafo de conceitos (Fase 2): ingestão em background dirigida pela leitura.
+        from src.gui.graph_ingest_service import GraphIngestService
+        self._graph_service = GraphIngestService(
+            db=self._db, rag_engine=self._rag_engine, config=self._config, parent=self)
+
+        # Auto-indexação RAG em ocioso: livros sem indexed_ok são indexados em
+        # background (1 por vez), destravando RAG e grafo para toda a biblioteca.
+        from src.gui.auto_index_service import AutoIndexService
+        self._auto_index_service = AutoIndexService(
+            db=self._db, rag_engine=self._rag_engine, config=self._config,
+            busy_check=lambda: bool(self._rag_worker and self._rag_worker.isRunning()),
+            parent=self)
+        self._auto_index_service.indexing_started.connect(
+            lambda _bid, title: self._statusbar.showMessage(
+                f"📚 Indexando em segundo plano: {title}…", 10000))
+        self._auto_index_service.indexing_finished.connect(self._on_auto_index_finished)
 
         self._setup_window()
         self._setup_menu()
@@ -225,6 +250,9 @@ class MainWindow(QMainWindow):
         self._book_details.add_to_collection_requested.connect(self._add_book_to_collection)
         self._book_details.remove_from_collection_requested.connect(self._remove_from_collection)
         self._book_details.fetch_metadata_requested.connect(self._on_fetch_metadata)
+        self._book_details.related_book_clicked.connect(self._on_book_selected)
+        self._book_details.dossier_requested.connect(self._open_book_dossier)
+        self._graph_service.graph_updated.connect(self._on_graph_updated)
         lib_splitter.addWidget(self._book_details)
 
         lib_splitter.setStretchFactor(0, 1)
@@ -239,8 +267,12 @@ class MainWindow(QMainWindow):
         self._reader_view.progress_changed.connect(self._on_progress)
         self._reader_view.annotation_added.connect(self._on_annotation_added)
         self._reader_view.annotation_deleted.connect(self._on_annotation_deleted)
+        self._reader_view.annotation_renamed.connect(self._on_annotation_renamed)
         self._reader_view.fullscreen_toggled.connect(self._on_fullscreen)
         self._reader_view.reading_context_updated.connect(lambda b, t, p, txt: self._rag_panel.set_reading_context(b, t, p, txt))
+        self._reader_view.reading_context_updated.connect(self._graph_service.on_page_context)
+        # Auto-indexação: leitura ativa adia o processamento em ocioso.
+        self._reader_view.reading_context_updated.connect(self._auto_index_service.on_activity)
         self._reader_view.ai_action_requested.connect(self._on_ai_action_requested)
         self._main_stack.addWidget(self._reader_view)  # index 1
 
@@ -370,6 +402,19 @@ class MainWindow(QMainWindow):
         if book:
             self._book_details.show_book(book)
 
+    def _open_book_dossier(self, book_id: int):
+        """Abre o dossiê do livro (Fase 4 — grafo). Só lê dados já ingeridos."""
+        from src.gui.dialogs.book_dossier_dialog import BookDossierDialog
+
+        dialog = BookDossierDialog(
+            self._db, book_id,
+            ollama_url=self._config.get("rag.ollama_url", "http://localhost:11434"),
+            model=self._config.get("rag.llm_model", "gemma4:e4b"),
+            parent=self,
+        )
+        dialog.open_book_requested.connect(self._on_book_selected)
+        dialog.exec()
+
     def _on_book_open(self, book_id: int):
         if book_id == -1:
             # Signal especial: abrir diálogo de importação
@@ -441,7 +486,7 @@ class MainWindow(QMainWindow):
         if self._reader_view._book_id > 0 and book_id != self._reader_view._book_id:
             book_id = self._reader_view._book_id
 
-        self._db.add_annotation(
+        ann_id = self._db.add_annotation(
             book_id=book_id,
             page_number=data.get("page", data.get("page_number", 0)),
             content=data.get("content", ""),
@@ -453,11 +498,51 @@ class MainWindow(QMainWindow):
         # Recarrega anotações no painel
         annotations = self._db.get_annotations(book_id)
         self._reader_view.load_annotations(annotations)
+        # Grafo de conceitos: anotação nova alimenta o grafo (nunca quebra o salvar).
+        try:
+            text = f"{data.get('title', '')} {data.get('content', '')}".strip()
+            self._graph_service.on_annotation_saved(
+                book_id, ann_id, data.get("page", data.get("page_number", 0)), text)
+        except Exception as exc:
+            logger.warning(f"Falha ao alimentar o grafo com a anotação (ignorado): {exc}")
+
+    def _on_auto_index_finished(self, book_id: int, title: str, status: str):
+        """Feedback discreto da auto-indexação + atualização do contador RAG."""
+        if status == "indexed_ok":
+            self._statusbar.showMessage(f"✅ '{title}' indexado em segundo plano.", 5000)
+            try:
+                self._rag_panel.set_indexed_count(
+                    self._rag_engine.get_indexed_count() if self._rag_engine else 0)
+            except Exception as exc:
+                logger.warning(f"Falha ao atualizar contador de indexados (ignorado): {exc}")
+        else:
+            self._statusbar.showMessage(
+                f"⚠️ Indexação de '{title}' não concluída ({status}).", 5000)
+
+    def _on_graph_updated(self, book_id: int):
+        """Grafo ganhou dados novos: atualiza o painel se o livro está em foco."""
+        try:
+            current = self._book_details._book
+            if current and current.get("id") == book_id:
+                self._book_details.refresh_graph_section()
+        except Exception as exc:
+            logger.warning(f"Falha ao atualizar a seção do grafo (ignorado): {exc}")
 
     def _on_annotation_deleted(self, annotation_id: int):
         """Remove uma anotação do banco."""
         self._db.delete_annotation(annotation_id)
         # Recarrega (precisa saber o book_id — pega do reader)
+        book_id = self._reader_view._book_id
+        annotations = self._db.get_annotations(book_id)
+        self._reader_view.load_annotations(annotations)
+
+    def _on_annotation_renamed(self, annotation_id: int, title: str):
+        """Renomeia o título de uma anotação (inclui notas da IA)."""
+        try:
+            self._db.update_annotation_title(annotation_id, title)
+        except Exception as exc:
+            logger.warning(f"Falha ao renomear anotação (ignorado): {exc}")
+            return
         book_id = self._reader_view._book_id
         annotations = self._db.get_annotations(book_id)
         self._reader_view.load_annotations(annotations)
@@ -752,6 +837,22 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
             self._rag_engine = None
 
+        # Warmup dos modelos alguns segundos após a UI abrir (não compete com
+        # o startup). Gracioso: Ollama fora do ar vira log debug, nunca erro.
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(3000, self._start_llm_warmup)
+
+    def _start_llm_warmup(self) -> None:
+        """Pré-carrega LLM e embeddings na VRAM para a 1ª ação de IA ser quente."""
+        from src.gui.workers.warmup_worker import WarmupWorker
+        self._warmup_worker = WarmupWorker(
+            ollama_url=self._config.get("rag.ollama_url", "http://localhost:11434"),
+            llm_model=self._config.get("rag.llm_model", "gemma4:e4b"),
+            embed_model=self._config.get("rag.embed_model", "bge-m3"),
+            parent=self,
+        )
+        self._warmup_worker.start()
+
     def _check_ollama_status(self) -> None:
         """Verifica status do Ollama, aciona o wizard se ausente, e atualiza o painel RAG."""
         if self._rag_engine is None:
@@ -773,6 +874,11 @@ class MainWindow(QMainWindow):
             models = self._rag_engine.list_local_models()
             installed_names = [m["name"] for m in models]
             self._rag_panel.update_model_list(installed_names)
+            # Daemon presente mas SEM modelos (instalado por fora / wizard
+            # pulado): puxa em background os recomendados pelo hardware —
+            # o usuário nunca precisa abrir terminal para baixar modelo.
+            if not installed_names:
+                self._start_model_pull()
 
         model = self._config.get("rag.llm_model", "gemma4:e4b")
         self._rag_panel.set_ollama_status(available, model if available else "")
@@ -802,6 +908,41 @@ class MainWindow(QMainWindow):
         self._rag_panel.set_standalone_mode(True)
         self._main_stack.setCurrentIndex(3)
         self._check_ollama_status()
+
+    def _start_model_pull(self) -> None:
+        """Baixa em background os modelos de IA recomendados pelo hardware."""
+        worker = getattr(self, "_model_pull_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        try:
+            from src.core.hardware_capability_service import HardwareCapabilityService
+            from src.gui.workers.install_worker import OllamaModelPullWorker
+
+            hw = HardwareCapabilityService()
+            models = [hw.get_recommended_llm_model(), HardwareCapabilityService.EMBED_MODEL]
+            self._statusbar.showMessage(
+                f"🤖 Baixando modelos de IA recomendados ({', '.join(models)})…", 10000)
+            self._model_pull_worker = OllamaModelPullWorker(models, parent=self)
+            self._model_pull_worker.progress_updated.connect(
+                lambda msg: self._statusbar.showMessage(msg, 10000))
+            self._model_pull_worker.finished_pull.connect(self._on_model_pull_finished)
+            self._model_pull_worker.start()
+        except Exception as exc:
+            logger.warning(f"Falha ao iniciar o download de modelos (ignorado): {exc}")
+
+    def _on_model_pull_finished(self, all_ok: bool) -> None:
+        if all_ok:
+            self._statusbar.showMessage("✅ Modelos de IA prontos — assistente disponível.", 6000)
+        else:
+            self._statusbar.showMessage(
+                "⚠️ Download de modelos incompleto — verifique a conexão e reabra o app.", 8000)
+        # Atualiza a lista de modelos no painel com o que chegou.
+        try:
+            if self._rag_engine is not None:
+                models = self._rag_engine.list_local_models()
+                self._rag_panel.update_model_list([m["name"] for m in models])
+        except Exception as exc:
+            logger.warning(f"Falha ao atualizar lista de modelos (ignorado): {exc}")
 
     def _on_rag_query(self, question: str) -> None:
         """Inicia uma consulta RAG em background."""
@@ -852,20 +993,20 @@ class MainWindow(QMainWindow):
     def _on_ai_action_requested(self, action_type: str, text: str) -> None:
         """Processa requisições de IA vindas do menu de contexto de leitura."""
         if action_type == "translate":
-            self._statusbar.showMessage("🌐 Iniciando tradução offline...", 5000)
+            # Cartão no painel do assistente (substitui o antigo QMessageBox — a
+            # tradução fica no mesmo lugar onde o resto da conversa acontece).
+            if self._rag_panel.parentWidget() != self._reader_view:
+                self._reader_view.set_ai_panel(self._rag_panel)
+            self._reader_view.show_ai_panel()
+
+            self._statusbar.showMessage(
+                f"🌐 Traduzindo seleção ({len(text)} caracteres)...", 15000)
             from src.gui.translation_service import TranslationService
-            
+
             def on_success(result):
                 self._statusbar.clearMessage()
-                from PyQt6.QtWidgets import QMessageBox
-                from PyQt6.QtCore import Qt
-                msg = QMessageBox(self)
-                msg.setWindowTitle("Tradução Offline (NLLB-200)")
-                msg.setText(result)
-                msg.setModal(False)
-                msg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-                msg.show()
-                self._translation_msg = msg  # Evitar coleta de lixo prematura
+                self._rag_panel.show_translation_card(
+                    f"Seleção ({len(text)} caracteres)", text, result)
 
             def on_error(err):
                 self._statusbar.showMessage(f"⚠️ Erro na tradução offline: {err}", 5000)
@@ -904,6 +1045,23 @@ class MainWindow(QMainWindow):
         elif action_type == "flashcard":
             self._open_anki_export_dialog(front=text, back="")
             return
+        elif action_type == "flashcard_qa":
+            # Insight do proativo → LLM destila em pergunta/resposta (item 1 UX).
+            self._generate_flashcard_qa(text)
+            return
+        elif action_type == "read_translated_page":
+            # Página inteira: traduz offline (NLLB) e narra o resultado (item 7 UX).
+            self._translate_and_narrate(text, enable_chaining=False)
+            return
+        elif action_type == "read_translated_page_chained":
+            # Leitura contínua TRADUZIDA (Commit 5): narra e, ao terminar,
+            # encadeia a tradução+narração da próxima página com texto.
+            self._translate_and_narrate(text, enable_chaining=True)
+            return
+        elif action_type == "translate_page":
+            # Página inteira como TEXTO: cartão no painel, sem narrar.
+            self._translate_page_as_text(text)
+            return
         elif action_type in ("explain_page", "summarize", "glossary", "flashcards"):
             from src.core.study_prompts import build_study_prompt
             question = build_study_prompt(action_type, text)
@@ -931,6 +1089,168 @@ class MainWindow(QMainWindow):
             current_book_id = self._reader_view._book_id
         dialog = FlashcardsDialog(self._db, current_book_id=current_book_id, parent=self)
         dialog.exec()
+
+    def _translate_and_narrate(self, text: str, enable_chaining: bool):
+        """Traduz a página em background (NLLB) e narra o resultado em PT.
+
+        Página já em português → narra direto (traduzir seria inútil).
+        Graceful (ADR-005): erro de tradução vira aviso na statusbar E não
+        encadeia a próxima página — o loop contínuo traduzido morre
+        naturalmente em vez de continuar num estado inconsistente.
+
+        ``enable_chaining``: False para a ação avulsa "Ler Página Traduzida"
+        (Commit 4 e anteriores); True para a leitura contínua traduzida
+        (Commit 5) — repassado para narrate_text(chain_continuous=...), que
+        aciona _on_audio_finished → _continue_narration ao terminar.
+        """
+        from src.core.tts.language_detect import detect_language
+
+        if getattr(self, "_page_translation_pending", False):
+            self._statusbar.showMessage("🌐 Já estou traduzindo uma página — aguarde…", 3000)
+            return
+
+        reader = self._reader_view._reader
+        page_label = f"{reader.current_page + 1}/{reader.total_pages}" if reader else "?"
+
+        if detect_language(text).lower().startswith("pt"):
+            self._statusbar.showMessage(
+                f"ℹ️ Página {page_label} já está em português — narrando o original.", 4000)
+            self._reader_view.narrate_text(text, chain_continuous=enable_chaining)
+            return
+
+        self._statusbar.showMessage(f"🌐 Traduzindo página {page_label}…", 60000)
+        self._page_translation_pending = True
+
+        def _on_success(result: str):
+            self._page_translation_pending = False
+            if not (result or "").strip():
+                self._statusbar.showMessage("⚠️ Tradução vazia — nada a narrar.", 5000)
+                return
+            self._statusbar.showMessage(f"🔊 Narrando página {page_label}…", 5000)
+            self._reader_view.narrate_text(result, chain_continuous=enable_chaining)
+
+        def _on_error(err: str):
+            self._page_translation_pending = False
+            self._statusbar.showMessage(f"⚠️ Erro na tradução offline: {err}", 6000)
+            # Sem encadear: o loop contínuo traduzido morre aqui (ADR-005) em
+            # vez de tentar continuar a partir de um estado de erro.
+
+        try:
+            from src.gui.translation_service import TranslationService
+            TranslationService.get_instance().translate_async(
+                text, src_lang="en", tgt_lang="pt",
+                on_success=_on_success, on_error=_on_error)
+        except Exception as exc:
+            self._page_translation_pending = False
+            logger.warning(f"Falha ao iniciar a tradução da página (ignorado): {exc}")
+            self._statusbar.showMessage("⚠️ Tradução indisponível no momento.", 5000)
+
+    def _translate_page_as_text(self, text: str):
+        """Traduz a página inteira como TEXTO (cartão no painel), sem narrar.
+
+        Página já em português → mostra o texto original direto no cartão
+        (evita chamar o NLLB à toa). Graceful (ADR-005): erro vira aviso na
+        statusbar. O "aviso do que está sendo processado" é a contagem de
+        caracteres na statusbar + no header do cartão.
+        """
+        from src.core.tts.language_detect import detect_language
+
+        if getattr(self, "_page_translation_pending", False):
+            self._statusbar.showMessage("🌐 Já estou traduzindo uma página — aguarde…", 3000)
+            return
+
+        page = self._reader_view._reader.current_page + 1 if self._reader_view._reader else 0
+        source_desc = f"Página {page} inteira"
+
+        if self._rag_panel.parentWidget() != self._reader_view:
+            self._reader_view.set_ai_panel(self._rag_panel)
+        self._reader_view.show_ai_panel()
+
+        if detect_language(text).lower().startswith("pt"):
+            self._statusbar.showMessage("ℹ️ A página já está em português.", 4000)
+            self._rag_panel.show_translation_card(source_desc, text, text)
+            return
+
+        self._statusbar.showMessage(
+            f"🌐 Traduzindo {source_desc.lower()} ({len(text)} caracteres)…", 60000)
+        self._page_translation_pending = True
+
+        def _on_success(result: str):
+            self._page_translation_pending = False
+            if not (result or "").strip():
+                self._statusbar.showMessage("⚠️ Tradução vazia.", 5000)
+                return
+            self._statusbar.clearMessage()
+            self._rag_panel.show_translation_card(source_desc, text, result)
+
+        def _on_error(err: str):
+            self._page_translation_pending = False
+            self._statusbar.showMessage(f"⚠️ Erro na tradução offline: {err}", 6000)
+
+        try:
+            from src.gui.translation_service import TranslationService
+            TranslationService.get_instance().translate_async(
+                text, src_lang="en", tgt_lang="pt",
+                on_success=_on_success, on_error=_on_error)
+        except Exception as exc:
+            self._page_translation_pending = False
+            logger.warning(f"Falha ao iniciar a tradução da página (ignorado): {exc}")
+            self._statusbar.showMessage("⚠️ Tradução indisponível no momento.", 5000)
+
+    def _generate_flashcard_qa(self, text: str):
+        """Gera pergunta/resposta a partir de um insight e abre o diálogo do Anki.
+
+        Fallback (Ollama fora / resposta inválida): abre o diálogo com o insight
+        no VERSO e a pergunta em branco — nunca mais o insight como "pergunta".
+        """
+        from src.gui.workers.flashcard_qa_worker import FlashcardQAWorker
+
+        worker = getattr(self, "_flashcard_qa_worker", None)
+        if worker is not None and worker.isRunning():
+            self._statusbar.showMessage("🃏 Já estou gerando um flashcard — aguarde…", 3000)
+            return
+
+        self._statusbar.showMessage("🃏 Gerando flashcard (pergunta/resposta)…", 15000)
+        self._flashcard_qa_worker = FlashcardQAWorker(
+            text,
+            ollama_url=self._config.get("rag.ollama_url", "http://localhost:11434"),
+            parent=self,
+        )
+
+        # Feedback visível: a geração pode levar alguns segundos; o diálogo de
+        # progresso (indeterminado, com Cancelar) deixa claro que algo acontece.
+        from PyQt6.QtWidgets import QProgressDialog
+        progress = QProgressDialog("🃏 Gerando flashcard (pergunta/resposta)…",
+                                   "Cancelar", 0, 0, self)
+        progress.setWindowTitle("Flashcard")
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.canceled.connect(self._flashcard_qa_worker.cancel)
+        progress.show()
+        self._flashcard_qa_progress = progress
+
+        def _close_progress():
+            try:
+                progress.canceled.disconnect(self._flashcard_qa_worker.cancel)
+            except (TypeError, RuntimeError):
+                pass
+            progress.close()
+
+        def _on_generated(front: str, back: str):
+            _close_progress()
+            self._statusbar.clearMessage()
+            self._open_anki_export_dialog(front=front, back=back)
+
+        def _on_failed(reason: str):
+            _close_progress()
+            logger.warning(f"Flashcard P/R indisponível ({reason}); usando fallback.")
+            self._statusbar.showMessage(
+                "⚠️ Sem LLM agora — complete a pergunta manualmente.", 5000)
+            self._open_anki_export_dialog(front="", back=text)
+
+        self._flashcard_qa_worker.generated.connect(_on_generated)
+        self._flashcard_qa_worker.failed.connect(_on_failed)
+        self._flashcard_qa_worker.start()
 
     def _open_anki_export_dialog(self, front: str, back: str):
         """Abre o diálogo de exportação para o Anki."""
@@ -1182,6 +1502,16 @@ class MainWindow(QMainWindow):
     # ── Lifecycle ──────────────────────────────────────────────────────
 
     def closeEvent(self, event):
+        # Para o serviço do grafo (cancel cooperativo)
+        try:
+            self._graph_service.shutdown()
+        except Exception as exc:
+            logger.warning(f"Falha ao encerrar o serviço do grafo (ignorado): {exc}")
+        # Para a auto-indexação
+        try:
+            self._auto_index_service.shutdown()
+        except Exception as exc:
+            logger.warning(f"Falha ao encerrar a auto-indexação (ignorado): {exc}")
         # Para o worker RAG
         if self._rag_worker and self._rag_worker.isRunning():
             self._rag_worker.stop()

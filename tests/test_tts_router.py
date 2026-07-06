@@ -301,6 +301,44 @@ class TestStopAndLifecycle:
         router.stop()  # _active_player é None — não deve levantar
         assert router._is_cancelled is True
 
+
+# ── Vozes por idioma (menu da GUI) ───────────────────────────────────
+
+class _VoicedProvider(FakeProvider):
+    def available_voices(self):
+        return [
+            VoiceInfo(voice_id="pf_dora", name="Dora", language="pt-BR", gender="female"),
+            VoiceInfo(voice_id="pm_alex", name="Alex", language="pt-BR", gender="male"),
+            VoiceInfo(voice_id="af_bella", name="Bella", language="en-US", gender="female"),
+            VoiceInfo(voice_id="ja_x", name="Jp", language="ja-JP"),
+        ]
+
+
+class TestVoicesByLanguage:
+    def test_groups_by_language_prefix(self):
+        router = TTSRouter()
+        router.register_provider(_VoicedProvider("Kokoro", "B"))
+        by_lang = router.voices_by_language("kokoro")
+        assert [v.voice_id for v in by_lang["pt"]] == ["pf_dora", "pm_alex"]
+        assert [v.voice_id for v in by_lang["en"]] == ["af_bella"]
+        assert "ja" not in by_lang  # fora dos idiomas pedidos
+
+    def test_unknown_provider_returns_empty(self):
+        router = TTSRouter()
+        assert router.voices_by_language("inexistente") == {}
+
+    def test_provider_without_voices_returns_empty(self):
+        router = TTSRouter()
+        router.register_provider(FakeProvider("Mudo", "C"))  # base: available_voices = []
+        assert router.voices_by_language("mudo") == {}
+
+    def test_provider_error_is_graceful(self):
+        router = TTSRouter()
+        broken = _VoicedProvider("Quebrado", "B")
+        broken.available_voices = lambda: (_ for _ in ()).throw(RuntimeError("x"))
+        router.register_provider(broken)
+        assert router.voices_by_language("quebrado") == {}
+
     def test_shutdown_clears_providers(self):
         router = TTSRouter()
         router.register_provider(FakeProvider("A", "A"))

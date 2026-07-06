@@ -10,6 +10,14 @@ from src.core.rag.trace_logger import TraceLogger
 
 logger = logging.getLogger(__name__)
 
+# Ferramentas de efeito colateral (mutação de UI) que não exigem mais nenhuma
+# rodada de raciocínio depois de executadas — ao contrário de vector_search/
+# keyword_search/cross_reference, cujo resultado o modelo ainda precisa
+# incorporar numa resposta. Usado para encerrar o loop sem pedir ao modelo
+# para "responder de novo" quando ele já escreveu a explicação nesta rodada
+# (ver Orchestrator.query_rag, Caso 2).
+_ACTION_ONLY_TOOLS = frozenset({"highlight_book_text", "create_ai_bookmark"})
+
 # Lista de Stopwords em Português e Inglês para Heurística Determinística Offline
 PORTUGUESE_STOPWORDS = {
     "a", "o", "os", "as", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas",
@@ -36,9 +44,17 @@ PORTUGUESE_STOPWORDS = {
 }
 
 
+# Nº máximo de vezes que uma resposta truncada por num_predict (done_reason
+# "length") é retomada com "Continue exatamente de onde parou.". Compartilhado
+# entre o loop principal e o fallback de final de orçamento (mesmo contador em
+# AgentState.continuation_count) — uma resposta longa pode precisar de uma
+# retomada em cada um dos dois pontos.
+_MAX_CONTINUATIONS = 2
+
+
 class Orchestrator:
     """Orquestrador do loop de agente RAG resiliente e tolerante a falhas.
-    
+
     Gerencia a execução de ferramentas com tratamento de exceções, fallbacks elegantes
     e heurísticas de encerramento precoce (Early-Exit).
     """
@@ -522,6 +538,22 @@ class Orchestrator:
         trace_logger.emit("query_completed", step=state.current_round + 1, payload=final_result)
         return final_result
 
+    def _finalize_success(self, question: str, book_id: Optional[int], answer_acc: list,
+                         state: AgentState, trace_logger: TraceLogger) -> None:
+        """Persiste o turno e emite o trace de encerramento de uma resposta bem-sucedida."""
+        if hasattr(self.engine, "append_chat_turn"):
+            self.engine.append_chat_turn(book_id, question, "".join(answer_acc))
+        payload = {
+            "sources_used": list(state.sources_used),
+            "books_consulted": list(state.books_consulted),
+            "repeated_result_count": state.repeated_result_count,
+            "errors": state.errors,
+            "web_seen": state.web_seen,
+            "ui_mutation_requested": state.ui_mutation_requested,
+            "called_tools": state.called_tools,
+        }
+        trace_logger.emit("query_completed", step=state.current_round + 1, payload=payload)
+
     def _call_chat_api(self, msgs: list, stream: bool = False, temperature: float | None = None) -> Any:
         """Helper para chamar o Ollama Chat API."""
         import urllib.request
@@ -529,15 +561,24 @@ class Orchestrator:
         options = {
             "num_predict": 4096,
             "num_ctx": 8192,
+            # Mitiga repetição literal de parágrafos inteiros em respostas longas
+            # (modelos locais menores tendem a "reiniciar" a mesma explicação).
+            # repeat_last_n amplo o bastante para enxergar parágrafos anteriores,
+            # não só as últimas palavras; não mexe em num_predict/num_ctx, então
+            # a profundidade de raciocínio dos modelos gemma4 é preservada.
+            "repeat_penalty": 1.15,
+            "repeat_last_n": 512,
         }
         if temperature is not None:
             options["temperature"] = temperature
 
+        from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
         payload_dict = {
             "model": self.engine._llm_model.strip(),
             "messages": msgs,
             "stream": stream,
             "tools": _TOOLS_DEF,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
             "options": options,
         }
 
@@ -550,6 +591,53 @@ class Orchestrator:
             method="POST",
         )
         return urllib.request.urlopen(req, timeout=120)
+
+    # ── Tools de grafo (Fase 3) — read-only sobre o GraphStore ────────
+
+    def _graph_store(self):
+        """GraphStore sob demanda (padrão do engine: LibraryDB por db_path)."""
+        from src.core.database import LibraryDB
+        from src.core.graph.graph_store import GraphStore
+        return GraphStore(LibraryDB(str(self.engine._db_path)))
+
+    def execute_graph_concept_lookup(self, concept: str, state=None,
+                                     trace_logger=None) -> ToolOutput:
+        """Onde o conceito aparece na biblioteca (livros + páginas)."""
+        if state:
+            state.called_tools.append("graph_concept_lookup")
+        try:
+            from src.core.rag.tools import graph_tools
+            return graph_tools.graph_concept_lookup(self._graph_store(), concept)
+        except Exception as exc:
+            logger.warning("graph_concept_lookup falhou: %s", exc)
+            return create_tool_output(status="error", data=[],
+                                      error_message=str(exc), confidence=0.0)
+
+    def execute_graph_related_books(self, book_id, state=None,
+                                    trace_logger=None) -> ToolOutput:
+        """Livros conectados a um livro por conceitos compartilhados."""
+        if state:
+            state.called_tools.append("graph_related_books")
+        try:
+            from src.core.rag.tools import graph_tools
+            return graph_tools.graph_related_books(self._graph_store(), book_id)
+        except Exception as exc:
+            logger.warning("graph_related_books falhou: %s", exc)
+            return create_tool_output(status="error", data=[],
+                                      error_message=str(exc), confidence=0.0)
+
+    def execute_graph_book_concepts(self, book_id, state=None,
+                                    trace_logger=None) -> ToolOutput:
+        """Principais conceitos de um livro segundo o grafo."""
+        if state:
+            state.called_tools.append("graph_book_concepts")
+        try:
+            from src.core.rag.tools import graph_tools
+            return graph_tools.graph_book_concepts(self._graph_store(), book_id)
+        except Exception as exc:
+            logger.warning("graph_book_concepts falhou: %s", exc)
+            return create_tool_output(status="error", data=[],
+                                      error_message=str(exc), confidence=0.0)
 
     def _execute_tool_orchestrated(
         self,
@@ -616,6 +704,31 @@ class Orchestrator:
                     for item in out.get("data", [])
                 ]
                 return json.dumps(formatted, ensure_ascii=False)
+
+            elif fn_name == "graph_concept_lookup":
+                out = self.execute_graph_concept_lookup(
+                    args.get("concept", ""), state=state, trace_logger=trace_logger)
+                return json.dumps(out.get("data", []), ensure_ascii=False)
+
+            elif fn_name == "graph_related_books":
+                bid = args.get("book_id")
+                if isinstance(bid, str):
+                    bid = int(bid) if bid.isdigit() else None
+                if bid is None:
+                    bid = book_id
+                out = self.execute_graph_related_books(
+                    bid, state=state, trace_logger=trace_logger)
+                return json.dumps(out.get("data", []), ensure_ascii=False)
+
+            elif fn_name == "graph_book_concepts":
+                bid = args.get("book_id")
+                if isinstance(bid, str):
+                    bid = int(bid) if bid.isdigit() else None
+                if bid is None:
+                    bid = book_id
+                out = self.execute_graph_book_concepts(
+                    bid, state=state, trace_logger=trace_logger)
+                return json.dumps(out.get("data", []), ensure_ascii=False)
 
             elif fn_name == "highlight_book_text":
                 state.ui_mutation_requested = True
@@ -714,9 +827,13 @@ class Orchestrator:
 
         n = n_context or self.engine._n_context
         
+        vector_error: str | None = None
         try:
             similar = self.engine.search_similar(question, n_results=n, book_id=book_id)
         except Exception as e:
+            # Guarda o motivo real: mascará-lo com "nenhum documento encontrado"
+            # já induziu reindexações inúteis da biblioteca inteira.
+            vector_error = str(e)
             try:
                 hits = self.engine.keyword_search_db(question, book_id=book_id)
                 similar = [
@@ -735,7 +852,10 @@ class Orchestrator:
                 similar = []
 
         if not similar:
-            err_msg = "Nenhum documento foi encontrado na biblioteca indexada. Indexe seus livros primeiro usando o botão 'Reindexar Biblioteca'."
+            if vector_error:
+                err_msg = f"A busca na biblioteca falhou: {vector_error}"
+            else:
+                err_msg = "Nenhum documento foi encontrado na biblioteca indexada. Indexe seus livros primeiro usando o botão 'Reindexar Biblioteca'."
             trace_logger.emit("error", step=1, error_type="EmptyContext", error_message=err_msg)
             trace_logger.emit("query_completed", step=2, error_message=err_msg)
             yield err_msg
@@ -767,7 +887,12 @@ class Orchestrator:
         ]
 
         answer_acc: list[str] = []
-        state = AgentState(session_id=session_id, max_rounds=5, max_time_ms=25000)
+        # 25s (valor anterior) já era estourado por uma ÚNICA rodada de modelos
+        # locais de raciocínio (gemma4 gasta tokens "pensando" antes do
+        # content — uma explicação de página observada em produção levou 49s
+        # só na 1ª rodada). Orçamento maior evita que is_budget_ok() aborte a
+        # retomada de uma resposta truncada por comprimento no meio do caminho.
+        state = AgentState(session_id=session_id, max_rounds=5, max_time_ms=150000)
 
         while state.is_budget_ok():
             state.current_round += 1
@@ -825,7 +950,7 @@ class Orchestrator:
                     trace_logger.emit("final_answer_completed", step=state.current_round, round_num=state.current_round, payload={"length": len(content)})
 
                 # Tratamento de continuação (resposta truncada por limite de tokens)
-                if done_reason == "length" and getattr(state, "continuation_count", 0) < 1:
+                if done_reason == "length" and getattr(state, "continuation_count", 0) < _MAX_CONTINUATIONS:
                     state.continuation_count = getattr(state, "continuation_count", 0) + 1
                     messages.append({"role": "assistant", "content": content})
                     messages.append({"role": "user", "content": "Continue exatamente de onde parou."})
@@ -833,24 +958,13 @@ class Orchestrator:
                     continue  # Nova chamada no loop while budget_ok
 
                 # Memória por livro: grava o turno concluído.
-                if hasattr(self.engine, "append_chat_turn"):
-                    self.engine.append_chat_turn(book_id, question, "".join(answer_acc))
-
-                payload = {
-                    "sources_used": list(state.sources_used),
-                    "books_consulted": list(state.books_consulted),
-                    "repeated_result_count": state.repeated_result_count,
-                    "errors": state.errors,
-                    "web_seen": state.web_seen,
-                    "ui_mutation_requested": state.ui_mutation_requested,
-                    "called_tools": state.called_tools
-                }
-                trace_logger.emit("query_completed", step=state.current_round + 1, payload=payload)
+                self._finalize_success(question, book_id, answer_acc, state, trace_logger)
                 return
 
             # Caso 2: o modelo solicitou ferramentas nesta rodada.
             messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
             round_outputs = []
+            fn_names_this_round: list[str] = []
 
             for tool_call in tool_calls:
                 if self.engine._cancelled:
@@ -860,6 +974,7 @@ class Orchestrator:
 
                 fn = tool_call.get("function", {})
                 fn_name = fn.get("name", "")
+                fn_names_this_round.append(fn_name)
                 args = fn.get("arguments", {})
                 if isinstance(args, str):
                     try:
@@ -886,6 +1001,21 @@ class Orchestrator:
                     provenance="web" if fn_name == "search_web" else "local"
                 ))
 
+            # Se o modelo já escreveu uma explicação completa NESTA rodada e as
+            # únicas ferramentas chamadas são de efeito colateral (destaque/
+            # marcador — que não exigem incorporar resultado numa resposta
+            # futura, ao contrário de vector_search/keyword_search/
+            # cross_reference), a rodada JÁ É a resposta final: os efeitos
+            # colaterais acima já foram aplicados, então encerra aqui. Sem
+            # isto, o loop pedia ao modelo para "responder de novo" e ele
+            # reescrevia (às vezes quase palavra por palavra) a explicação
+            # que já tinha dado — o texto duplicado relatado pelo usuário.
+            if content.strip() and fn_names_this_round and all(
+                name in _ACTION_ONLY_TOOLS for name in fn_names_this_round
+            ):
+                self._finalize_success(question, book_id, answer_acc, state, trace_logger)
+                return
+
             digest = self.compute_results_digest(round_outputs)
             if state.last_result_hash and state.last_result_hash == digest:
                 state.repeated_result_count += 1
@@ -895,7 +1025,11 @@ class Orchestrator:
 
             state.last_result_hash = digest
 
-        yield "\n[⚠️ Limite de rodadas de ferramentas atingido — gerando resposta final...]\n"
+        # Alcançado tanto por esgotar as rodadas de ferramentas quanto pelo
+        # orçamento de tempo — inclusive no meio de uma retomada de resposta
+        # truncada por comprimento (sem nenhuma ferramenta chamada). A mensagem
+        # não presume qual dos dois motivos ocorreu.
+        yield "\n[⚠️ Orçamento do agente esgotado — gerando resposta final...]\n"
         trace_logger.emit("early_exit", step=state.current_round, reason="max_rounds_reached", round_num=state.current_round)
         trace_logger.emit("final_answer_started", step=state.current_round, round_num=state.current_round)
         try:
@@ -917,7 +1051,7 @@ class Orchestrator:
                         if chunk.get("done", False):
                             done_reason = chunk.get("done_reason", "")
                             trace_logger.emit("final_answer_completed", step=state.current_round, round_num=state.current_round)
-                            if done_reason == "length" and getattr(state, "continuation_count", 0) < 1:
+                            if done_reason == "length" and getattr(state, "continuation_count", 0) < _MAX_CONTINUATIONS:
                                 state.continuation_count = getattr(state, "continuation_count", 0) + 1
                                 yield "\n[⚠️ A resposta foi interrompida pelo limite de tokens. Retomando...]\n"
                                 messages.append({"role": "assistant", "content": "".join(accumulated_content)})
@@ -929,7 +1063,9 @@ class Orchestrator:
                                             try:
                                                 c = json.loads(line_cont.decode("utf-8"))
                                                 t = c.get("message", {}).get("content", "")
-                                                if t: yield t
+                                                if t:
+                                                    accumulated_content.append(t)
+                                                    yield t
                                             except json.JSONDecodeError: continue
                                 except Exception:
                                     pass

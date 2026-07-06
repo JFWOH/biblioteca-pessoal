@@ -11,8 +11,9 @@ from PyQt6.QtGui import QFont, QColor
 class AnnotationItem(QFrame):
     """Widget individual de anotação."""
 
-    delete_requested = pyqtSignal(int)  # annotation_id
-    goto_requested = pyqtSignal(int)    # page_number
+    delete_requested = pyqtSignal(int)       # annotation_id
+    goto_requested = pyqtSignal(int)         # page_number
+    rename_requested = pyqtSignal(int, str)  # annotation_id, novo título
 
     def __init__(self, annotation: dict, parent=None):
         super().__init__(parent)
@@ -29,8 +30,9 @@ class AnnotationItem(QFrame):
         # Header: tipo + página
         header = QHBoxLayout()
         ann_type = self._annotation.get("annotation_type", "highlight")
-        type_icons = {"highlight": "🖍️", "note": "📝", "bookmark": "🔖"}
-        type_labels = {"highlight": "Destaque", "note": "Nota", "bookmark": "Marcador"}
+        type_icons = {"highlight": "🖍️", "note": "📝", "bookmark": "🔖", "ai_note": "🤖"}
+        type_labels = {"highlight": "Destaque", "note": "Nota", "bookmark": "Marcador",
+                       "ai_note": "Nota da IA"}
 
         self._type_lbl = QLabel(f"{type_icons.get(ann_type, '📝')} {type_labels.get(ann_type, ann_type)}")
         self._type_lbl.setStyleSheet("color: #818cf8; font-size: 11px; font-weight: 600;")
@@ -92,6 +94,20 @@ class AnnotationItem(QFrame):
 
         footer.addStretch()
 
+        # Renomear (título) — vale para notas, destaques e notas da IA.
+        self._rename_btn = QPushButton("✏️")
+        self._rename_btn.setFixedSize(20, 20)
+        self._rename_btn.setToolTip("Renomear título")
+        self._rename_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; border: none;
+                color: #52525b; font-size: 12px;
+            }
+            QPushButton:hover { color: #10b981; }
+        """)
+        self._rename_btn.clicked.connect(self._on_rename_clicked)
+        footer.addWidget(self._rename_btn)
+
         self._del_btn = QPushButton("✕")
         self._del_btn.setFixedSize(20, 20)
         self._del_btn.setStyleSheet("""
@@ -107,6 +123,16 @@ class AnnotationItem(QFrame):
         footer.addWidget(self._del_btn)
 
         layout.addLayout(footer)
+
+    def _on_rename_clicked(self):
+        """Abre um diálogo simples para renomear o título da anotação."""
+        from PyQt6.QtWidgets import QInputDialog
+        current = self._annotation.get("title", "") or ""
+        new_title, ok = QInputDialog.getText(
+            self, "Renomear anotação", "Título:", text=current)
+        if ok and new_title.strip() != current:
+            self.rename_requested.emit(
+                self._annotation.get("id", 0), new_title.strip())
 
     def set_theme(self, theme: str):
         if theme == "light":
@@ -181,14 +207,22 @@ class AnnotationItem(QFrame):
             }}
             QPushButton:hover {{ color: #ef4444; }}
         """)
+        self._rename_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; border: none;
+                color: {del_color}; font-size: 12px;
+            }}
+            QPushButton:hover {{ color: #10b981; }}
+        """)
 
 
 class AnnotationPanel(QWidget):
     """Painel lateral para gerenciar anotações de um livro."""
 
-    annotation_deleted = pyqtSignal(int)    # annotation_id
-    goto_page = pyqtSignal(int)             # page_number
-    annotation_added = pyqtSignal(dict)     # {page, content, type, color}
+    annotation_deleted = pyqtSignal(int)     # annotation_id
+    goto_page = pyqtSignal(int)              # page_number
+    annotation_added = pyqtSignal(dict)      # {page, content, type, color}
+    annotation_renamed = pyqtSignal(int, str)  # annotation_id, novo título
 
     HIGHLIGHT_COLORS = [
         ("#fbbf24", "Amarelo"),
@@ -500,6 +534,7 @@ class AnnotationPanel(QWidget):
                 widget.set_theme(self._theme)
             widget.delete_requested.connect(self.annotation_deleted.emit)
             widget.goto_requested.connect(self.goto_page.emit)
+            widget.rename_requested.connect(self.annotation_renamed.emit)
             self._list_layout.addWidget(widget)
 
         count = len(filtered_annotations)

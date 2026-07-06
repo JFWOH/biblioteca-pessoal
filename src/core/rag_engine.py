@@ -58,7 +58,9 @@ Você também possui ferramentas visuais para alterar a interface do usuário:
 - highlight_book_text: Use para destacar visualmente um trecho importante na página aberta do livro. Escolha a cor apropriada baseado no tipo de conteúdo: "yellow" para geral ou resumos, "green" para conceitos ou definições, e "red" para pontos complexos ou alertas. Ao usar, informe ao usuário que você destacou o texto.
 - create_ai_bookmark: Use para criar marcadores de página inteligentes com resumos. Ao usar, informe ao usuário que o marcador foi criado.
 
-IMPORTANTE: Para as informações retiradas dos livros, você DEVE citar a fonte usando o formato exato: [Título do Livro, p. X] (por exemplo, [Dom Casmurro, p. 12]). Use o título e a página fornecidos no cabeçalho de cada trecho do contexto ou retornados pelas ferramentas."""
+IMPORTANTE: Para as informações retiradas dos livros, você DEVE citar a fonte usando o formato exato: [Título do Livro, p. X] (por exemplo, [Dom Casmurro, p. 12]). Use o título e a página fornecidos no cabeçalho de cada trecho do contexto ou retornados pelas ferramentas.
+
+Para perguntas sobre conexões entre livros da biblioteca ou sobre onde um conceito aparece em outros livros, prefira as ferramentas graph_* (grafo de conceitos) antes de buscas semânticas."""
 
 _TOOLS_DEF = [
     {
@@ -138,6 +140,57 @@ _TOOLS_DEF = [
                     }
                 },
                 "required": ["topic", "current_book_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "graph_concept_lookup",
+            "description": "Consulta o grafo de conceitos da biblioteca: em quais livros e páginas um conceito aparece. Ideal para 'onde mais este conceito aparece?'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "concept": {
+                        "type": "string",
+                        "description": "Nome do conceito (ex.: 'entropia')."
+                    }
+                },
+                "required": ["concept"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "graph_related_books",
+            "description": "Livros relacionados a um livro por conceitos compartilhados (grafo da biblioteca).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "book_id": {
+                        "type": "integer",
+                        "description": "Opcional. ID do livro. Nulo = livro atual."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "graph_book_concepts",
+            "description": "Principais conceitos de um livro segundo o grafo da biblioteca.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "book_id": {
+                        "type": "integer",
+                        "description": "Opcional. ID do livro. Nulo = livro atual."
+                    }
+                },
+                "required": []
             }
         }
     },
@@ -315,19 +368,32 @@ class RAGEngine:
         except Exception:
             return None
 
+    @staticmethod
+    def _model_base(name: str | None) -> str:
+        """Nome-base do modelo, sem a tag (ex.: 'bge-m3:latest' → 'bge-m3').
+
+        Tags do mesmo modelo ('bge-m3' vs 'bge-m3:latest') são aliases com a
+        MESMA dimensão de embedding — compará-las como modelos diferentes
+        bloqueava as buscas para sempre: _get_embedding resolve a tag exata e
+        grava ':latest' na metadata, mas a config traz o nome cru, e o
+        needs_reindex roda antes de qualquer embedding (mismatch eterno que
+        pedia reindex a cada reinício do app).
+        """
+        return (name or "").split(":", 1)[0].strip().lower()
+
     def needs_reindex(self) -> bool:
         """True se o índice vetorial foi construído com outro modelo de embeddings.
 
         Trocar o modelo muda a dimensão dos vetores (ex.: nomic=768 → bge-m3=1024),
         tornando a collection existente incompatível. Enquanto não reindexar, as
         buscas vetoriais devem ser bloqueadas com mensagem clara (nunca crashar com
-        erro bruto de dimensão do Chroma).
+        erro bruto de dimensão do Chroma). A comparação usa o nome-base (sem tag).
         """
         if self._collection is None:
             return False
         if self.get_indexed_count() == 0:
             return False
-        return self._stored_embed_model() != self._embed_model
+        return self._model_base(self._stored_embed_model()) != self._model_base(self._embed_model)
 
     def reset_collection(self) -> None:
         """Apaga e recria a collection vetorial (usado ao trocar o modelo de embeddings).
@@ -370,9 +436,11 @@ class RAGEngine:
                 self._embed_model = exact_embed
 
         # Tenta o endpoint novo: /api/embed
+        from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
         payload = json.dumps({
             "model": self._embed_model,
             "input": text,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
         }).encode()
         req = urllib.request.Request(
             f"{self._ollama_url}/api/embed",
@@ -393,6 +461,7 @@ class RAGEngine:
                 payload_legacy = json.dumps({
                     "model": self._embed_model,
                     "prompt": text,
+                    "keep_alive": OLLAMA_KEEP_ALIVE,
                 }).encode()
                 req_legacy = urllib.request.Request(
                     f"{self._ollama_url}/api/embeddings",
@@ -440,9 +509,11 @@ class RAGEngine:
             if exact_embed:
                 self._embed_model = exact_embed
 
+        from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
         payload = json.dumps({
             "model": self._embed_model,
             "input": texts,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
         }).encode()
 
         for attempt in range(1, _EMBED_MAX_ATTEMPTS + 1):

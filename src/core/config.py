@@ -62,6 +62,37 @@ DEFAULT_CONFIG = {
             "language": "pt-BR",
         },
         "auto_fallback": True,
+        "continuous_reading": False,  # narração vira páginas automaticamente
+    },
+    # Tradução offline (NLLB + revisão pelo LLM local).
+    "translation": {
+        "model": "facebook/nllb-200-distilled-600M",
+        "default_src": "en",
+        "default_tgt": "pt",
+        "revise_with_llm": True,   # gemma4 revisa o rascunho do NLLB (fallback: rascunho)
+    },
+    # Auto-indexação RAG: indexa livros pendentes em ocioso (1 por vez).
+    "auto_index": {
+        "enabled": True,
+        "idle_interval_s": 120,        # frequência de verificação
+        "idle_min_inactivity_s": 120,  # só roda sem leitura ativa há N segundos
+    },
+    # Grafo de conceitos (Fase 2): ingestão dirigida pela leitura + ocioso.
+    "graph": {
+        "enabled": True,
+        "use_llm_pages": False,        # páginas = heurística (evita colidir com o proativo)
+        "use_llm_annotations": True,   # anotações = LLM (raras/curtas), fallback heurístico
+        "use_llm_idle": False,
+        "llm_model": None,             # None → resolve entre os modelos instalados
+        "llm_timeout_s": 20,
+        "max_concepts_per_page": 8,
+        "max_concepts_per_annotation": 5,
+        "idle_enabled": True,
+        "idle_interval_s": 60,
+        "idle_min_inactivity_s": 90,
+        "idle_batch_pages": 25,
+        "edge_min_shared": 2,
+        "edge_df_cap": 0.5,
     },
 }
 
