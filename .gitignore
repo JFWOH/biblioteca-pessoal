@@ -53,6 +53,8 @@ check_*.py
 # OS
 .DS_Store
 Thumbs.db
+# Redirect cmd "> nul" executado em shell POSIX cria um arquivo literal "nul"
+/nul
 
 # Coverage
 htmlcov/
