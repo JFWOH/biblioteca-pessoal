@@ -701,11 +701,15 @@ class ReaderView(QWidget):
             QTimer.singleShot(0, lambda: self._image_scroll.verticalScrollBar().setValue(0))
             QTimer.singleShot(0, lambda: self._image_scroll.horizontalScrollBar().setValue(0))
         elif content.content_type in ("html", "text"):
-            # EPUB/TXT/DOCX — renderiza como HTML
+            # EPUB/TXT/DOCX — renderiza como HTML. O conteúdo do livro é
+            # sanitizado antes do setHtml: o QWebEngineView tem JS habilitado
+            # (features próprias do leitor), então <script>/on*/javascript:
+            # de um EPUB baixado da internet executariam aqui (§2.1).
+            from src.readers.html_sanitizer import sanitize_book_html
             css = get_reader_css(self._theme)
             html = f"""<!DOCTYPE html>
             <html><head><style>{css}</style></head>
-            <body>{content.content}</body></html>"""
+            <body>{sanitize_book_html(content.content)}</body></html>"""
             self._web_view.setHtml(html)
             self._content_stack.setCurrentIndex(1)
             # Fase 9A: Resetar viewport do webview para EPUB/HTML
