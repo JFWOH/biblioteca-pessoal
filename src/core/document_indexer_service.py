@@ -218,8 +218,14 @@ class DocumentIndexerService:
         # Validação do modelo de embeddings
         if not self._rag_engine.is_model_available(self._rag_engine._embed_model):
             print(f"[Indexer] Modelo '{self._rag_engine._embed_model}' ausente — iniciando pull…", flush=True)
-            for status in self._rag_engine.pull_model(self._rag_engine._embed_model):
-                pass
+            # Pull é best-effort (ADR-005): sem rede/registry o urlopen do
+            # /api/pull estoura URLError crua — degrada para a mensagem clara
+            # do check abaixo em vez de vazar o stacktrace de rede.
+            try:
+                for _status in self._rag_engine.pull_model(self._rag_engine._embed_model):
+                    pass
+            except Exception as exc:
+                print(f"[Indexer] Pull do modelo falhou ({exc}) — seguindo para o check final.", flush=True)
             if not self._rag_engine.is_model_available(self._rag_engine._embed_model):
                 self._db.set_indexing_status(book_id, "failed", 0, "Falha ao baixar modelo de embeddings")
                 raise RuntimeError(f"Modelo de embedding '{self._rag_engine._embed_model}' não disponível após download.")

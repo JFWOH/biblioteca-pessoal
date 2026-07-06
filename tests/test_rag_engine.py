@@ -81,7 +81,14 @@ def mock_engine(test_db, chroma_path, fake_embedding):
 
     with patch.object(RAGEngine, "_get_embedding", return_value=fake_embedding), \
          patch.object(RAGEngine, "_get_embeddings_batch",
-                      side_effect=lambda texts: [fake_embedding for _ in texts]):
+                      side_effect=lambda texts: [fake_embedding for _ in texts]), \
+         patch.object(RAGEngine, "is_model_available", return_value=True), \
+         patch.object(RAGEngine, "is_ollama_available", return_value=True):
+        # is_model_available/is_ollama_available: sem eles, numa máquina SEM
+        # Ollama (CI) o index_book entrava no caminho de pull do modelo e
+        # vazava rede real — a suíte deve ser 100% hermética. Testes que
+        # precisam de Ollama "fora" seguem patchando a instância (vence o
+        # patch de classe).
         engine = RAGEngine(
             db_path=test_db,
             chroma_path=chroma_path,
@@ -152,22 +159,36 @@ class TestRAGEngineInit:
             RAGEngine(db_path=test_db, chroma_path=chroma_path)
         assert chroma_path.exists()
 
-    def test_is_ollama_available_returns_false_when_offline(self, mock_engine):
+    # Os health-checks abaixo testam os métodos REAIS (com urlopen mockado),
+    # então usam um engine próprio — o fixture mock_engine substitui
+    # is_ollama_available/is_model_available para tornar a suíte hermética.
+
+    @staticmethod
+    def _bare_engine(test_db, chroma_path):
+        from src.core.rag_engine import RAGEngine
+        with patch.object(RAGEngine, "_get_embedding", return_value=[0.1] * 768):
+            return RAGEngine(db_path=test_db, chroma_path=chroma_path,
+                             ollama_url="http://localhost:11434")
+
+    def test_is_ollama_available_returns_false_when_offline(self, test_db, chroma_path):
         """Sem Ollama real rodando, deve retornar False."""
+        engine = self._bare_engine(test_db, chroma_path)
         # Força exceção de conexão
         with patch("urllib.request.urlopen", side_effect=OSError("connection refused")):
-            assert mock_engine.is_ollama_available() is False
+            assert engine.is_ollama_available() is False
 
-    def test_is_ollama_available_returns_true_when_online(self, mock_engine):
+    def test_is_ollama_available_returns_true_when_online(self, test_db, chroma_path):
         """Simula resposta bem-sucedida do Ollama."""
+        engine = self._bare_engine(test_db, chroma_path)
         mock_resp = MagicMock()
         mock_resp.status = 200
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            assert mock_engine.is_ollama_available() is True
+            assert engine.is_ollama_available() is True
 
-    def test_is_model_available_true(self, mock_engine):
+    def test_is_model_available_true(self, test_db, chroma_path):
+        engine = self._bare_engine(test_db, chroma_path)
         mock_resp = MagicMock()
         mock_resp.status = 200
         mock_resp.read.return_value = json.dumps({
@@ -176,9 +197,10 @@ class TestRAGEngineInit:
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            assert mock_engine.is_model_available("llama3") is True
+            assert engine.is_model_available("llama3") is True
 
-    def test_is_model_available_false_for_missing_model(self, mock_engine):
+    def test_is_model_available_false_for_missing_model(self, test_db, chroma_path):
+        engine = self._bare_engine(test_db, chroma_path)
         mock_resp = MagicMock()
         mock_resp.read.return_value = json.dumps({
             "models": [{"name": "llama3:latest"}]
@@ -186,7 +208,7 @@ class TestRAGEngineInit:
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            assert mock_engine.is_model_available("mistral") is False
+            assert engine.is_model_available("mistral") is False
 
     def test_get_indexed_count_starts_at_zero(self, mock_engine):
         assert mock_engine.get_indexed_count() == 0

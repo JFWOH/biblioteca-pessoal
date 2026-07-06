@@ -25,6 +25,24 @@ from src.core.tts.tts_router import TTSRouter
 from src.core.tts.text_preprocessor import TTSTextPreprocessor
 
 
+def _has_audio_output() -> bool:
+    """True se há stack de áudio utilizável (sounddevice + dispositivo).
+
+    Testes do CAMINHO DE REPRODUÇÃO (player contínuo) dependem disso; num
+    runner de CI sem PortAudio/dispositivo o fluxo degrada por caminhos
+    diferentes dos da máquina de desenvolvimento e as asserções de chunk
+    ficam ambíguas — pular é mais honesto que afrouxar o teste.
+    """
+    try:
+        import sounddevice as sd
+        return len(sd.query_devices()) > 0
+    except Exception:
+        return False
+
+
+HAS_AUDIO_OUTPUT = _has_audio_output()
+
+
 # ── Fake Providers for Testing ───────────────────────────────────────
 
 class FakeProvider(BaseTTSProvider):
@@ -473,6 +491,8 @@ class TestRouterReadinessFallback:
 
 
 class TestAdaptiveChunking:
+    @pytest.mark.skipif(not HAS_AUDIO_OUTPUT,
+                        reason="sem dispositivo de áudio (caminho de reprodução diverge)")
     def test_adaptive_chunking_high_latency(self):
         router = TTSRouter()
         # High latency provider

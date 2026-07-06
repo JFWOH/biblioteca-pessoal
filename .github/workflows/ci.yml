@@ -29,7 +29,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libegl1 libgl1 libnss3 libxkbcommon0 libxkbcommon-x11-0 \
             libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxss1 \
-            libasound2t64 libdbus-1-3 libdrm2 libgbm1 libxcb-cursor0
+            libasound2t64 libdbus-1-3 libdrm2 libgbm1 libxcb-cursor0 \
+            libportaudio2
 
       - name: Instala dependências (torch CPU no CI; GPU só na máquina local)
         run: |
