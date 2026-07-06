@@ -54,3 +54,21 @@ def test_recommended_llm_model_by_tier():
 
 def test_embed_model_constant():
     assert HardwareCapabilityService.EMBED_MODEL == "bge-m3"
+
+
+def test_get_model_for_task_fast_stays_in_default_family():
+    """Tarefas rápidas usam o e4b (mesma família do padrão do app); a
+    velocidade vem do think=False no chamador, não de trocar de família —
+    benchmark 2026-07-06: e4b think=false empata com gemma3:4b (3,3s) com
+    qualidade superior."""
+    svc = HardwareCapabilityService()
+    assert svc.get_model_for_task("fast") == "gemma4:e4b"
+
+
+def test_get_model_for_task_deep_matches_recommended_llm_model():
+    svc = HardwareCapabilityService()
+    svc._cached_tier = "Tier A"
+    assert svc.get_model_for_task("deep") == svc.get_recommended_llm_model() == "gemma4:12b"
+
+    svc._cached_tier = "Tier B"
+    assert svc.get_model_for_task("deep") == svc.get_recommended_llm_model() == "gemma4:e4b"

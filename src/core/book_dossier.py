@@ -110,3 +110,24 @@ def build_dossier_synthesis_prompt(data: dict | None) -> str | None:
         partial = (" A análise cobre menos da metade das páginas — deixe claro "
                    "que a visão ainda é parcial.")
     return _SYNTHESIS_PROMPT.format(partial=partial, facts="\n".join(facts))
+
+
+def get_cached_synthesis(db: LibraryDB, graph_store: GraphStore, book_id: int) -> str | None:
+    """Síntese em cache, se a cobertura de ingestão não mudou desde então.
+
+    Evita chamar o LLM a cada abertura do dossiê (§1.5 da revisão de
+    engenharia 2026-07-05): a síntese só precisa mudar quando o grafo
+    ingere algo novo do livro, não a cada clique.
+    """
+    cached = db.get_dossier_synthesis_cache(book_id)
+    if not cached:
+        return None
+    if cached["fingerprint"] != graph_store.ingest_fingerprint(book_id):
+        return None
+    return cached["synthesis"]
+
+
+def save_synthesis_cache(db: LibraryDB, graph_store: GraphStore,
+                         book_id: int, text: str) -> None:
+    """Grava a síntese com a fingerprint de cobertura atual (chave de invalidação)."""
+    db.set_dossier_synthesis_cache(book_id, graph_store.ingest_fingerprint(book_id), text)

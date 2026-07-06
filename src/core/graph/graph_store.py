@@ -96,6 +96,19 @@ class GraphStore:
                 (book_id,)).fetchall()
         return {r["origin_ref"] for r in rows}
 
+    def ingest_fingerprint(self, book_id: int) -> str:
+        """Fingerprint barata da cobertura de ingestão de um livro.
+
+        Muda sempre que uma página/anotação nova é ingerida no grafo, ou uma
+        já ingerida é reprocessada com contagem de menções diferente — usada
+        para invalidar caches derivados do grafo (ex.: síntese do dossiê,
+        Fase 4) sem precisar comparar o conteúdo inteiro.
+        """
+        row = self._db.conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(mentions), 0) FROM graph_ingest_log WHERE book_id = ?",
+            (book_id,)).fetchone()
+        return f"{row[0]}:{row[1]}"
+
     def coverage(self, book_id: int, pages_total: int | None = None) -> dict:
         """Progresso da ingestão do livro (páginas e anotações)."""
         pages_done = self._db.conn.execute(

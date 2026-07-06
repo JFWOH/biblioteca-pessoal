@@ -40,18 +40,24 @@ class FlashcardQAWorker(QThread):
 
             model = self._model
             if not model:
-                # Resolução na thread do worker (rede) — mesma preferência do grafo.
+                # Resolução na thread do worker (rede). Flashcard P/R é tarefa
+                # rápida/estruturada (§1.3 da revisão de engenharia).
                 from src.core.graph.concept_extractor import resolve_llm_model
-                model = resolve_llm_model(self._ollama_url)
+                from src.core.hardware_capability_service import HardwareCapabilityService
+                model = resolve_llm_model(
+                    self._ollama_url,
+                    preferred=HardwareCapabilityService().get_model_for_task("fast"))
             if not model:
                 self.failed.emit("nenhum modelo do Ollama disponível")
                 return
 
             from src.core import ollama_client
+            # think=False: reformatar um insight em P/R não precisa de
+            # raciocínio — benchmark 2026-07-06: 9,8s → 3,3s no e4b.
             content = ollama_client.chat_once(
                 self._ollama_url, model, [{"role": "user", "content": prompt}],
                 response_format="json", temperature=0.2, num_predict=512,
-                timeout_s=self._timeout_s,
+                timeout_s=self._timeout_s, think=False,
             )
 
             qa = parse_flashcard_qa(content)

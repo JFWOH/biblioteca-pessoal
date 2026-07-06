@@ -38,8 +38,18 @@ def build_chat_payload(
     repeat_penalty: Optional[float] = None,
     repeat_last_n: Optional[int] = None,
     keep_alive: str = OLLAMA_KEEP_ALIVE,
+    think: Optional[bool] = None,
 ) -> dict[str, Any]:
-    """Monta o payload de ``/api/chat`` com as opções comuns a todos os chamadores."""
+    """Monta o payload de ``/api/chat`` com as opções comuns a todos os chamadores.
+
+    ``think=False`` desliga a fase de raciocínio dos modelos thinking —
+    medido em 2026-07-06: flashcard P/R no gemma4:e4b cai de 9,8s para
+    3,3s (e no 12b de 65s para 3,9s) sem perder validade do JSON. Só usar
+    em tarefas estruturadas; tarefas profundas (RAG, dossiê, proativo)
+    mantêm o raciocínio por decisão de qualidade (lição do commit a1cc513).
+    ``None`` não envia o campo (default do modelo); o Ollama aceita
+    ``think=False`` sem erro mesmo em modelos não-thinking (verificado).
+    """
     options: dict[str, Any] = {"num_predict": num_predict}
     if num_ctx is not None:
         options["num_ctx"] = num_ctx
@@ -61,6 +71,8 @@ def build_chat_payload(
         payload["tools"] = tools
     if response_format:
         payload["format"] = response_format
+    if think is not None:
+        payload["think"] = think
     return payload
 
 
@@ -73,6 +85,7 @@ def chat_once(
     temperature: Optional[float] = None,
     num_predict: int = 4096,
     timeout_s: int = DEFAULT_TIMEOUT_S,
+    think: Optional[bool] = None,
 ) -> str:
     """Chamada não-streaming: devolve ``message.content`` (stripped, pode ser "").
 
@@ -84,6 +97,7 @@ def chat_once(
         model, messages, stream=False,
         response_format=response_format,
         temperature=temperature, num_predict=num_predict,
+        think=think,
     )
     req = urllib.request.Request(
         f"{ollama_url.rstrip('/')}/api/chat",

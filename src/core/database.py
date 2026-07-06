@@ -187,6 +187,12 @@ class LibraryDB:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (book_id, origin_ref)
                 );
+                CREATE TABLE IF NOT EXISTS dossier_synthesis_cache (
+                    book_id INTEGER PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE,
+                    fingerprint TEXT NOT NULL,
+                    synthesis TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
                 CREATE INDEX IF NOT EXISTS idx_mentions_book ON concept_mentions(book_id);
                 CREATE INDEX IF NOT EXISTS idx_mentions_concept ON concept_mentions(concept_id);
                 CREATE INDEX IF NOT EXISTS idx_chat_turns_book ON chat_turns(book_id, id);
@@ -281,6 +287,7 @@ class LibraryDB:
             self.conn.execute(
                 "DELETE FROM book_edges WHERE book_a = ? OR book_b = ?", (book_id, book_id))
             self.conn.execute("DELETE FROM graph_ingest_log WHERE book_id = ?", (book_id,))
+            self.conn.execute("DELETE FROM dossier_synthesis_cache WHERE book_id = ?", (book_id,))
 
             self.conn.execute("DELETE FROM books WHERE id = ?", (book_id,))
             self.conn.commit()
@@ -736,6 +743,25 @@ class LibraryDB:
     def dismiss_observation(self, obs_id: int) -> None:
         with self._write_lock:
             self.conn.execute("UPDATE ai_observations SET dismissed=1 WHERE id=?", (obs_id,))
+            self.conn.commit()
+
+    # ── Cache da síntese do dossiê (Fase 4) ─────────────────────────────
+
+    def get_dossier_synthesis_cache(self, book_id: int) -> dict | None:
+        r = self.conn.execute(
+            "SELECT fingerprint, synthesis FROM dossier_synthesis_cache WHERE book_id = ?",
+            (book_id,)).fetchone()
+        return dict(r) if r else None
+
+    def set_dossier_synthesis_cache(self, book_id: int, fingerprint: str, synthesis: str) -> None:
+        with self._write_lock:
+            self.conn.execute(
+                """INSERT INTO dossier_synthesis_cache (book_id, fingerprint, synthesis, created_at)
+                   VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(book_id) DO UPDATE SET
+                   fingerprint=excluded.fingerprint, synthesis=excluded.synthesis,
+                   created_at=CURRENT_TIMESTAMP""",
+                (book_id, fingerprint, synthesis))
             self.conn.commit()
 
     # ── Busca ──────────────────────────────────────────────────────────
