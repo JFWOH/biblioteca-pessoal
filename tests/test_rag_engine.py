@@ -510,6 +510,76 @@ class TestRAGEngineRAG:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# TestThinkingStatusFeedback — feedback de raciocínio dos modelos thinking
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestThinkingStatusFeedback:
+    """O stream de modelos thinking emite message.thinking antes do content;
+    query_rag deve convertê-lo em status efêmero via status_callback, sem
+    vazar o texto do raciocínio para a resposta."""
+
+    @staticmethod
+    def _mock_stream(lines: list[bytes]) -> MagicMock:
+        resp = MagicMock()
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        resp.__iter__ = lambda s: iter(lines)
+        return resp
+
+    def test_thinking_chunks_emit_status_and_do_not_leak_into_answer(self, mock_engine):
+        stream_lines = [
+            json.dumps({"message": {"role": "assistant", "thinking": "Deixe-me pensar sobre Capitu..."}}).encode("utf-8"),
+            json.dumps({"message": {"thinking": "...os olhos de ressaca são..."}}).encode("utf-8"),
+            json.dumps({"message": {"content": "Capitu é "}}).encode("utf-8"),
+            json.dumps({"message": {"content": "a personagem central."}, "done": True, "done_reason": "stop"}).encode("utf-8"),
+        ]
+        statuses: list[str] = []
+        with patch.object(mock_engine, "is_ollama_available", return_value=True):
+            mock_engine.index_book(1)
+            with patch("urllib.request.urlopen", return_value=self._mock_stream(stream_lines)):
+                tokens = list(mock_engine.query_rag(
+                    "Quem é Capitu?", status_callback=statuses.append))
+
+        answer = "".join(tokens)
+        # O raciocínio NÃO vai para a resposta.
+        assert "Deixe-me pensar" not in answer
+        assert "Capitu é a personagem central." in answer
+        # Status de raciocínio emitido antes do content, escrita ao começar.
+        assert any("Raciocinando" in s for s in statuses)
+        assert any("Escrevendo" in s for s in statuses)
+        assert statuses.index(next(s for s in statuses if "Raciocinando" in s)) < \
+            statuses.index(next(s for s in statuses if "Escrevendo" in s))
+
+    def test_stream_without_thinking_only_signals_writing(self, mock_engine):
+        stream_lines = [
+            json.dumps({"message": {"content": "Resposta direta."}, "done": True, "done_reason": "stop"}).encode("utf-8"),
+        ]
+        statuses: list[str] = []
+        with patch.object(mock_engine, "is_ollama_available", return_value=True):
+            mock_engine.index_book(1)
+            with patch("urllib.request.urlopen", return_value=self._mock_stream(stream_lines)):
+                tokens = list(mock_engine.query_rag(
+                    "Pergunta simples", status_callback=statuses.append))
+
+        assert "Resposta direta." in "".join(tokens)
+        assert not any("Raciocinando" in s for s in statuses)
+        assert any("Escrevendo" in s for s in statuses)
+
+    def test_query_rag_without_status_callback_keeps_working(self, mock_engine):
+        """Compat: chamadas existentes (sem status_callback) não mudam de comportamento."""
+        stream_lines = [
+            json.dumps({"message": {"thinking": "pensando..."}}).encode("utf-8"),
+            json.dumps({"message": {"content": "ok"}, "done": True, "done_reason": "stop"}).encode("utf-8"),
+        ]
+        with patch.object(mock_engine, "is_ollama_available", return_value=True):
+            mock_engine.index_book(1)
+            with patch("urllib.request.urlopen", return_value=self._mock_stream(stream_lines)):
+                tokens = list(mock_engine.query_rag("Pergunta"))
+        assert "ok" in "".join(tokens)
+        assert "pensando" not in "".join(tokens)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # TestRAGWorker (requer pytest-qt)
 # ══════════════════════════════════════════════════════════════════════════════
 

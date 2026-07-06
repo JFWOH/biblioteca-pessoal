@@ -23,6 +23,8 @@ class RAGWorker(QThread):
 
     Signals:
         token_received: Emitido a cada token gerado pelo LLM (streaming).
+        status_updated: Estado efêmero da geração (raciocínio do modelo
+            thinking, início da escrita) — não faz parte da resposta.
         answer_complete: Emitido com a resposta final completa.
         sources_found: Emitido com a lista de fontes usadas como contexto.
         progress_updated: (current, total, message) durante indexação.
@@ -31,6 +33,7 @@ class RAGWorker(QThread):
     """
 
     token_received = pyqtSignal(str)
+    status_updated = pyqtSignal(str)
     answer_complete = pyqtSignal(str)
     sources_found = pyqtSignal(list)
     progress_updated = pyqtSignal(int, int, str)   # current, total, msg
@@ -102,6 +105,7 @@ class RAGWorker(QThread):
             self._question,
             book_id=self._book_id,
             ui_mutation_callback=self._emit_ui_mutation,
+            status_callback=self._emit_status,
         )
 
         for token in generator:
@@ -117,6 +121,10 @@ class RAGWorker(QThread):
     def _emit_ui_mutation(self, action_type: str, data: dict) -> None:
         """Callback thread-safe: emite sinal para a Main Thread processar a mutação visual."""
         self.ui_mutation_requested.emit(action_type, data)
+
+    def _emit_status(self, status: str) -> None:
+        """Callback thread-safe: repassa o estado efêmero da geração à GUI."""
+        self.status_updated.emit(status)
 
     def _run_index_book(self) -> None:
         """Indexa um único livro com tratamento robusto de erros."""

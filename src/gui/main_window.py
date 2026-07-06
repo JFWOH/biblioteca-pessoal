@@ -969,6 +969,7 @@ class MainWindow(QMainWindow):
             self._rag_engine, mode=RAGWorker.MODE_QUERY, question=question_payload, book_id=book_id
         )
         self._rag_worker.token_received.connect(self._rag_panel.on_token_received)
+        self._rag_worker.status_updated.connect(self._rag_panel.on_status_updated)
         self._rag_worker.answer_complete.connect(self._rag_panel.on_answer_complete)
         self._rag_worker.sources_found.connect(self._rag_panel.on_sources_found)
         self._rag_worker.error_occurred.connect(self._rag_panel.on_error)

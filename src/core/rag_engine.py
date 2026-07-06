@@ -735,9 +735,10 @@ class RAGEngine:
         n_context: int | None = None,
         book_id: int | None = None,
         ui_mutation_callback: callable = None,
+        status_callback: callable = None,
     ) -> Generator[str, None, None]:
         """Pipeline RAG com streaming.
-        
+
         .. deprecated::
             Esta implementação delega ao Orchestrator (ADR-003 compliance).
             Usar Orchestrator.query_rag() diretamente quando possível.
@@ -747,6 +748,7 @@ class RAGEngine:
         yield from orchestrator.query_rag(
             question, n_context=n_context,
             book_id=book_id, ui_mutation_callback=ui_mutation_callback,
+            status_callback=status_callback,
         )
 
 
