@@ -6,9 +6,7 @@ Ollama estiver indisponível ou a resposta vier vazia, o chamador mantém o
 dossiê sem síntese — ADR-005.
 """
 
-import json
 import logging
-import urllib.request
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -46,24 +44,13 @@ class DossierSynthesisWorker(QThread):
                 self.failed.emit("nenhum modelo do Ollama disponível")
                 return
 
-            from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
-            payload = {
-                "model": model,
-                "messages": [{"role": "user", "content": self._prompt}],
-                "stream": False,
-                "keep_alive": OLLAMA_KEEP_ALIVE,
-                # gemma4 é modelo de raciocínio: consome tokens "pensando" antes
-                # do content — teto folgado evita resposta vazia. Nunca think=False.
-                "options": {"num_predict": 4096, "temperature": 0.2},
-            }
-            req = urllib.request.Request(
-                f"{self._ollama_url}/api/chat",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
+            from src.core import ollama_client
+            # gemma4 é modelo de raciocínio: consome tokens "pensando" antes
+            # do content — teto folgado evita resposta vazia. Nunca think=False.
+            content = ollama_client.chat_once(
+                self._ollama_url, model, [{"role": "user", "content": self._prompt}],
+                temperature=0.2, num_predict=4096, timeout_s=self._timeout_s,
             )
-            with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
-                data = json.loads(resp.read())
-            content = ((data.get("message", {}) or {}).get("content") or "").strip()
 
             if self._cancelled:
                 return

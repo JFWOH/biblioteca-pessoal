@@ -6,12 +6,10 @@ o LLM local recebe o original + o rascunho do NLLB e devolve a tradução
 revisada. Falha em qualquer ponto (Ollama fora, resposta inválida) devolve
 None e o chamador usa o rascunho — a revisão nunca piora nada (ADR-005).
 
-Core puro (ADR-006): urllib, sem Qt.
+Core puro (ADR-006): sem Qt.
 """
 
-import json
 import logging
-import urllib.request
 
 logger = logging.getLogger(__name__)
 
@@ -55,23 +53,12 @@ def revise_translation(original: str, draft: str,
         return None
 
     prompt = _REVISION_PROMPT.format(original=original[:6000], draft=draft[:6000])
-    from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "stream": False,
-        "keep_alive": OLLAMA_KEEP_ALIVE,
-        "options": {"temperature": 0.2, "num_predict": 2048},
-    }
     try:
-        req = urllib.request.Request(
-            f"{ollama_url.rstrip('/')}/api/chat",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+        from src.core import ollama_client
+        revised = ollama_client.chat_once(
+            ollama_url, model, [{"role": "user", "content": prompt}],
+            temperature=0.2, num_predict=2048, timeout_s=timeout_s,
         )
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            data = json.loads(resp.read())
-        revised = ((data.get("message", {}) or {}).get("content") or "").strip()
         # Sanidade: revisão suspeita de truncamento/vazia → mantém o rascunho.
         if not revised or len(revised) < 0.4 * len(draft):
             logger.debug("Revisão descartada (curta demais: %d vs %d chars).",

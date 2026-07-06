@@ -6,9 +6,7 @@ o Ollama estiver indisponível ou a resposta for inválida, o chamador usa o
 fallback (insight no verso, pergunta em branco) — ADR-005.
 """
 
-import json
 import logging
-import urllib.request
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -49,23 +47,12 @@ class FlashcardQAWorker(QThread):
                 self.failed.emit("nenhum modelo do Ollama disponível")
                 return
 
-            from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
-            payload = {
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False,
-                "format": "json",
-                "keep_alive": OLLAMA_KEEP_ALIVE,
-                "options": {"num_predict": 512, "temperature": 0.2},
-            }
-            req = urllib.request.Request(
-                f"{self._ollama_url}/api/chat",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
+            from src.core import ollama_client
+            content = ollama_client.chat_once(
+                self._ollama_url, model, [{"role": "user", "content": prompt}],
+                response_format="json", temperature=0.2, num_predict=512,
+                timeout_s=self._timeout_s,
             )
-            with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
-                data = json.loads(resp.read())
-            content = (data.get("message", {}) or {}).get("content", "")
 
             qa = parse_flashcard_qa(content)
             if self._cancelled:
