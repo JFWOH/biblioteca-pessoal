@@ -59,7 +59,7 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 
 HF_HUB_OFFLINE_AT_IMPORT = os.environ.get("HF_HUB_OFFLINE", "Not Set")
 
-from src.core.tts.base_tts_provider import (
+from src.core.tts.base_tts_provider import (  # noqa: E402 — HF_HUB_OFFLINE precisa ser setado ANTES dos imports
     BaseTTSProvider,
     SynthesisResult,
     TTSCapability,
@@ -260,7 +260,6 @@ class KokoroProvider(BaseTTSProvider):
                 import os
                 logger.info("KOKORO_IMPORT_STAGE: Starting imports...")
                 import_t0 = time.time()
-                import kokoro
                 logger.info("KOKORO_IMPORT_STAGE: Finished importing kokoro package in %.2fs", time.time() - import_t0)
 
                 # Unconditionally force HuggingFace offline mode for the warmup process

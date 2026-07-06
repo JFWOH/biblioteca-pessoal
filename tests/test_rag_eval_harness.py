@@ -1,9 +1,5 @@
-import tempfile
-import json
-from pathlib import Path
 
-from src.tools.rag_eval_harness import evaluate_session, evaluate_directory
-from src.tools.trace_inspector import parse_trace_file
+from src.tools.rag_eval_harness import evaluate_session
 
 def test_evaluate_perfect_session():
     events = [

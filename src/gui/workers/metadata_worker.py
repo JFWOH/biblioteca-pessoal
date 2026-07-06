@@ -1,5 +1,5 @@
 from PyQt6.QtCore import QThread, pyqtSignal
-from typing import Dict, Any, Optional
+from typing import Optional
 from src.core.api_clients import MetadataFetcher
 
 class MetadataWorker(QThread):

@@ -8,13 +8,12 @@ from __future__ import annotations
 
 import uuid
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont, QTextCursor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTextEdit, QListWidget, QListWidgetItem,
-    QProgressBar, QFrame, QSizePolicy, QSplitter, QScrollArea,
-    QComboBox,
+    QProgressBar, QFrame, QSplitter, QComboBox,
 )
 
 
@@ -875,7 +874,6 @@ class RAGPanel(QWidget):
         # O _rag_panel reporta para a MainWindow, precisamos enviar um sinal.
         # Mas para simplificar, usaremos o MainWindow parent ou um custom event.
         # Vamos achar a main_window recursivamente ou adicionar um signal:
-        from PyQt6.QtWidgets import QWidget
         parent = self.parent()
         while parent:
             if hasattr(parent, "_open_anki_export_dialog"):

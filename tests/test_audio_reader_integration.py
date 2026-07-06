@@ -7,20 +7,18 @@ import numpy as np
 import time
 from unittest.mock import MagicMock, patch
 
-from src.core.tts.tts_router import TTSRouter
 from src.core.tts.kokoro_provider import KokoroProvider
 from src.core.tts.piper_provider import PiperProvider
 from src.core.audio.continuous_player import ContinuousAudioPlayer
-from src.core.tts.voice_profile import VoiceProfile, NarrationRole
 
 try:
-    import kokoro
+    import kokoro  # noqa: F401 — só testa disponibilidade
     HAS_KOKORO = True
 except ImportError:
     HAS_KOKORO = False
 
 try:
-    import piper
+    import piper  # noqa: F401 — só testa disponibilidade
     HAS_PIPER = True
 except ImportError:
     HAS_PIPER = False

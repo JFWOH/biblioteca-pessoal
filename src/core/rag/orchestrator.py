@@ -3,7 +3,7 @@ import json
 import logging
 import time
 import uuid
-from typing import List, Dict, Any, Optional, Generator
+from typing import List, Any, Optional, Generator
 
 from src.core import ollama_client
 from src.core.rag.agent_state import AgentState
@@ -509,80 +509,6 @@ class Orchestrator:
         core_data = [o.get("data", []) for o in outputs]
         serialized = json.dumps(core_data, sort_keys=True)
         return hashlib.md5(serialized.encode("utf-8")).hexdigest()
-
-    def run_agent_loop(
-        self,
-        question: str,
-        book_id: Optional[int] = None,
-        max_rounds: int = 5,
-        max_time_ms: int = 20000
-    ) -> Dict[str, Any]:
-        """Executa o loop de agente síncrono simplificado."""
-        session_id = str(uuid.uuid4())
-        trace_logger = TraceLogger(session_id)
-        state = AgentState(session_id=session_id, max_rounds=max_rounds, max_time_ms=max_time_ms)
-        logger.info("Iniciando loop resiliente de orquestração RAG.")
-        trace_logger.emit("query_started", step=0, query=question, book_id=book_id)
-
-        while state.is_budget_ok():
-            state.current_round += 1
-            round_outputs: List[ToolOutput] = []
-
-            # Roteamento de Ferramentas Simulado:
-            if "web" in question.lower() or "internet" in question.lower() or "atual" in question.lower():
-                out = self.execute_search_web(question, state, trace_logger)
-                round_outputs.append(out)
-                state.update_provenance(out["provenance"])
-            else:
-                out = self.execute_vector_search(question, book_id=book_id, state=state, trace_logger=trace_logger)
-                round_outputs.append(out)
-                state.update_provenance(out["provenance"])
-
-            if out["status"] == "error" and "keyword_search" not in state.called_tools:
-                kw_out = self.execute_keyword_search(question, book_id=book_id, state=state)
-                round_outputs.append(kw_out)
-
-            digest = self.compute_results_digest(round_outputs)
-            if state.last_result_hash and state.last_result_hash == digest:
-                state.repeated_result_count += 1
-                logger.info("Early-Exit ativado: resultados idênticos detectados no round %d.", state.current_round)
-                trace_logger.emit("early_exit", step=state.current_round, reason="resultados_identicos", round_num=state.current_round)
-                break
-            
-            state.last_result_hash = digest
-
-            state.history.append({
-                "round": state.current_round,
-                "called_tools": list(state.called_tools),
-                "provenance": state.provenance,
-                "outputs": round_outputs
-            })
-
-            min_conf = min([o.get("confidence_score", 1.0) for o in round_outputs]) if round_outputs else 1.0
-            state.confidence_score = min_conf
-
-            if state.confidence_score >= 0.85 and state.current_round >= 2:
-                logger.info("Encerramento precoce por alto score de confiança (%.2f).", state.confidence_score)
-                trace_logger.emit("early_exit", step=state.current_round, reason="alta_confianca", confidence=state.confidence_score, round_num=state.current_round)
-                break
-
-        final_result = {
-            "status": "success",
-            "provenance": state.provenance,
-            "confidence_score": state.confidence_score,
-            "rounds_executed": state.current_round,
-            "called_tools": state.called_tools,
-            "history": state.history,
-            "final_data": state.history[-1]["outputs"] if state.history else [],
-            "sources_used": list(state.sources_used),
-            "books_consulted": list(state.books_consulted),
-            "repeated_result_count": state.repeated_result_count,
-            "errors": state.errors,
-            "web_seen": state.web_seen,
-            "ui_mutation_requested": state.ui_mutation_requested,
-        }
-        trace_logger.emit("query_completed", step=state.current_round + 1, payload=final_result)
-        return final_result
 
     def _finalize_success(self, question: str, book_id: Optional[int], answer_acc: list,
                          state: AgentState, trace_logger: TraceLogger) -> None:

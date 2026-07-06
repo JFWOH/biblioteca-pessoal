@@ -47,7 +47,7 @@ def extract_pdf_metadata(filepath: str | Path) -> BookMetadata:
             description=meta.get("subject", ""),
             cover_data=cover_data,
         )
-    except Exception as e:
+    except Exception:
         return BookMetadata(title=Path(filepath).stem)
 
 
@@ -60,36 +60,43 @@ def extract_epub_metadata(filepath: str | Path) -> BookMetadata:
 
         title = ""
         for t in book.get_metadata("DC", "title"):
-            title = t[0]; break
+            title = t[0]
+            break
         title = title or Path(filepath).stem
 
         author = ""
         for a in book.get_metadata("DC", "creator"):
-            author = a[0]; break
+            author = a[0]
+            break
 
         description = ""
         for d in book.get_metadata("DC", "description"):
-            description = d[0]; break
+            description = d[0]
+            break
 
         language = ""
-        for l in book.get_metadata("DC", "language"):
-            language = l[0]; break
+        for lang in book.get_metadata("DC", "language"):
+            language = lang[0]
+            break
 
         publisher = ""
         for p in book.get_metadata("DC", "publisher"):
-            publisher = p[0]; break
+            publisher = p[0]
+            break
 
         isbn = ""
         for ident in book.get_metadata("DC", "identifier"):
             val = ident[0]
             if val and ("isbn" in val.lower() or len(val.replace("-", "")) in (10, 13)):
-                isbn = val; break
+                isbn = val
+                break
 
         # Extrai capa
         cover_data = None
         for item in book.get_items_of_type(ebooklib.ITEM_IMAGE):
             if "cover" in item.get_name().lower():
-                cover_data = item.get_content(); break
+                cover_data = item.get_content()
+                break
         if not cover_data:
             imgs = list(book.get_items_of_type(ebooklib.ITEM_IMAGE))
             if imgs:

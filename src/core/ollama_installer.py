@@ -7,7 +7,6 @@ sem que o usuário precise abrir um terminal.
 from __future__ import annotations
 
 import logging
-import platform
 import subprocess
 import sys
 import urllib.request

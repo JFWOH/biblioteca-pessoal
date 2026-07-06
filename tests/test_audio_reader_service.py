@@ -1,4 +1,3 @@
-import sys
 import pytest
 from src.core.audio.tts_backend import TTSBackend, AudioReaderError
 from src.core.audio.audio_reader_service import AudioReaderService

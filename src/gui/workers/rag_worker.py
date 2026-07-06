@@ -12,7 +12,6 @@ from typing import Any
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from src.core.rag.orchestrator import Orchestrator
-from src.core.rag.agent_state import AgentState
 
 
 class RAGWorker(QThread):

@@ -127,7 +127,10 @@ def test_process_passes_search_fn_and_book_id(qtbot):
     from src.gui.proactive_reader_service import ProactiveReaderService
     svc = ProactiveReaderService()
     svc.intensity = "Estudo"
-    fn = lambda text: []
+
+    def fn(text):
+        return []
+
     svc.set_cross_reference(fn)
     with patch("src.gui.proactive_reader_service.ProactiveWorker") as MockWorker, \
          patch.object(svc.hardware_service, "get_proactive_model_name", return_value="gemma4:e4b"), \

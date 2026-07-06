@@ -2,10 +2,9 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QLabel, QGridLayout,
-    QHBoxLayout, QPushButton, QSizePolicy, QFrame,
+    QHBoxLayout, QPushButton, QFrame,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QCursor
 
 from src.gui.widgets.book_card import BookCard
 from src.utils.constants import CARD_WIDTH, GRID_SPACING

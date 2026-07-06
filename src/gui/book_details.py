@@ -1,8 +1,7 @@
 """Painel de detalhes do livro."""
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout,
-    QScrollArea, QSizePolicy,
+    QWidget, QVBoxLayout, QLabel, QPushButton,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QFont

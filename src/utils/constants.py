@@ -1,7 +1,6 @@
 """Constantes globais da aplicação."""
 
 from pathlib import Path
-import sys
 
 # ── Diretórios ─────────────────────────────────────────────────────────
 APP_NAME = "Biblioteca Pessoal"

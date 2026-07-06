@@ -7,7 +7,7 @@ allowing different voices, rates, and expressiveness per role.
 ADR-006 compliance: No PyQt6 imports.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
 

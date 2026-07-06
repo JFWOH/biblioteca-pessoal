@@ -17,12 +17,12 @@ def test_is_available_success(mock_urlopen, anki_service):
     mock_resp.read.return_value = json.dumps({"result": 6, "error": None}).encode("utf-8")
     mock_urlopen.return_value.__enter__.return_value = mock_resp
     
-    assert anki_service.is_available() == True
+    assert anki_service.is_available() is True
 
 @patch("src.core.anki_service.urllib.request.urlopen")
 def test_is_available_failure(mock_urlopen, anki_service):
     mock_urlopen.side_effect = URLError("Connection refused")
-    assert anki_service.is_available() == False
+    assert anki_service.is_available() is False
 
 @patch("src.core.anki_service.urllib.request.urlopen")
 def test_add_basic_note_success(mock_urlopen, anki_service):

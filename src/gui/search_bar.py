@@ -1,8 +1,7 @@
 """Barra de busca com filtros."""
 
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QComboBox
-from PyQt6.QtCore import pyqtSignal, Qt, QTimer
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtCore import pyqtSignal, QTimer
 
 
 class SearchBar(QWidget):

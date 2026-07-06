@@ -1,7 +1,6 @@
 """Testes dos utilitários de arquivo."""
 
 from pathlib import Path
-import pytest
 
 from src.utils.file_utils import (
     get_file_extension, is_supported_format, format_file_size,

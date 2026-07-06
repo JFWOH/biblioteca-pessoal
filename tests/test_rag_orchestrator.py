@@ -1,9 +1,8 @@
 import time
 from unittest.mock import MagicMock, patch
-import pytest
 
 from src.core.rag.agent_state import AgentState
-from src.core.rag.tools.base import create_tool_output, ToolOutput
+from src.core.rag.tools.base import create_tool_output
 from src.core.rag.orchestrator import Orchestrator
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -197,23 +196,64 @@ class TestOrchestrator:
             assert "degraded_info" in output["data"][0]
 
     def test_early_exit_on_identical_results(self):
+        """Early-Exit no caminho de PRODUÇÃO (query_rag): quando duas rodadas
+        de ferramentas devolvem resultados idênticos (digest igual), o loop
+        para e gera a resposta final — em vez de queimar max_rounds=5.
+
+        (Migrado de run_agent_loop, removido no sprint A5 — era código morto
+        que duplicava esta heurística fora do caminho real.)
+        """
+        import json as _json
+
         mock_engine = MagicMock()
-        # Sempre retorna o mesmo documento
+        mock_engine._llm_model = "gemma4:e4b"
+        mock_engine._ollama_url = "http://localhost:11434"
+        mock_engine._cancelled = False
+        mock_engine.get_chat_history.return_value = []
+        # Sempre o mesmo documento → digests idênticos entre rodadas.
         mock_engine.search_similar.return_value = [
             {
                 "document": "Texto fixo",
                 "metadata": {"title": "Livro Fixo", "page_number": 0, "book_id": 1}
             }
         ]
-        
+
+        def _stream(lines):
+            resp = MagicMock()
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = MagicMock(return_value=False)
+            resp.__iter__ = lambda s: iter(lines)
+            return resp
+
+        tool_round = [
+            _json.dumps({"message": {"tool_calls": [
+                {"function": {"name": "vector_search",
+                              "arguments": {"query": "sentido da vida"}}}
+            ]}, "done": True, "done_reason": "stop"}).encode("utf-8"),
+        ]
+        final_answer = [
+            _json.dumps({"message": {"content": "Resposta final."},
+                         "done": True, "done_reason": "stop"}).encode("utf-8"),
+        ]
+
+        calls = {"n": 0}
+
+        def fake_urlopen(req, timeout=None):
+            calls["n"] += 1
+            # Rodadas 1 e 2 pedem a mesma ferramenta; a 3ª chamada é o
+            # fallback pós-early-exit que escreve a resposta final.
+            return _stream(tool_round if calls["n"] <= 2 else final_answer)
+
         orchestrator = Orchestrator(mock_engine)
-        
-        # Executa o loop do agente. Como o resultado é sempre idêntico, 
-        # a heurística de Early-Exit deve parar o loop no round 2 (ao invés de rodar max_rounds=5).
-        result = orchestrator.run_agent_loop("Qual o sentido da vida?", max_rounds=5)
-        
-        assert result["rounds_executed"] == 2
-        assert len(result["history"]) == 1  # O primeiro round rodou, o segundo causou early-exit antes de comitar a história
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            tokens = list(orchestrator.query_rag("Qual o sentido da vida?"))
+
+        answer = "".join(tokens)
+        # Early-exit: só 2 rodadas de ferramenta + 1 chamada de resposta final,
+        # nunca as 5 do orçamento.
+        assert calls["n"] == 3
+        assert answer.count("vector_search") == 2
+        assert "Resposta final." in answer
 
     def test_query_reformulation_offline_heuristic(self):
         """_reformulate_query offline (sem Ollama) usa a heurística determinística:

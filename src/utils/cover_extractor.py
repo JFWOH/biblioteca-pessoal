@@ -1,9 +1,7 @@
 """Utilitários para extração de capas de documentos."""
 
 from pathlib import Path
-from io import BytesIO
 
-from PIL import Image
 
 
 def extract_cover_from_pdf(filepath: str | Path) -> bytes | None:

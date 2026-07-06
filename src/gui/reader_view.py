@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QToolButton, QSizePolicy,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize, QEvent
-from PyQt6.QtGui import QPixmap, QKeySequence, QShortcut, QAction, QIcon
+from PyQt6.QtGui import QPixmap, QKeySequence, QShortcut, QAction
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 from src.readers.base_reader import BaseReader, PageContent
@@ -914,7 +914,6 @@ class ReaderView(QWidget):
             btn_bg = "#e4e4e7"
             btn_hover_bg = "#d4d4d8"
             btn_color = "#52525b"
-            sep_color = "#e4e4e7"
             page_lbl_color = "#71717a"
             bg_scroll = "#FFFFFF"
             bg_progress = "#f4f4f5"
@@ -937,7 +936,6 @@ class ReaderView(QWidget):
             btn_bg = "#dfd8c8"
             btn_hover_bg = "#d4cbb8"
             btn_color = "#5b4636"
-            sep_color = "#d4cbb8"
             page_lbl_color = "#8b7355"
             bg_scroll = "#F4ECD8"
             bg_progress = "#ebe5d9"
@@ -959,7 +957,6 @@ class ReaderView(QWidget):
             btn_bg = "#161920"         # Dark surface
             btn_hover_bg = "#2d333f"   # Dark border
             btn_color = "#cbd5e1"      # Text secondary
-            sep_color = "#2d333f"
             page_lbl_color = "#94a3b8" # Text muted
             bg_scroll = "#0f1115"      # Dark base
             bg_progress = "#161920"    # Dark surface

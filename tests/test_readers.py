@@ -1,11 +1,8 @@
 """Testes do módulo de leitores."""
 
-import tempfile
-from pathlib import Path
 
-import pytest
 
-from src.readers.base_reader import BaseReader, PageContent, TOCEntry
+from src.readers.base_reader import PageContent, TOCEntry
 from src.readers.txt_reader import TXTReader
 from src.readers.reader_factory import create_reader, get_supported_reader_formats
 

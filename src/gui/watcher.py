@@ -2,11 +2,10 @@
 
 import time
 from pathlib import Path
-from typing import Callable
 
-from PyQt6.QtCore import QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import QThread, pyqtSignal
 
-from src.utils.file_utils import is_supported_format, find_documents
+from src.utils.file_utils import find_documents
 from src.core.library import LibraryManager
 
 

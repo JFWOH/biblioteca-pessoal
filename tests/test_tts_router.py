@@ -17,7 +17,6 @@ from typing import Optional
 from src.core.tts.base_tts_provider import (
     BaseTTSProvider,
     SynthesisResult,
-    TTSCapability,
     TTSProviderError,
     VoiceInfo,
 )
@@ -184,7 +183,7 @@ class TestTieredFallback:
             preferred_provider="kokoro",
         )
         router.set_book_profile(profile)
-        count = router.speak("Short text.")
+        router.speak("Short text.")
         # Should have fallen back to piper
         assert len(piper.spoken_texts) > 0
 

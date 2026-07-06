@@ -8,7 +8,6 @@ import logging
 import queue
 import time
 import os
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,7 @@ class ContinuousAudioPlayer:
         
         self._available = False
         try:
-            import sounddevice as sd
+            import sounddevice as sd  # noqa: F401 — só testa disponibilidade aqui
             import numpy as np
             self._available = True
             self._buffer = np.zeros(0, dtype=np.float32)
@@ -237,7 +236,6 @@ class ContinuousAudioPlayer:
             pass
 
         import tempfile
-        import os
         try:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 if isinstance(wav_data, np.ndarray):
