@@ -75,11 +75,24 @@ class ReaderView(QWidget):
         # para conectar a página atual a outros livros da biblioteca.
         if rag_engine is not None:
             self._proactive_service.set_cross_reference(self._proactive_cross_ref)
+        # Continuidade (Fase 5): o proativo consulta as observações persistidas
+        # para não repetir o que já disse e pular páginas já observadas.
+        self._proactive_service.set_observations_provider(self._proactive_observations)
         self._setup_ui()
         self._setup_shortcuts()
         self.reading_context_updated.connect(
             lambda b, t, p, txt: self._proactive_service.process_page_context(txt, p, b)
         )
+
+    def _proactive_observations(self, book_id: int, page=None) -> list[dict]:
+        """Observações persistidas do livro (Fase 5 — memória do proativo).
+
+        Não dispensadas, mais recentes primeiro; limit curto (o bloco de
+        memória usa no máximo 5). Sem banco → lista vazia (ADR-005).
+        """
+        if self._db is None or not book_id:
+            return []
+        return self._db.get_observations(book_id=book_id, page=page, limit=5)
 
     def _proactive_cross_ref(self, page_text: str):
         """Busca o conceito da página em toda a biblioteca (roda na thread do worker).

@@ -25,6 +25,7 @@ class ProactiveReaderService(QObject):
         self.intensity = "Desligado"  # Desligado, Leve, Moderado, Estudo
         self._worker = None
         self._cross_ref_fn = None  # função injetada: page_text -> hits vetoriais
+        self._observations_fn = None  # função injetada: (book_id, page=None) -> list[dict]
 
     def set_intensity(self, intensity: str):
         self.intensity = intensity
@@ -33,6 +34,15 @@ class ProactiveReaderService(QObject):
     def set_cross_reference(self, fn):
         """Injeta a busca vetorial usada para conectar a página a outros livros."""
         self._cross_ref_fn = fn
+
+    def set_observations_provider(self, fn):
+        """Injeta o acesso às observações persistidas (Fase 5 — continuidade).
+
+        ``fn(book_id, page=None) -> list[dict]`` (não dispensadas, mais
+        recentes primeiro). O acesso ao SQLite fica na GUI; a lógica do que
+        fazer com as observações é pura (src/core/proactive_continuity).
+        """
+        self._observations_fn = fn
 
     def process_page_context(self, page_text: str, page_number: int, book_id=None):
         if self.intensity == "Desligado":
@@ -53,6 +63,22 @@ class ProactiveReaderService(QObject):
         if not self.trigger_engine.should_trigger(page_text, page_number, self.intensity):
             return
 
+        # Continuidade (Fase 5): página com observação viva não gera de novo
+        # (nem entre sessões); as observações recentes do livro entram no
+        # prompt para o agente não se repetir. Falha do provider → segue como
+        # antes, sem memória (ADR-005).
+        memory_block = ""
+        if self._observations_fn is not None and book_id:
+            from src.core.proactive_continuity import (
+                already_observed_page, build_memory_block,
+            )
+            try:
+                if already_observed_page(self._observations_fn(book_id, page_number)):
+                    return
+                memory_block = build_memory_block(self._observations_fn(book_id))
+            except Exception:
+                memory_block = ""
+
         model = self._resolve_model(tier_model)
         if not model:
             # Antes isso falhava em silêncio; agora avisamos o usuário.
@@ -65,6 +91,7 @@ class ProactiveReaderService(QObject):
         self._worker = ProactiveWorker(
             model, page_text, self.ollama_url,
             search_fn=self._cross_ref_fn, book_id=book_id,
+            memory_block=memory_block,
         )
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.error.connect(self._on_worker_error)

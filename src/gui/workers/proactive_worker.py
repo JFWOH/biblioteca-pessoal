@@ -12,7 +12,7 @@ class ProactiveWorker(QThread):
     error = pyqtSignal(str)
 
     def __init__(self, model: str, page_text: str, ollama_url: str = "http://localhost:11434",
-                 parent=None, search_fn=None, book_id=None):
+                 parent=None, search_fn=None, book_id=None, memory_block: str = ""):
         super().__init__(parent)
         self.model = model
         self.page_text = page_text
@@ -20,6 +20,8 @@ class ProactiveWorker(QThread):
         # Cross-reference proativo: busca o conceito em outros livros (injetada).
         self.search_fn = search_fn
         self.book_id = book_id
+        # Continuidade (Fase 5): bloco com o que o agente já disse neste livro.
+        self.memory_block = memory_block
         self._is_cancelled = False
 
     def cancel(self):
@@ -33,6 +35,9 @@ class ProactiveWorker(QThread):
 
     def _build_payload(self) -> dict:
         """Monta o payload do /api/chat. Isolado para ser testável."""
+        # Continuidade (Fase 5): o que o agente já disse entra entre as regras
+        # e o trecho — sem memória, o prompt é idêntico ao anterior.
+        memory = f"{self.memory_block}\n\n" if self.memory_block else ""
         prompt = (
             "Você é um Assistente Proativo de Leitura discreto e útil. "
             "Sua tarefa é analisar o trecho fornecido e gerar UMA ÚNICA observação curta (1 a 4 frases). "
@@ -42,6 +47,7 @@ class ProactiveWorker(QThread):
             '- "tipo": (deve ser exatamente "Observação do texto", "Contexto externo" ou "Hipótese interpretativa")\n'
             '- "confianca": (deve ser "Alta", "Média" ou "Baixa")\n'
             '- "texto": (A observação em si, 1 a 4 frases)\n\n'
+            f"{memory}"
             f"Trecho para análise:\n{self.page_text}"
         )
 
