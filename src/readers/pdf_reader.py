@@ -273,7 +273,15 @@ class PDFReader(BaseReader):
         # a página inteira, começando pelo número de página do rodapé).
         # Limitação conhecida: PDFs de duas colunas com bandas sobrepostas
         # ainda podem ordenar de forma imperfeita mesmo com sort=True.
-        words = page.get_text("words", sort=True)
+        # Cache por página: o feedback ao vivo (item 9) chama este método a
+        # cada ~40ms durante o arrasto — extrair as palavras uma vez basta
+        # (o documento não muda enquanto aberto).
+        cache = getattr(self, "_flow_words_cache", None)
+        if cache and cache[0] == page_number:
+            words = cache[1]
+        else:
+            words = page.get_text("words", sort=True)
+            self._flow_words_cache = (page_number, words)
         if not words:
             return None
 

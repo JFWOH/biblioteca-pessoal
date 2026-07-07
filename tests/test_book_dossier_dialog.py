@@ -86,6 +86,31 @@ def test_related_click_emits_and_closes(qtbot, db):
     assert got == [other]
 
 
+def test_related_long_titles_do_not_force_width(qtbot, db):
+    """Título/conceitos longos são elipsados em duas linhas com tooltip
+    completo — antes o botão de linha única forçava scroll horizontal."""
+    long_title = "Um Título Extraordinariamente Comprido Que Jamais Caberia " \
+                 "Numa Linha do Diálogo do Dossiê Sem Quebrar o Layout"
+    bid = _book(db, title="A", path="/tmp/a.pdf")
+    other = _book(db, title=long_title, path="/tmp/b.pdf")
+    store = GraphStore(db)
+    shared = [(f"conceito {i}", f"Conceito Muito Longo Número {i}", 0.5)
+              for i in range(6)]
+    store.add_mentions(bid, "page:1", shared, page=1)
+    store.add_mentions(other, "page:1", shared, page=1)
+    store.recompute_book_edges(bid)
+
+    dialog = BookDossierDialog(db, bid)
+    qtbot.addWidget(dialog)
+    btns = [b for b in dialog.findChildren(QPushButton) if "📕" in b.text()]
+    assert len(btns) == 1
+    btn = btns[0]
+    lines = btn.text().split("\n")
+    assert all(len(line) <= 80 for line in lines)   # elipsado, nunca a linha inteira
+    assert "…" in btn.text()
+    assert long_title in btn.toolTip()               # texto completo preservado
+
+
 def test_synthesis_ready_updates_label(qtbot, db):
     bid = _book(db, title="A", path="/tmp/a.pdf")
     other = _book(db, title="B", path="/tmp/b.pdf")

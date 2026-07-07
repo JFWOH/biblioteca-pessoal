@@ -445,8 +445,14 @@ class ReaderView(QWidget):
         self._image_scroll.setWidget(self._image_label)
         self._content_stack.addWidget(self._image_scroll)  # index 0
 
-        # Rubber band para seleção em PDF
+        # Rubber band para seleção em PDF (fallback para áreas sem texto);
+        # o feedback ao vivo da seleção por FLUXO usa o overlay abaixo
+        # (item 9 do backlog UX: quads por linha durante o arrasto).
         self._rubber_band = QRubberBand(QRubberBand.Shape.Rectangle, self._image_label)
+        from src.gui.widgets.selection_flow_overlay import SelectionFlowOverlay
+        self._selection_flow_overlay = SelectionFlowOverlay(self._image_label)
+        from PyQt6.QtCore import QElapsedTimer
+        self._flow_throttle = QElapsedTimer()
         self._origin = QPoint()
         self._is_selecting = False
         self._last_selection_coords: tuple | None = None  # Últimas coords normalizadas salvas
@@ -596,6 +602,8 @@ class ReaderView(QWidget):
                 self._origin = event.position().toPoint()
                 self._rubber_band.setGeometry(QRect(self._origin, QSize()))
                 self._rubber_band.show()
+                self._selection_flow_overlay.clear()
+                self._flow_throttle.start()
                 self._is_selecting = True
                 self._last_selection_coords = None  # Reseta coords ao iniciar
                 self._last_selection_flow = None
@@ -603,7 +611,17 @@ class ReaderView(QWidget):
                     self._selection_popover.hide()
                 return True
             elif event.type() == QEvent.Type.MouseMove and self._is_selecting:
-                self._rubber_band.setGeometry(QRect(self._origin, event.position().toPoint()).normalized())
+                pos = event.position().toPoint()
+                # A geometria do rubber band é SEMPRE atualizada (o release e o
+                # popover dependem dela), mas ele só fica visível quando o
+                # fluxo de texto não cobre o arrasto (ex.: área de imagem).
+                self._rubber_band.setGeometry(QRect(self._origin, pos).normalized())
+                if self._update_live_selection(pos):
+                    self._rubber_band.hide()
+                else:
+                    self._selection_flow_overlay.clear()
+                    if not self._rubber_band.isVisible():
+                        self._rubber_band.show()
                 return True
             elif event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
                 self._is_selecting = False
@@ -616,11 +634,11 @@ class ReaderView(QWidget):
                 if origin is not None and rect.width() < 6 and rect.height() < 6:
                     width = obj.width()
                     if origin.x() < width * 0.15:
-                        self._rubber_band.hide()
+                        self._hide_selection_marquee()
                         self._go_prev()
                         return True
                     elif origin.x() > width * 0.85:
-                        self._rubber_band.hide()
+                        self._hide_selection_marquee()
                         self._go_next()
                         return True
                 label_size = self._image_label.size()
@@ -658,6 +676,60 @@ class ReaderView(QWidget):
                 return True
 
         return super().eventFilter(obj, event)
+
+    def _update_live_selection(self, pos) -> bool:
+        """Feedback ao vivo da seleção por fluxo durante o arrasto (item 9).
+
+        Converte origem/posição atual em % da página, pede os quads ao
+        reader e pinta um retângulo por linha no overlay. Devolve True se o
+        fluxo cobriu o arrasto (overlay ativo); False manda o chamador usar
+        o rubber band retangular (áreas de imagem / leitor sem fluxo).
+        Throttle de 40ms: o get_selection_flow varre as palavras da página.
+        """
+        if not (self._reader and hasattr(self._reader, "get_selection_flow")):
+            return False
+        # Dentro da janela de throttle, mantém o que está na tela.
+        if self._flow_throttle.isValid() and self._flow_throttle.elapsed() < 40:
+            return self._selection_flow_overlay.isVisible()
+        self._flow_throttle.restart()
+
+        pixmap = self._image_label.pixmap()
+        if pixmap is None or pixmap.width() <= 0 or pixmap.height() <= 0:
+            return False
+        label_size = self._image_label.size()
+        offset_x = (label_size.width() - pixmap.width()) / 2
+        offset_y = (label_size.height() - pixmap.height()) / 2
+
+        def to_pct(pt):
+            px = min(max((pt.x() - offset_x) / pixmap.width(), 0.0), 1.0)
+            py = min(max((pt.y() - offset_y) / pixmap.height(), 0.0), 1.0)
+            return px, py
+
+        try:
+            flow = self._reader.get_selection_flow(
+                self._reader.current_page, to_pct(self._origin), to_pct(pos))
+        except Exception:
+            flow = None
+        quads = (flow or {}).get("quads") or []
+        if not quads:
+            return False
+
+        rects = [
+            QRect(
+                int(q[0] * pixmap.width() + offset_x),
+                int(q[1] * pixmap.height() + offset_y),
+                max(1, int((q[2] - q[0]) * pixmap.width())),
+                max(1, int((q[3] - q[1]) * pixmap.height())),
+            )
+            for q in quads
+        ]
+        self._selection_flow_overlay.set_rects(rects)
+        return True
+
+    def _hide_selection_marquee(self) -> None:
+        """Esconde o feedback visual da seleção (rubber band + overlay de fluxo)."""
+        self._rubber_band.setVisible(False)
+        self._selection_flow_overlay.clear()
 
     def open_book(self, book_data: dict, start_page: int = 0):
         """Abre um livro para leitura."""
@@ -1169,8 +1241,8 @@ class ReaderView(QWidget):
             return
         if self._search_bar.isVisible():
             self._search_bar.close_bar()
-        elif self._rubber_band.isVisible():
-            self._rubber_band.hide()
+        elif self._rubber_band.isVisible() or self._selection_flow_overlay.isVisible():
+            self._hide_selection_marquee()
             self._last_selection_coords = None
         elif self._is_fullscreen:
             self._toggle_fullscreen()
@@ -1203,7 +1275,7 @@ class ReaderView(QWidget):
         else:
             # Restaura cursor padrão
             self._image_label.unsetCursor()
-            self._rubber_band.hide()
+            self._hide_selection_marquee()
             self._last_selection_coords = None
 
     # ── Integração RAG Lado a Lado ───────────────────────────────────────────
@@ -1439,11 +1511,11 @@ class ReaderView(QWidget):
 
         # Se não há seleção ativa e não clicou em nenhum destaque, cancela o menu de contexto
         if coords is None and clicked_highlight is None:
-            self._rubber_band.hide()
+            self._hide_selection_marquee()
             return
 
         # Esconde rubber band antes de abrir o menu
-        self._rubber_band.hide()
+        self._hide_selection_marquee()
         
         menu = self._create_ai_menu()
         
@@ -1526,7 +1598,7 @@ class ReaderView(QWidget):
         self.annotation_added.emit(self._book_id, data)
 
         # Esconde a rubber band após destacar
-        self._rubber_band.hide()
+        self._hide_selection_marquee()
 
     def _show_selection_popover(self, rect) -> None:
         """Exibe o popover de ações logo abaixo da seleção (PDF)."""
@@ -1551,7 +1623,7 @@ class ReaderView(QWidget):
         elif text:
             self.ai_action_requested.emit(action, text)
         self._last_selection_coords = None
-        self._rubber_band.hide()
+        self._hide_selection_marquee()
 
     def _toggle_audio(self):
         """Alterna a leitura de áudio (TTS) da página atual.
