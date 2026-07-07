@@ -9,7 +9,7 @@ A síntese chega em background; sem Ollama o resto do dossiê segue de pé
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QWidget, QFrame,
+    QScrollArea, QSizePolicy, QWidget, QFrame,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
@@ -61,6 +61,8 @@ class BookDossierDialog(QDialog):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        # Conteúdo se adapta à largura do diálogo — nunca scroll horizontal.
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         content = QWidget()
         content.setStyleSheet("background: transparent;")
@@ -164,6 +166,11 @@ class BookDossierDialog(QDialog):
         ]
         lay.addWidget(self._label("  ·  ".join(parts), _BODY_STYLE))
 
+    @staticmethod
+    def _ellipsize(text: str, max_chars: int) -> str:
+        text = text or ""
+        return text if len(text) <= max_chars else text[:max_chars - 1].rstrip() + "…"
+
     def _build_related(self, lay: QVBoxLayout):
         related = self._data["related"]
         if not related:
@@ -171,7 +178,16 @@ class BookDossierDialog(QDialog):
         lay.addWidget(self._label("🔗 Livros relacionados", _HEADER_STYLE))
         for rel in related:
             shared = ", ".join(rel.get("shared") or [])
-            btn = QPushButton(f"📕 {rel['title']}" + (f"  —  {shared}" if shared else ""))
+            # Título e conceitos em DUAS linhas elipsadas: o texto longo numa
+            # linha só forçava a largura mínima do botão além do diálogo e
+            # criava scroll horizontal (feedback do usuário, 2026-07-06).
+            title_line = f"📕 {self._ellipsize(rel['title'], 56)}"
+            text = title_line + (
+                f"\n      em comum: {self._ellipsize(shared, 60)}" if shared else "")
+            btn = QPushButton(text)
+            btn.setToolTip(rel["title"] + (f"\nEm comum: {shared}" if shared else ""))
+            btn.setMinimumWidth(0)
+            btn.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(
                 "QPushButton { background: transparent; border: 1px solid #3f3f46;"
