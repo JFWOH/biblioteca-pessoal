@@ -26,6 +26,7 @@ class ProactiveReaderService(QObject):
         self._worker = None
         self._cross_ref_fn = None  # função injetada: page_text -> hits vetoriais
         self._observations_fn = None  # função injetada: (book_id, page=None) -> list[dict]
+        self._dismissal_history_fn = None  # função injetada: () -> list[dict] (com dispensadas)
 
     def set_intensity(self, intensity: str):
         self.intensity = intensity
@@ -43,6 +44,16 @@ class ProactiveReaderService(QObject):
         fazer com as observações é pura (src/core/proactive_continuity).
         """
         self._observations_fn = fn
+
+    def set_dismissal_history_provider(self, fn):
+        """Injeta o histórico global de observações (Fase 6 — aprendizado).
+
+        ``fn() -> list[dict]`` com ao menos ``kind`` e ``dismissed``, de todos
+        os livros (a preferência é do leitor) e INCLUINDO as dispensadas — é
+        delas que se aprende. A agregação/formatação é pura
+        (src/core/proactive_learning).
+        """
+        self._dismissal_history_fn = fn
 
     def process_page_context(self, page_text: str, page_number: int, book_id=None):
         if self.intensity == "Desligado":
@@ -79,6 +90,17 @@ class ProactiveReaderService(QObject):
             except Exception:
                 memory_block = ""
 
+        # Aprendizado (Fase 6): os tipos que o leitor costuma dispensar entram
+        # no prompt como orientação (nunca supressão). Falha do provider →
+        # segue sem preferência (ADR-005).
+        preference_block = ""
+        if self._dismissal_history_fn is not None:
+            from src.core.proactive_learning import build_preference_block
+            try:
+                preference_block = build_preference_block(self._dismissal_history_fn())
+            except Exception:
+                preference_block = ""
+
         model = self._resolve_model(tier_model)
         if not model:
             # Antes isso falhava em silêncio; agora avisamos o usuário.
@@ -91,7 +113,7 @@ class ProactiveReaderService(QObject):
         self._worker = ProactiveWorker(
             model, page_text, self.ollama_url,
             search_fn=self._cross_ref_fn, book_id=book_id,
-            memory_block=memory_block,
+            memory_block=memory_block, preference_block=preference_block,
         )
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.error.connect(self._on_worker_error)

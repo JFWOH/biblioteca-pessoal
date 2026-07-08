@@ -78,6 +78,9 @@ class ReaderView(QWidget):
         # Continuidade (Fase 5): o proativo consulta as observações persistidas
         # para não repetir o que já disse e pular páginas já observadas.
         self._proactive_service.set_observations_provider(self._proactive_observations)
+        # Aprendizado (Fase 6): os tipos de observação que o leitor costuma
+        # dispensar orientam o prompt do proativo (sinal global, com dispensadas).
+        self._proactive_service.set_dismissal_history_provider(self._proactive_dismissal_history)
         self._setup_ui()
         self._setup_shortcuts()
         self.reading_context_updated.connect(
@@ -93,6 +96,16 @@ class ReaderView(QWidget):
         if self._db is None or not book_id:
             return []
         return self._db.get_observations(book_id=book_id, page=page, limit=5)
+
+    def _proactive_dismissal_history(self) -> list[dict]:
+        """Histórico global de observações (Fase 6 — aprendizado com dispensas).
+
+        Todos os livros, INCLUINDO dispensadas (é delas que se aprende); janela
+        das 200 mais recentes. Sem banco → lista vazia (ADR-005).
+        """
+        if self._db is None:
+            return []
+        return self._db.get_observations(include_dismissed=True, limit=200)
 
     def _proactive_cross_ref(self, page_text: str):
         """Busca o conceito da página em toda a biblioteca (roda na thread do worker).
