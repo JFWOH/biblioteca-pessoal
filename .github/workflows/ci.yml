@@ -41,5 +41,13 @@ jobs:
       - name: Ruff
         run: ruff check src tests
 
-      - name: Pytest
-        run: pytest tests/ -q
+      # Suíte em 2 processos: os ~800 testes num único processo acumulam
+      # estado nativo (Chroma/torch/spaCy/Qt) e abortavam (exit 134) numa
+      # raça de teardown aos ~63% — cada teste passa isolado e com -v.
+      # Sharding zera o estado nativo no meio; todos os testes continuam
+      # rodando (diagnóstico completo: PR #14, 2026-07-16).
+      - name: Pytest (shard 1 — test_a..test_o)
+        run: pytest tests/test_[a-o]*.py -q
+
+      - name: Pytest (shard 2 — test_p..test_z)
+        run: pytest tests/test_[p-z]*.py -q
