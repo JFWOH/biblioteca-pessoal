@@ -141,3 +141,82 @@ def test_process_passes_search_fn_and_book_id(qtbot):
         MockWorker.assert_called_once()
         assert MockWorker.call_args.kwargs.get("book_id") == 7
         assert MockWorker.call_args.kwargs.get("search_fn") is fn
+
+
+# ── Fase 5: continuidade (contrato proativo_continuidade §3) ───────────
+
+def _svc_ready(svc):
+    """Patches comuns: modelo disponível + trigger liberado."""
+    return (
+        patch("src.gui.proactive_reader_service.ProactiveWorker"),
+        patch.object(svc.hardware_service, "get_proactive_model_name",
+                     return_value="gemma4:e4b"),
+        patch.object(svc.trigger_engine, "should_trigger", return_value=True),
+        patch.object(svc, "_installed_models", return_value=["gemma4:e4b"]),
+    )
+
+
+def test_page_already_observed_skips_worker(qtbot):
+    """Página com observação viva não gera de novo (nem entre sessões)."""
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    svc.intensity = "Estudo"
+    svc.set_observations_provider(
+        lambda book_id, page=None: [{"content": "já disse", "dismissed": 0}])
+    w, hw, trg, inst = _svc_ready(svc)
+    with w as MockWorker, hw, trg, inst:
+        svc.process_page_context("Texto longo " * 30, 5, book_id=7)
+        MockWorker.assert_not_called()
+
+
+def test_memory_block_reaches_worker(qtbot):
+    """As observações recentes do livro entram no prompt via memory_block."""
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    svc.intensity = "Estudo"
+
+    def observations(book_id, page=None):
+        if page is not None:
+            return []  # página atual sem observação → não pula
+        return [{"content": "O autor conecta entropia à seta do tempo.", "page": 3}]
+
+    svc.set_observations_provider(observations)
+    w, hw, trg, inst = _svc_ready(svc)
+    with w as MockWorker, hw, trg, inst:
+        MockWorker.return_value.isRunning.return_value = False
+        svc.process_page_context("Texto longo " * 30, 5, book_id=7)
+        MockWorker.assert_called_once()
+        memory = MockWorker.call_args.kwargs.get("memory_block", "")
+        assert "entropia à seta do tempo" in memory
+        assert "NÃO as repita" in memory
+
+
+def test_broken_observations_provider_degrades_gracefully(qtbot):
+    """Provider quebrado → dispara como antes, sem memória (ADR-005)."""
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    svc.intensity = "Estudo"
+    svc.set_observations_provider(
+        lambda book_id, page=None: (_ for _ in ()).throw(RuntimeError("db off")))
+    w, hw, trg, inst = _svc_ready(svc)
+    with w as MockWorker, hw, trg, inst:
+        MockWorker.return_value.isRunning.return_value = False
+        svc.process_page_context("Texto longo " * 30, 5, book_id=7)
+        MockWorker.assert_called_once()
+        assert MockWorker.call_args.kwargs.get("memory_block") == ""
+
+
+def test_without_book_id_no_memory_lookup(qtbot):
+    """Sem book_id (ex.: arquivo avulso) o provider nem é consultado."""
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    svc.intensity = "Estudo"
+    calls = []
+    svc.set_observations_provider(
+        lambda book_id, page=None: calls.append(book_id) or [])
+    w, hw, trg, inst = _svc_ready(svc)
+    with w as MockWorker, hw, trg, inst:
+        MockWorker.return_value.isRunning.return_value = False
+        svc.process_page_context("Texto longo " * 30, 5, book_id=None)
+        MockWorker.assert_called_once()
+        assert calls == []

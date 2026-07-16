@@ -16,6 +16,56 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Teto seguro quando o cliente Chroma não informa o limite real (versões da
+# 0.4.x reportam 5461; ficamos abaixo com folga).
+_FALLBACK_MAX_BATCH = 4000
+
+
+def _resolve_max_batch(collection, default: int = _FALLBACK_MAX_BATCH) -> int:
+    """Limite de itens por upsert do Chroma (dinâmico quando o cliente expõe)."""
+    client = getattr(collection, "_client", None)
+    fn = getattr(client, "get_max_batch_size", None)
+    if callable(fn):
+        try:
+            value = int(fn())
+            if value > 0:
+                return value
+        except Exception:
+            pass
+    return default
+
+
+def upsert_in_batches(collection, ids, embeddings, documents, metadatas,
+                      should_cancel=None, batch_size: int | None = None,
+                      progress_cb=None) -> int:
+    """Upsert no Chroma em lotes sob o limite do cliente.
+
+    Livros grandes estouravam o teto de batch do Chroma ("Batch size 9820
+    exceeds maximum batch size 5461") DEPOIS de todo o custo de gerar os
+    embeddings — o trabalho inteiro era descartado no último passo. O upsert
+    é idempotente por id, então lotes parciais são seguros (re-executar
+    completa o restante). Devolve o nº de itens efetivamente enviados.
+    """
+    if not ids:
+        return 0
+    limit = batch_size or _resolve_max_batch(collection)
+    sent = 0
+    for start in range(0, len(ids), limit):
+        if should_cancel is not None and should_cancel():
+            break
+        end = start + limit
+        collection.upsert(
+            ids=ids[start:end],
+            embeddings=embeddings[start:end],
+            documents=documents[start:end],
+            metadatas=metadatas[start:end],
+        )
+        sent = min(end, len(ids))
+        if progress_cb:
+            progress_cb(sent, len(ids))
+    return sent
+
+
 def _chunk_text(text: str, size: int = 1000, overlap: int = 200) -> list[str]:
     """Divide texto em chunks com sobreposição."""
     if text is None or not str(text).strip():
@@ -334,12 +384,18 @@ class DocumentIndexerService:
 
             if ids:
                 print("3. Salvando no ChromaDB...", flush=True)
-                self._rag_engine._collection.upsert(
-                    ids=ids,
-                    embeddings=embeddings,
-                    documents=documents,
-                    metadatas=metadatas,
+                sent = upsert_in_batches(
+                    self._rag_engine._collection, ids, embeddings, documents, metadatas,
+                    should_cancel=lambda: self._cancelled,
+                    progress_cb=lambda done, total: print(
+                        f"   [{done}/{total}] chunks salvos...", flush=True),
                 )
+                if sent < len(ids):
+                    # Cancelado no meio do salvamento: lotes já enviados são
+                    # idempotentes; re-executar completa o restante.
+                    self._db.set_indexing_status(
+                        book_id, "failed", sent, "Cancelado pelo usuário")
+                    return sent
                 logger.info("Indexados %d chunks para book_id=%d", len(ids), book_id)
                 self._db.set_indexing_status(book_id, "indexed_ok", len(ids))
                 print(f"OK: Concluído: {len(ids)} chunks indexados para {book_title}", flush=True)

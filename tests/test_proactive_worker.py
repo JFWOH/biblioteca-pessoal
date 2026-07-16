@@ -34,6 +34,22 @@ class TestProactiveWorkerPayload:
         payload = w._build_payload()
         assert "CONTEUDO_UNICO_XYZ" in payload["messages"][0]["content"]
 
+    def test_build_payload_injects_memory_block(self):
+        """Fase 5: o que o agente já disse entra no prompt, antes do trecho."""
+        memory = "VOCÊ JÁ FEZ AS OBSERVAÇÕES ABAIXO:\n- (p.3) MEMORIA_UNICA_ABC"
+        w = ProactiveWorker("m", "TRECHO_XYZ", "http://localhost:11434",
+                            memory_block=memory)
+        prompt = w._build_payload()["messages"][0]["content"]
+        assert "MEMORIA_UNICA_ABC" in prompt
+        assert prompt.index("MEMORIA_UNICA_ABC") < prompt.index("TRECHO_XYZ")
+
+    def test_build_payload_without_memory_is_unchanged(self):
+        """Regressão: sem memória o prompt é idêntico ao formato anterior."""
+        w = ProactiveWorker("m", "TRECHO_XYZ", "http://localhost:11434")
+        prompt = w._build_payload()["messages"][0]["content"]
+        assert "VOCÊ JÁ FEZ" not in prompt
+        assert "Trecho para análise:\nTRECHO_XYZ" in prompt
+
 
 class TestProactiveWorkerRun:
     def test_run_emits_observation_on_success(self, qtbot):
