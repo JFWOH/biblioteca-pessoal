@@ -701,13 +701,41 @@ class LibraryDB:
 
     def add_feedback(self, rating: int, kind: str = "answer", book_id=None, page=None,
                      session_id: str = "", target_ref: str = "", reason: str = "",
-                     query: str = "") -> None:
+                     query: str = "") -> int:
+        """Registra um feedback do leitor e retorna o id da linha inserida.
+
+        O id (``lastrowid``) permite à GUI completar o motivo depois, quando o
+        leitor escolhe o chip do 👎 (ver :meth:`set_agent_feedback_reason`).
+        """
         with self._write_lock:
-            self.conn.execute(
+            cur = self.conn.execute(
                 "INSERT INTO agent_feedback (session_id, book_id, page, kind, target_ref, "
                 "rating, reason, query) VALUES (?,?,?,?,?,?,?,?)",
                 (session_id, book_id, page, kind, target_ref, int(rating), reason, query))
             self.conn.commit()
+            return cur.lastrowid
+
+    def set_agent_feedback_reason(self, feedback_id: int, reason: str) -> None:
+        """Atualiza o motivo (``reason``) de um feedback já registrado.
+
+        Usado pela GUI para gravar o motivo do 👎 depois que o leitor escolhe
+        o chip. ``feedback_id`` inexistente é no-op silencioso (ADR-005).
+        """
+        with self._write_lock:
+            self.conn.execute(
+                "UPDATE agent_feedback SET reason=? WHERE id=?", (reason, feedback_id))
+            self.conn.commit()
+
+    def get_recent_agent_feedback(self, limit: int = 200) -> list[dict]:
+        """Feedbacks recentes (mais novos primeiro) para o aprendizado do agente.
+
+        Campos por linha: id, rating, reason, kind, query, book_id, page,
+        created_at.
+        """
+        rows = self.conn.execute(
+            "SELECT id, rating, reason, kind, query, book_id, page, created_at "
+            "FROM agent_feedback ORDER BY id DESC LIMIT ?", (int(limit),)).fetchall()
+        return [dict(r) for r in rows]
 
     # ── Observações da IA (proativas/agente) — persistidas ─────────────────
 

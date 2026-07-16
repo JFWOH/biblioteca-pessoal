@@ -287,6 +287,7 @@ class MainWindow(QMainWindow):
         self._rag_panel.model_changed.connect(self._on_model_changed)
         self._rag_panel.save_annotation_requested.connect(self._on_rag_annotation_save)
         self._rag_panel.feedback_submitted.connect(self._on_rag_feedback)
+        self._rag_panel.feedback_reason_submitted.connect(self._on_rag_feedback_reason)
         self._rag_panel.clear_chat_requested.connect(self._on_clear_chat)
         self._rag_panel.back_requested.connect(lambda: self._main_stack.setCurrentIndex(0))
         self._main_stack.addWidget(self._rag_panel)  # index 3
@@ -474,11 +475,31 @@ class MainWindow(QMainWindow):
         )
 
     def _on_rag_feedback(self, rating: int, context: dict):
-        """Persiste 👍/👎 do usuário sobre a resposta do RAG em agent_feedback."""
+        """Persiste 👍/👎 do usuário sobre a resposta do RAG em agent_feedback.
+
+        Captura o id da linha para que o painel possa anexar um motivo (👎).
+        """
         try:
-            self._db.add_feedback(rating=rating, **context)
+            feedback_id = self._db.add_feedback(rating=rating, **context)
         except Exception as exc:
             logger.warning(f"Falha ao registrar feedback do RAG (ignorado): {exc}")
+            return
+        # Informa o painel do id persistido (habilita a captura de motivo do 👎).
+        if isinstance(feedback_id, int):
+            try:
+                self._rag_panel.on_feedback_persisted(feedback_id)
+            except Exception as exc:
+                logger.warning(f"Falha ao notificar id de feedback ao painel (ignorado): {exc}")
+
+    def _on_rag_feedback_reason(self, feedback_id: int, reason: str):
+        """Grava o motivo (chip ou texto livre) de um 👎 já persistido.
+
+        Falha de DB nunca derruba a UI (ADR-005): apenas registra o aviso.
+        """
+        try:
+            self._db.set_agent_feedback_reason(feedback_id, reason)
+        except Exception as exc:
+            logger.warning(f"Falha ao gravar motivo do feedback (ignorado): {exc}")
 
     def _on_annotation_added(self, book_id: int, data: dict):
         """Persiste uma nova anotação no banco."""

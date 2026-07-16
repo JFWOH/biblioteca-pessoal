@@ -140,3 +140,44 @@ class TestLibraryDB:
         assert len(pdf_books) == 1
         high_rated = db.filter_books(min_rating=4)
         assert len(high_rated) == 1
+
+
+class TestAgentFeedback:
+    """Feedback do agente: retorno de id, atualização de motivo e leitura recente."""
+
+    def test_add_feedback_returns_increasing_ids(self, db):
+        id1 = db.add_feedback(rating=-1, kind="answer", query="q1")
+        id2 = db.add_feedback(rating=1, kind="answer", query="q2")
+        assert isinstance(id1, int) and isinstance(id2, int)
+        assert id2 > id1
+
+    def test_set_reason_updates_existing_row(self, db):
+        fid = db.add_feedback(rating=-1, kind="answer", query="q")
+        db.set_agent_feedback_reason(fid, "resposta_errada")
+        rows = db.get_recent_agent_feedback()
+        match = [r for r in rows if r["id"] == fid]
+        assert match and match[0]["reason"] == "resposta_errada"
+
+    def test_set_reason_noop_on_missing_id(self, db):
+        db.add_feedback(rating=-1, kind="answer", query="q")
+        # id inexistente: no-op silencioso, sem exceção (ADR-005).
+        db.set_agent_feedback_reason(999999, "resposta_errada")
+        rows = db.get_recent_agent_feedback()
+        assert all(r["reason"] != "resposta_errada" for r in rows)
+
+    def test_get_recent_orders_desc_and_respects_limit(self, db):
+        ids = [db.add_feedback(rating=-1, query=f"q{i}") for i in range(5)]
+        rows = db.get_recent_agent_feedback(limit=3)
+        assert len(rows) == 3
+        # Mais recentes primeiro: ids em ordem decrescente.
+        returned = [r["id"] for r in rows]
+        assert returned == sorted(returned, reverse=True)
+        assert returned[0] == ids[-1]
+
+    def test_get_recent_exposes_expected_fields(self, db):
+        db.add_feedback(rating=-1, kind="answer", query="pergunta",
+                        book_id=None, page=7, reason="incompleta")
+        row = db.get_recent_agent_feedback()[0]
+        for field in ("id", "rating", "reason", "kind", "query",
+                      "book_id", "page", "created_at"):
+            assert field in row
