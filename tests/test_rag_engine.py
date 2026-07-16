@@ -480,6 +480,80 @@ class TestRAGEngineRAG:
         # A pergunta está na quarta mensagem (user role)
         assert "Quem escreveu Dom Casmurro?" in messages[3]["content"]
 
+    @staticmethod
+    def _fake_urlopen_factory(captured_payload):
+        """urlopen falso que CAPTURA o payload e ainda transmite (NDJSON) "ok"."""
+        stream_lines = [
+            json.dumps({"message": {"role": "assistant", "content": "ok"}}).encode("utf-8"),
+            json.dumps({"message": {"content": ""}, "done": True,
+                        "done_reason": "stop"}).encode("utf-8"),
+        ]
+
+        def fake_urlopen(req, timeout=None):
+            body = json.loads(req.data.decode())
+            captured_payload.update(body)
+            fake_resp = MagicMock()
+            fake_resp.__enter__ = lambda s: s
+            fake_resp.__exit__ = MagicMock(return_value=False)
+            fake_resp.__iter__ = lambda s: iter(stream_lines)
+            return fake_resp
+        return fake_urlopen
+
+    def test_query_rag_injects_feedback_block_between_tools_and_context(self, mock_engine):
+        """Com ≥4 👎 (categoria qualificada), o bloco de aprendizado entra como
+        mensagem system logo após as ferramentas e antes do contexto."""
+        from src.core.database import LibraryDB
+        fb_db = LibraryDB(str(mock_engine._db_path))
+        for _ in range(4):
+            fb_db.add_feedback(rating=-1, kind="answer", query="q", reason="resposta_errada")
+
+        captured_payload = {}
+        fake_urlopen = self._fake_urlopen_factory(captured_payload)
+        with patch.object(mock_engine, "is_ollama_available", return_value=True):
+            mock_engine.index_book(1)
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                list(mock_engine.query_rag("Quem é Capitu?"))
+
+        messages = captured_payload["messages"]
+        # [0]=prompt fixo, [1]=ferramentas, [2]=feedback, [3]=contexto, [4]=user
+        assert "Assistente Avançado" in messages[0]["content"]
+        assert "Ferramentas" in messages[1]["content"]
+        assert "avaliou negativamente" in messages[2]["content"]
+        assert "Verifique cada afirmação" in messages[2]["content"]
+        assert "CONTEXTO" in messages[3]["content"]
+        assert messages[4]["role"] == "user"
+
+    def test_query_rag_no_feedback_block_when_no_signal(self, mock_engine):
+        """Sem 👎 suficientes, nenhuma mensagem extra é injetada: o contexto
+        permanece imediatamente após as ferramentas."""
+        captured_payload = {}
+        fake_urlopen = self._fake_urlopen_factory(captured_payload)
+        with patch.object(mock_engine, "is_ollama_available", return_value=True):
+            mock_engine.index_book(1)
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                list(mock_engine.query_rag("Quem é Capitu?"))
+
+        messages = captured_payload["messages"]
+        assert all("avaliou negativamente" not in m["content"] for m in messages)
+        assert "CONTEXTO" in messages[2]["content"]
+
+    def test_query_rag_survives_feedback_learning_error(self, mock_engine):
+        """Erro no caminho do aprendizado (DB/módulo) degrada para sem bloco;
+        a query segue normalmente (ADR-005)."""
+        captured_payload = {}
+        fake_urlopen = self._fake_urlopen_factory(captured_payload)
+        with patch.object(mock_engine, "is_ollama_available", return_value=True):
+            mock_engine.index_book(1)
+            with patch("src.core.feedback_learning.build_feedback_block",
+                       side_effect=RuntimeError("boom")), \
+                 patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                tokens = list(mock_engine.query_rag("Quem é Capitu?"))
+
+        assert "ok" in "".join(tokens)
+        messages = captured_payload["messages"]
+        assert all("avaliou negativamente" not in m["content"] for m in messages)
+        assert "CONTEXTO" in messages[2]["content"]
+
     def test_query_rag_cancel_stops_streaming(self, mock_engine):
         """Cancelamento deve interromper o streaming token a token."""
         stream_lines = [

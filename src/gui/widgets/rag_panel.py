@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QEvent, pyqtSignal
 from PyQt6.QtGui import QFont, QTextCursor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -41,6 +41,15 @@ class RAGPanel(QWidget):
     save_annotation_requested = pyqtSignal(int, int, str) # book_id, page, content
     clear_chat_requested = pyqtSignal()  # limpar a memória conversacional do contexto atual
     feedback_submitted = pyqtSignal(int, dict)  # rating (+1/-1), context dict
+    feedback_reason_submitted = pyqtSignal(int, str)  # feedback_id, reason (motivo do 👎)
+
+    # Chips de motivo do 👎: rótulo exibido → chave canônica gravada em reason.
+    _REASON_CHIPS = (
+        ("Errada", "resposta_errada"),
+        ("Incompleta", "incompleta"),
+        ("Fora do contexto", "fora_contexto"),
+        ("Genérica", "generica"),
+    )
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -53,6 +62,10 @@ class RAGPanel(QWidget):
         self._current_session_id = ""
         self._last_query = ""
         self._feedback_given = False
+        # Motivo do 👎: id da linha persistida (chega via on_feedback_persisted)
+        # e motivo escolhido antes do id (defensivo — ADR-005, nunca quebra a UI).
+        self._last_feedback_id: int | None = None
+        self._pending_reason: str | None = None
         self._setup_ui()
 
     # ── Construção da UI ───────────────────────────────────────────────────────
@@ -248,6 +261,66 @@ class RAGPanel(QWidget):
         self._thumbs_down_btn.setStyleSheet(_fb_style)
         self._thumbs_down_btn.clicked.connect(lambda: self._on_feedback_clicked(-1))
         action_btns_layout.addWidget(self._thumbs_down_btn)
+
+        # Motivo do 👎 (opcional): linha discreta de chips que ocupa o lugar dos
+        # botões de feedback. Clique num chip grava a chave canônica; "Outro…"
+        # troca os chips por um campo curto de texto livre.
+        _chip_style = """
+            QPushButton {
+                background: transparent;
+                border: 1px solid #3f3f46;
+                border-radius: 8px;
+                color: #9ca3af;
+                padding: 4px 10px;
+                font-size: 11px;
+            }
+            QPushButton:hover { background: rgba(16, 185, 129, 0.12);
+                                color: #10b981; border-color: #10b981; }
+        """
+        self._reason_container = QWidget()
+        self._reason_container.setVisible(False)
+        reason_layout = QHBoxLayout(self._reason_container)
+        reason_layout.setContentsMargins(0, 0, 0, 0)
+        reason_layout.setSpacing(6)
+
+        self._reason_label = QLabel("O que faltou? (opcional)")
+        self._reason_label.setStyleSheet("color: #6b7280; font-size: 11px;")
+        reason_layout.addWidget(self._reason_label)
+
+        self._reason_chip_btns: list[QPushButton] = []
+        for text, key in self._REASON_CHIPS:
+            chip = QPushButton(text)
+            chip.setStyleSheet(_chip_style)
+            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            chip.clicked.connect(lambda _=False, k=key: self._on_reason_chosen(k))
+            reason_layout.addWidget(chip)
+            self._reason_chip_btns.append(chip)
+
+        self._reason_other_btn = QPushButton("Outro…")
+        self._reason_other_btn.setStyleSheet(_chip_style)
+        self._reason_other_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._reason_other_btn.setToolTip("Escrever o motivo com suas palavras")
+        self._reason_other_btn.clicked.connect(self._on_reason_other)
+        reason_layout.addWidget(self._reason_other_btn)
+        self._reason_chip_btns.append(self._reason_other_btn)
+
+        self._reason_edit = QLineEdit()
+        self._reason_edit.setPlaceholderText("conte o motivo…")
+        self._reason_edit.setMaximumWidth(220)
+        self._reason_edit.setVisible(False)
+        self._reason_edit.setStyleSheet("""
+            QLineEdit {
+                background: transparent; border: 1px solid #3f3f46;
+                border-radius: 8px; color: #e5e7eb;
+                padding: 4px 10px; font-size: 11px;
+            }
+            QLineEdit:focus { border-color: #10b981; }
+        """)
+        self._reason_edit.returnPressed.connect(self._on_reason_edit_confirmed)
+        self._reason_edit.installEventFilter(self)  # Esc → volta aos chips
+        reason_layout.addWidget(self._reason_edit)
+
+        action_btns_layout.addWidget(self._reason_container)
 
         chat_layout.addLayout(action_btns_layout)
 
@@ -740,6 +813,8 @@ class RAGPanel(QWidget):
         self._flashcard_btn.setVisible(False)
         self._hide_feedback_buttons()
         self._feedback_given = False
+        self._last_feedback_id = None
+        self._pending_reason = None
 
     def clear_reading_context(self) -> None:
         """Limpa o contexto de leitura (útil para modo standalone)."""
@@ -839,12 +914,21 @@ class RAGPanel(QWidget):
     def _hide_feedback_buttons(self) -> None:
         self._thumbs_up_btn.setVisible(False)
         self._thumbs_down_btn.setVisible(False)
+        self._hide_reason_chips()
 
     def _on_feedback_clicked(self, rating: int) -> None:
-        """Registra 👍 (+1) / 👎 (-1) da resposta atual. Um voto por resposta."""
+        """Registra 👍 (+1) / 👎 (-1) da resposta atual. Um voto por resposta.
+
+        👍: confirmação imediata ("✅ Obrigado!"), zero fricção. 👎: o voto é
+        emitido/persistido na hora; em seguida os botões dão lugar a uma linha
+        discreta de chips para capturar o motivo (opcional).
+        """
         if self._feedback_given:
             return
         self._feedback_given = True
+        # Voto novo: zera qualquer estado de motivo herdado.
+        self._last_feedback_id = None
+        self._pending_reason = None
         ctx = self._reading_context or {}
         book_id = ctx.get("book_id") or None
         if book_id == 0:
@@ -857,11 +941,97 @@ class RAGPanel(QWidget):
             "query": self._last_query,
         }
         self.feedback_submitted.emit(rating, context)
-        # Confirmação visual: desabilita ambos e destaca o escolhido.
-        chosen = self._thumbs_up_btn if rating > 0 else self._thumbs_down_btn
-        chosen.setText("✅ Obrigado!")
         self._thumbs_up_btn.setEnabled(False)
         self._thumbs_down_btn.setEnabled(False)
+        if rating > 0:
+            # 👍 — confirmação imediata no mesmo lugar de hoje.
+            self._thumbs_up_btn.setText("✅ Obrigado!")
+        else:
+            # 👎 — voto já emitido; abre os chips de motivo (opcional).
+            self._thumbs_up_btn.setVisible(False)
+            self._thumbs_down_btn.setVisible(False)
+            self._show_reason_chips()
+
+    # ── Motivo do 👎 (chips) ────────────────────────────────────────────────────
+
+    def on_feedback_persisted(self, feedback_id: int) -> None:
+        """Recebe o id da linha persistida em agent_feedback (via MainWindow).
+
+        Habilita o envio do motivo. Se o usuário já escolheu um motivo antes do
+        id chegar, emite-o agora (ADR-005 — persistência é rápida, mas defensivo).
+        """
+        self._last_feedback_id = feedback_id
+        if self._pending_reason is not None:
+            reason = self._pending_reason
+            self._pending_reason = None
+            self.feedback_reason_submitted.emit(feedback_id, reason)
+
+    def _show_reason_chips(self) -> None:
+        """Exibe a linha de chips de motivo no lugar dos botões de feedback."""
+        self._reason_edit.setVisible(False)
+        self._reason_edit.clear()
+        self._reason_label.setVisible(True)
+        for chip in self._reason_chip_btns:
+            chip.setVisible(True)
+        self._reason_container.setVisible(True)
+
+    def _hide_reason_chips(self) -> None:
+        """Esconde toda a área de motivo (chips + campo livre)."""
+        self._reason_edit.clear()
+        self._reason_edit.setVisible(False)
+        self._reason_container.setVisible(False)
+
+    def _on_reason_other(self) -> None:
+        """'Outro…': troca os chips por um campo curto de texto livre."""
+        self._reason_label.setVisible(False)
+        for chip in self._reason_chip_btns:
+            chip.setVisible(False)
+        self._reason_edit.setVisible(True)
+        self._reason_edit.setFocus()
+
+    def _cancel_reason_other(self) -> None:
+        """Esc no campo livre: descarta o texto e volta aos chips."""
+        self._reason_edit.clear()
+        self._reason_edit.setVisible(False)
+        self._reason_label.setVisible(True)
+        for chip in self._reason_chip_btns:
+            chip.setVisible(True)
+
+    def _on_reason_edit_confirmed(self) -> None:
+        """Enter no campo livre: grava o texto cru como motivo."""
+        text = self._reason_edit.text().strip()
+        if not text:
+            return
+        self._submit_reason(text)
+
+    def _on_reason_chosen(self, key: str) -> None:
+        """Clique num chip: grava a chave canônica como motivo."""
+        self._submit_reason(key)
+
+    def _submit_reason(self, reason: str) -> None:
+        """Emite o motivo (se o id já chegou) ou o guarda para quando chegar,
+        esconde os chips e confirma visualmente ("✅ Obrigado!")."""
+        self._hide_reason_chips()
+        if self._last_feedback_id is not None:
+            self.feedback_reason_submitted.emit(self._last_feedback_id, reason)
+        else:
+            # Persistência ainda não confirmou o id — guarda para emitir depois.
+            self._pending_reason = reason
+        # Confirmação visual no mesmo lugar de hoje.
+        self._thumbs_down_btn.setText("✅ Obrigado!")
+        self._thumbs_down_btn.setEnabled(False)
+        self._thumbs_down_btn.setVisible(True)
+
+    def eventFilter(self, obj, event):  # noqa: N802 (assinatura do Qt)
+        """Esc no campo de texto livre volta aos chips (sem perder o voto)."""
+        if (
+            obj is self._reason_edit
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() == Qt.Key.Key_Escape
+        ):
+            self._cancel_reason_other()
+            return True
+        return super().eventFilter(obj, event)
 
     def _on_flashcard_clicked(self) -> None:
         """Abre o dialog para criar um flashcard a partir da resposta e do contexto."""
@@ -949,6 +1119,8 @@ class RAGPanel(QWidget):
         self._last_query = question
         self._current_session_id = str(uuid.uuid4())
         self._feedback_given = False
+        self._last_feedback_id = None
+        self._pending_reason = None
         self._gen_status.setText(f'🔍 Consultando: "{question[:60]}..."')
         self.query_requested.emit(question)
 
