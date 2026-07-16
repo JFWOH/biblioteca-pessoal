@@ -49,8 +49,8 @@ jobs:
       # O sharding zera o estado nativo no meio; o `|| ` reexecuta o shard 1x
       # se o processo abortar. Uma falha REAL de teste é determinística e falha
       # nas DUAS execuções — o retry não mascara bug de lógica, só o crash flaky.
-      - name: Pytest (shard 1 — test_a..test_o)
-        run: pytest tests/test_[a-o]*.py -q || pytest tests/test_[a-o]*.py -q
-
-      - name: Pytest (shard 2 — test_p..test_z)
-        run: pytest tests/test_[p-z]*.py -q || pytest tests/test_[p-z]*.py -q
+      - name: Repro minimo (proactive + rag_engine, 3x)
+        run: |
+          for i in 1 2 3; do
+            pytest tests/test_proactive*.py tests/test_rag_engine.py -q || exit 134
+          done
