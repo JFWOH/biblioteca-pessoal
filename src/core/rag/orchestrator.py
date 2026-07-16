@@ -549,6 +549,36 @@ class Orchestrator:
         from src.core.graph.graph_store import GraphStore
         return GraphStore(LibraryDB(str(self.engine._db_path)))
 
+    def _feedback_learning_block(self, trace_logger=None) -> Optional[str]:
+        """Bloco de prompt aprendido dos 👎 do leitor, ou ``None`` (ADR-005).
+
+        Segue o padrão de :meth:`_graph_store`: LibraryDB sob demanda pelo
+        db_path do engine. QUALQUER exceção degrada para ``None`` — a query
+        nunca quebra por causa do aprendizado. Quando um bloco é produzido e
+        há TraceLogger, emite ``feedback_block_injected``.
+        """
+        try:
+            from src.core.database import LibraryDB
+            from src.core.feedback_learning import build_feedback_block
+            rows = LibraryDB(str(self.engine._db_path)).get_recent_agent_feedback(200)
+            block = build_feedback_block(rows)
+        except Exception as exc:
+            logger.debug("feedback_learning indisponível: %s", exc)
+            return None
+        if block and trace_logger is not None:
+            try:
+                negatives = sum(
+                    1 for r in rows
+                    if isinstance(r, dict) and isinstance(r.get("rating"), int)
+                    and not isinstance(r.get("rating"), bool) and r["rating"] < 0
+                )
+                trace_logger.emit("feedback_block_injected", step=1,
+                                  payload={"negatives": negatives,
+                                           "categories": block.count("\n- ")})
+            except Exception:
+                pass
+        return block
+
     def execute_graph_concept_lookup(self, concept: str, state=None,
                                      trace_logger=None) -> ToolOutput:
         """Onde o conceito aparece na biblioteca (livros + páginas)."""
@@ -841,10 +871,17 @@ class Orchestrator:
         messages = [
             {"role": "system", "content": _FIXED_SYSTEM_PROMPT},
             {"role": "system", "content": f"Ferramentas Disponíveis (JSON Schema):\n{json.dumps(_TOOLS_DEF, ensure_ascii=False)}"},
-            {"role": "system", "content": f"--- CONTEXTO ATUAL ---\n{context}\n--- FIM DO CONTEXTO ---"},
-            *history,
-            {"role": "user", "content": question},
         ]
+        # Aprendizado por feedback (👎): ajustes aprendidos entram DEPOIS das
+        # ferramentas e ANTES do contexto. Ausência de sinal/erro → None, e o
+        # prompt fica idêntico ao anterior (degradação graciosa, ADR-005).
+        feedback_block = self._feedback_learning_block(trace_logger)
+        if feedback_block:
+            messages.append({"role": "system", "content": feedback_block})
+        messages.append(
+            {"role": "system", "content": f"--- CONTEXTO ATUAL ---\n{context}\n--- FIM DO CONTEXTO ---"})
+        messages.extend(history)
+        messages.append({"role": "user", "content": question})
 
         answer_acc: list[str] = []
         # 25s (valor anterior) já era estourado por uma ÚNICA rodada de modelos
