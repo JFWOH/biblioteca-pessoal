@@ -558,9 +558,17 @@ class Orchestrator:
         há TraceLogger, emite ``feedback_block_injected``.
         """
         try:
+            from pathlib import Path
+
             from src.core.database import LibraryDB
             from src.core.feedback_learning import build_feedback_block
-            rows = LibraryDB(str(self.engine._db_path)).get_recent_agent_feedback(200)
+            db_path = Path(str(self.engine._db_path))
+            # Caminho de LEITURA: só consulta banco que já existe. Sem este
+            # guard, engines mockados em testes viravam SQLites-lixo reais no
+            # Linux (str(Mock) é nome de arquivo válido lá) a cada query_rag.
+            if not db_path.is_file():
+                return None
+            rows = LibraryDB(str(db_path)).get_recent_agent_feedback(200)
             block = build_feedback_block(rows)
         except Exception as exc:
             logger.debug("feedback_learning indisponível: %s", exc)
