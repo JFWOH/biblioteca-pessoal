@@ -43,7 +43,7 @@ class SettingsDialog(QDialog):
         font.setPointSize(16)
         font.setWeight(QFont.Weight.Bold)
         title.setFont(font)
-        title.setStyleSheet("color: #e4e4e7;")
+        title.setObjectName("settingsDialogTitle")
         layout.addWidget(title)
 
         # Abas
@@ -82,7 +82,7 @@ class SettingsDialog(QDialog):
 
         # Tema
         theme_group = QGroupBox("Tema")
-        theme_group.setStyleSheet(self._group_style())
+        theme_group.setObjectName("settingsGroup")
         theme_layout = QVBoxLayout(theme_group)
 
         theme_row = QHBoxLayout()
@@ -103,7 +103,7 @@ class SettingsDialog(QDialog):
 
         # Visualização da biblioteca
         view_group = QGroupBox("Visualização da Biblioteca")
-        view_group.setStyleSheet(self._group_style())
+        view_group.setObjectName("settingsGroup")
         view_layout = QVBoxLayout(view_group)
 
         view_row = QHBoxLayout()
@@ -139,19 +139,14 @@ class SettingsDialog(QDialog):
 
         # Tipografia
         font_group = QGroupBox("Tipografia")
-        font_group.setStyleSheet(self._group_style())
+        font_group.setObjectName("settingsGroup")
         font_layout = QVBoxLayout(font_group)
 
         font_row = QHBoxLayout()
         font_row.addWidget(QLabel("Fonte:"))
         self._font_combo = QFontComboBox()
         self._font_combo.setFixedWidth(220)
-        self._font_combo.setStyleSheet("""
-            QFontComboBox {
-                background: #18181b; border: 1px solid #27272a;
-                border-radius: 6px; padding: 4px 8px; color: #e4e4e7;
-            }
-        """)
+        self._font_combo.setObjectName("settingsNumericInput")
         font_row.addWidget(self._font_combo)
         font_row.addStretch()
         font_layout.addLayout(font_row)
@@ -163,12 +158,7 @@ class SettingsDialog(QDialog):
         self._font_size.setValue(DEFAULT_FONT_SIZE)
         self._font_size.setSuffix(" px")
         self._font_size.setFixedWidth(100)
-        self._font_size.setStyleSheet("""
-            QSpinBox {
-                background: #18181b; border: 1px solid #27272a;
-                border-radius: 6px; padding: 4px 8px; color: #e4e4e7;
-            }
-        """)
+        self._font_size.setObjectName("settingsNumericInput")
         size_row.addWidget(self._font_size)
         size_row.addStretch()
         font_layout.addLayout(size_row)
@@ -194,7 +184,7 @@ class SettingsDialog(QDialog):
 
         # Margens
         margin_group = QGroupBox("Margens")
-        margin_group.setStyleSheet(self._group_style())
+        margin_group.setObjectName("settingsGroup")
         margin_layout = QVBoxLayout(margin_group)
 
         h_margin = QHBoxLayout()
@@ -204,7 +194,7 @@ class SettingsDialog(QDialog):
         self._h_margin.setValue(60)
         self._h_margin.setSuffix(" px")
         self._h_margin.setFixedWidth(100)
-        self._h_margin.setStyleSheet(self._font_size.styleSheet())
+        self._h_margin.setObjectName("settingsNumericInput")
         h_margin.addWidget(self._h_margin)
         h_margin.addStretch()
         margin_layout.addLayout(h_margin)
@@ -216,7 +206,7 @@ class SettingsDialog(QDialog):
         self._v_margin.setValue(40)
         self._v_margin.setSuffix(" px")
         self._v_margin.setFixedWidth(100)
-        self._v_margin.setStyleSheet(self._font_size.styleSheet())
+        self._v_margin.setObjectName("settingsNumericInput")
         v_margin.addWidget(self._v_margin)
         v_margin.addStretch()
         margin_layout.addLayout(v_margin)
@@ -232,7 +222,7 @@ class SettingsDialog(QDialog):
 
         # Importação
         import_group = QGroupBox("Importação")
-        import_group.setStyleSheet(self._group_style())
+        import_group.setObjectName("settingsGroup")
         import_layout = QVBoxLayout(import_group)
 
         self._detect_dups = QCheckBox("Detectar duplicatas ao importar")
@@ -247,17 +237,12 @@ class SettingsDialog(QDialog):
 
         # Diretórios monitorados
         watch_group = QGroupBox("Diretórios Monitorados")
-        watch_group.setStyleSheet(self._group_style())
+        watch_group.setObjectName("settingsGroup")
         watch_layout = QVBoxLayout(watch_group)
 
         self._watch_list = QListWidget()
         self._watch_list.setMaximumHeight(100)
-        self._watch_list.setStyleSheet("""
-            QListWidget {
-                background: #0f0f17; border: 1px solid #27272a;
-                border-radius: 6px; color: #e4e4e7; font-size: 12px;
-            }
-        """)
+        self._watch_list.setObjectName("settingsWatchList")
         watch_layout.addWidget(self._watch_list)
 
         watch_btns = QHBoxLayout()
@@ -286,7 +271,7 @@ class SettingsDialog(QDialog):
 
         # Narrador do Livro
         book_group = QGroupBox("📖 Narrador do Livro")
-        book_group.setStyleSheet(self._group_style())
+        book_group.setObjectName("settingsGroup")
         book_layout = QVBoxLayout(book_group)
 
         # Provider preferido
@@ -336,7 +321,7 @@ class SettingsDialog(QDialog):
 
         # Voz do Assistente
         asst_group = QGroupBox("🤖 Voz do Assistente")
-        asst_group.setStyleSheet(self._group_style())
+        asst_group.setObjectName("settingsGroup")
         asst_layout = QVBoxLayout(asst_group)
 
         asst_prov_row = QHBoxLayout()
@@ -383,7 +368,7 @@ class SettingsDialog(QDialog):
 
         # Fallback automático
         fallback_group = QGroupBox("⚡ Comportamento")
-        fallback_group.setStyleSheet(self._group_style())
+        fallback_group.setObjectName("settingsGroup")
         fallback_layout = QVBoxLayout(fallback_group)
 
         self._tts_auto_fallback = QCheckBox("Fallback automático para engine mais leve")
@@ -394,20 +379,6 @@ class SettingsDialog(QDialog):
 
         layout.addStretch()
         return tab
-
-    def _group_style(self) -> str:
-        return """
-            QGroupBox {
-                border: 1px solid #27272a; border-radius: 8px;
-                margin-top: 12px; padding: 16px; padding-top: 24px;
-                color: #a1a1aa; font-size: 12px; font-weight: 600;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin; left: 12px; padding: 0 6px;
-            }
-            QLabel { color: #a1a1aa; font-size: 12px; }
-            QCheckBox { color: #a1a1aa; font-size: 12px; }
-        """
 
     def _load_settings(self):
         """Carrega configurações atuais nos widgets."""

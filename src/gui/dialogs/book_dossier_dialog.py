@@ -24,8 +24,8 @@ from src.core.book_dossier import (
 from src.core.graph.graph_store import GraphStore
 from src.gui.widgets.ai_response_card import AIResponseCard
 
-_HEADER_STYLE = "color: #71717a; font-size: 11px; font-weight: 600;"
-_BODY_STYLE = "color: #cbd5e1; font-size: 12px;"
+_HEADER_STYLE = "dossierSectionHeader"
+_BODY_STYLE = "dossierBody"
 
 
 class BookDossierDialog(QDialog):
@@ -46,7 +46,7 @@ class BookDossierDialog(QDialog):
 
         self.setWindowTitle("📋 Dossiê do Livro")
         self.resize(560, 680)
-        self.setStyleSheet("QDialog { background-color: #0f1115; }")
+        self.setObjectName("bookDossierDialog")
 
         self._data = build_dossier_data(db, GraphStore(db), book_id)
         self._setup_ui()
@@ -63,9 +63,9 @@ class BookDossierDialog(QDialog):
         scroll.setWidgetResizable(True)
         # Conteúdo se adapta à largura do diálogo — nunca scroll horizontal.
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.setObjectName("dossierScroll")
         content = QWidget()
-        content.setStyleSheet("background: transparent;")
+        content.setObjectName("dossierContent")
         lay = QVBoxLayout(content)
         lay.setContentsMargins(0, 0, 8, 0)
         lay.setSpacing(12)
@@ -96,17 +96,15 @@ class BookDossierDialog(QDialog):
         close_btn.clicked.connect(self.accept)
         root.addWidget(close_btn)
 
-    def _label(self, text: str, style: str) -> QLabel:
+    def _label(self, text: str, object_name: str) -> QLabel:
         lbl = QLabel(text)
         lbl.setWordWrap(True)
-        lbl.setStyleSheet(style)
+        lbl.setObjectName(object_name)
         return lbl
 
     def _card(self, text: str) -> QFrame:
         frame = QFrame()
-        frame.setStyleSheet(
-            "QFrame { background-color: #20242d; border: 1px solid #2d333f;"
-            " border-radius: 8px; }")
+        frame.setObjectName("dossierCard")
         lay = QVBoxLayout(frame)
         lay.setContentsMargins(12, 10, 12, 10)
         lay.addWidget(self._label(text, _BODY_STYLE))
@@ -119,7 +117,7 @@ class BookDossierDialog(QDialog):
         cover = QLabel()
         cover.setFixedSize(72, 100)
         cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cover.setStyleSheet("background: #18181b; border-radius: 6px; font-size: 28px;")
+        cover.setObjectName("dossierCover")
         pixmap = QPixmap(book.get("cover_path") or "")
         if not pixmap.isNull():
             cover.setPixmap(pixmap.scaled(
@@ -133,17 +131,17 @@ class BookDossierDialog(QDialog):
         info.setSpacing(4)
         info.addWidget(self._label(
             book.get("title") or "Sem título",
-            "color: #e5e7eb; font-size: 16px; font-weight: 700;"))
+            "dossierBookTitle"))
         info.addWidget(self._label(
             book.get("author") or "Autor desconhecido",
-            "color: #818cf8; font-size: 12px;"))
+            "dossierBookAuthor"))
         progress = self._data["progress"]
         if progress and progress.get("total_pages"):
             pct = int(round(progress.get("percentage") or 0))
             info.addWidget(self._label(
                 f"📖 Página {progress['current_page']} de "
                 f"{progress['total_pages']} ({pct}%)",
-                "color: #71717a; font-size: 11px;"))
+                "dossierProgress"))
         info.addStretch()
         row.addLayout(info, stretch=1)
         lay.addLayout(row)
@@ -189,11 +187,7 @@ class BookDossierDialog(QDialog):
             btn.setMinimumWidth(0)
             btn.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(
-                "QPushButton { background: transparent; border: 1px solid #3f3f46;"
-                " border-radius: 6px; padding: 8px; color: #a5b4fc; font-size: 12px;"
-                " text-align: left; }"
-                " QPushButton:hover { border-color: #6366f1; }")
+            btn.setObjectName("dossierRelatedBtn")
             btn.clicked.connect(
                 lambda _c=False, bid=rel["book_id"]: self._open_related(bid))
             lay.addWidget(btn)

@@ -66,9 +66,7 @@ class BookCard(QWidget):
                             Qt.TransformationMode.SmoothTransformation,
                         )
                     )
-                    self._cover_label.setStyleSheet(
-                        "border-radius: 8px; background-color: #27272a;"
-                    )
+                    self._cover_label.setObjectName("bookCoverImage")
                 else:
                     self._set_placeholder_cover()
             else:
@@ -116,9 +114,7 @@ class BookCard(QWidget):
 
         if self._is_broken:
             broken_badge = QLabel("⚠️ Ausente")
-            broken_badge.setStyleSheet(
-                "color: #f59e0b; font-size: 8px; font-weight: 700;"
-            )
+            broken_badge.setObjectName("bookCardBrokenBadge")
             info_layout.addWidget(broken_badge)
 
         info_layout.addStretch()
@@ -133,25 +129,12 @@ class BookCard(QWidget):
     def _set_placeholder_cover(self):
         """Capa placeholder quando não há imagem."""
         self._cover_label.setText("📖")
-        self._cover_label.setStyleSheet("""
-            border-radius: 8px;
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #312e81, stop:1 #1e1b4b);
-            font-size: 48px;
-            color: #818cf8;
-        """)
+        self._cover_label.setObjectName("bookCoverPlaceholder")
 
     def _set_broken_cover(self):
         """Capa âmbar de alerta para livros com arquivo ausente."""
         self._cover_label.setText("⚠️")
-        self._cover_label.setStyleSheet("""
-            border-radius: 8px;
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #451a03, stop:1 #78350f);
-            font-size: 48px;
-            color: #f59e0b;
-            border: 2px solid #f59e0b;
-        """)
+        self._cover_label.setObjectName("bookCoverBroken")
 
     def _apply_shadow(self):
         shadow = QGraphicsDropShadowEffect(self)
@@ -163,13 +146,11 @@ class BookCard(QWidget):
     def set_selected(self, selected: bool) -> None:
         """Altera o estado de seleção visual do card."""
         self._is_selected = selected
-        if selected:
-            self.setStyleSheet(
-                "QWidget#bookCard { border: 2px solid #6366f1; border-radius: 12px; "
-                "background-color: rgba(99,102,241,0.12); }"
-            )
-        else:
-            self.setStyleSheet("")
+        # Estado dinâmico via propriedade Qt + seletor QSS (#bookCard[selected="true"])
+        # em vez de setStyleSheet inline — repolish força o QSS a reavaliar o seletor.
+        self.setProperty("selected", selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
         self.selected_changed.emit(self._book_id, selected)
 
     def mousePressEvent(self, event):

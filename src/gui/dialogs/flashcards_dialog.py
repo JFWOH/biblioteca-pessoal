@@ -24,10 +24,7 @@ class _FlashcardCard(QFrame):
     def __init__(self, fc: dict, book_title: str, parent=None):
         super().__init__(parent)
         self._fc = fc
-        self.setStyleSheet(
-            "QFrame { background-color: #20242d; border: 1px solid #2d333f;"
-            " border-radius: 8px; }"
-        )
+        self.setObjectName("flashcardItem")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(6)
@@ -35,34 +32,28 @@ class _FlashcardCard(QFrame):
         header = QHBoxLayout()
         is_new = not (fc.get("due_date") or "")
         badge = QLabel("novo" if is_new else f"revisar {fc.get('due_date', '')}")
-        badge.setStyleSheet(
-            "color: #10b981; font-size: 10px; font-weight: 600;"
-            if is_new else "color: #94a3b8; font-size: 10px;"
-        )
+        badge.setObjectName("flashcardBadgeNew" if is_new else "flashcardBadgeDue")
         header.addWidget(badge)
         header.addStretch()
         if book_title:
             origin = QLabel(f"📖 {book_title}")
-            origin.setStyleSheet("color: #818cf8; font-size: 10px;")
+            origin.setObjectName("flashcardOrigin")
             header.addWidget(origin)
         del_btn = QPushButton("✕")
         del_btn.setFixedSize(20, 20)
-        del_btn.setStyleSheet(
-            "QPushButton { background: transparent; border: none; color: #52525b; font-size: 12px; }"
-            " QPushButton:hover { color: #ef4444; }"
-        )
+        del_btn.setObjectName("flashcardDeleteBtn")
         del_btn.clicked.connect(lambda: self.delete_requested.emit(fc.get("id", 0)))
         header.addWidget(del_btn)
         layout.addLayout(header)
 
         front = QLabel(fc.get("front", ""))
         front.setWordWrap(True)
-        front.setStyleSheet("color: #e5e7eb; font-size: 13px; font-weight: 600;")
+        front.setObjectName("flashcardFront")
         layout.addWidget(front)
 
         back = QLabel(fc.get("back", ""))
         back.setWordWrap(True)
-        back.setStyleSheet("color: #cbd5e1; font-size: 12px;")
+        back.setObjectName("flashcardBack")
         layout.addWidget(back)
 
 
@@ -80,7 +71,7 @@ class FlashcardsDialog(QDialog):
 
         self.setWindowTitle("🃏 Flashcards")
         self.resize(560, 640)
-        self.setStyleSheet("QDialog { background-color: #0f1115; }")
+        self.setObjectName("flashcardsDialog")
         self._setup_ui()
         self._reload_books_filter()
         self._refresh_list()
@@ -95,28 +86,18 @@ class FlashcardsDialog(QDialog):
         # Cabeçalho: filtro por livro + botão estudar
         top = QHBoxLayout()
         title = QLabel("🃏 Flashcards")
-        title.setStyleSheet("color: #e5e7eb; font-size: 16px; font-weight: 700;")
+        title.setObjectName("flashcardsTitle")
         top.addWidget(title)
         top.addStretch()
 
         self._book_filter = QComboBox()
         self._book_filter.setMinimumWidth(180)
-        self._book_filter.setStyleSheet(
-            "QComboBox { background: #161920; border: 1px solid #2d333f; border-radius: 6px;"
-            " padding: 5px 8px; color: #e4e4e7; font-size: 12px; }"
-            " QComboBox QAbstractItemView { background: #161920; color: #e4e4e7;"
-            " selection-background-color: #2d333f; }"
-        )
+        self._book_filter.setObjectName("flashcardsBookFilter")
         self._book_filter.currentIndexChanged.connect(self._on_filter_changed)
         top.addWidget(self._book_filter)
 
         self._study_btn = QPushButton("Estudar")
-        self._study_btn.setStyleSheet(
-            "QPushButton { background: #10b981; color: #06281e; border: none; border-radius: 6px;"
-            " padding: 6px 14px; font-size: 12px; font-weight: 600; }"
-            " QPushButton:hover { background: #34d399; }"
-            " QPushButton:disabled { background: #1f2937; color: #4b5563; }"
-        )
+        self._study_btn.setObjectName("flashcardsStudyBtn")
         self._study_btn.clicked.connect(self._start_study)
         top.addWidget(self._study_btn)
         root.addLayout(top)
@@ -151,12 +132,12 @@ class FlashcardsDialog(QDialog):
             "ou pelo Assistente, e eles aparecem aqui para consulta e estudo."
         )
         self._empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_lbl.setStyleSheet("color: #6b7280; font-size: 13px;")
+        self._empty_lbl.setObjectName("flashcardsEmptyLabel")
         self._empty_lbl.setVisible(False)
         lay.addWidget(self._empty_lbl)
 
         self._count_lbl = QLabel("")
-        self._count_lbl.setStyleSheet("color: #52525b; font-size: 11px;")
+        self._count_lbl.setObjectName("flashcardsCountLabel")
         lay.addWidget(self._count_lbl)
         return page
 
@@ -167,40 +148,36 @@ class FlashcardsDialog(QDialog):
         lay.setSpacing(12)
 
         self._progress_lbl = QLabel("")
-        self._progress_lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        self._progress_lbl.setObjectName("flashcardsProgressLabel")
         lay.addWidget(self._progress_lbl)
 
         card = QFrame()
-        card.setStyleSheet("QFrame { background: #161920; border: 1px solid #2d333f; border-radius: 10px; }")
+        card.setObjectName("flashcardsStudyCard")
         card_lay = QVBoxLayout(card)
         card_lay.setContentsMargins(18, 18, 18, 18)
         card_lay.setSpacing(12)
 
         self._front_lbl = QLabel("")
         self._front_lbl.setWordWrap(True)
-        self._front_lbl.setStyleSheet("color: #e5e7eb; font-size: 15px; font-weight: 600;")
+        self._front_lbl.setObjectName("flashcardsStudyFront")
         card_lay.addWidget(self._front_lbl)
 
         self._sep = QFrame()
         self._sep.setFixedHeight(1)
-        self._sep.setStyleSheet("background: #2d333f;")
+        self._sep.setObjectName("flashcardsStudySep")
         self._sep.setVisible(False)
         card_lay.addWidget(self._sep)
 
         self._back_lbl = QLabel("")
         self._back_lbl.setWordWrap(True)
-        self._back_lbl.setStyleSheet("color: #cbd5e1; font-size: 14px;")
+        self._back_lbl.setObjectName("flashcardsStudyBack")
         self._back_lbl.setVisible(False)
         card_lay.addWidget(self._back_lbl)
         card_lay.addStretch()
         lay.addWidget(card, 1)
 
         self._reveal_btn = QPushButton("Mostrar resposta")
-        self._reveal_btn.setStyleSheet(
-            "QPushButton { background: #2563eb; color: white; border: none; border-radius: 8px;"
-            " padding: 10px; font-size: 13px; font-weight: 600; }"
-            " QPushButton:hover { background: #1d4ed8; }"
-        )
+        self._reveal_btn.setObjectName("flashcardsRevealBtn")
         self._reveal_btn.clicked.connect(self._reveal_answer)
         lay.addWidget(self._reveal_btn)
 
@@ -208,17 +185,18 @@ class FlashcardsDialog(QDialog):
         self._grade_row = QHBoxLayout()
         self._grade_row.setSpacing(6)
         self._grade_buttons = {}
-        grade_colors = {
-            "again": "#ef4444", "hard": "#f59e0b", "good": "#10b981", "easy": "#3b82f6",
+        # Cores fixas por nota (enum de 4 valores conhecidos em tempo de
+        # escrita — não é dado de runtime) — cada uma vira um objectName
+        # dedicado (#flashcardsGrade<Nota>) com regras nos 3 temas.
+        grade_object_names = {
+            "again": "flashcardsGradeAgain",
+            "hard": "flashcardsGradeHard",
+            "good": "flashcardsGradeGood",
+            "easy": "flashcardsGradeEasy",
         }
         for g in srs.GRADES:
             btn = QPushButton(srs.GRADE_LABELS[g])
-            color = grade_colors[g]
-            btn.setStyleSheet(
-                f"QPushButton {{ background: transparent; color: {color}; border: 1px solid {color};"
-                f" border-radius: 8px; padding: 8px 6px; font-size: 12px; font-weight: 600; }}"
-                f" QPushButton:hover {{ background: {color}; color: #0f1115; }}"
-            )
+            btn.setObjectName(grade_object_names[g])
             btn.clicked.connect(lambda _checked=False, gr=g: self._grade(gr))
             self._grade_buttons[g] = btn
             self._grade_row.addWidget(btn)
@@ -228,10 +206,7 @@ class FlashcardsDialog(QDialog):
         lay.addWidget(self._grade_widget)
 
         back_btn = QPushButton("← Voltar à lista")
-        back_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #94a3b8; border: none; font-size: 12px; }"
-            " QPushButton:hover { color: #e5e7eb; }"
-        )
+        back_btn.setObjectName("flashcardsBackBtn")
         back_btn.clicked.connect(self._back_to_list)
         lay.addWidget(back_btn)
         return page

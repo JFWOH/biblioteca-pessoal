@@ -54,7 +54,7 @@ class BookDetails(QWidget):
         self._cover = QLabel()
         self._cover.setFixedHeight(280)
         self._cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._cover.setStyleSheet("border-radius: 8px; background: #18181b;")
+        self._cover.setObjectName("bookDetailsCover")
         self._cover.setScaledContents(False)
         layout.addWidget(self._cover)
 
@@ -65,12 +65,12 @@ class BookDetails(QWidget):
         font.setPointSize(14)
         font.setWeight(QFont.Weight.Bold)
         self._title.setFont(font)
-        self._title.setStyleSheet("color: #e4e4e7;")
+        self._title.setObjectName("bookDetailsTitle")
         layout.addWidget(self._title)
 
         # Autor
         self._author = QLabel()
-        self._author.setStyleSheet("color: #818cf8; font-size: 13px;")
+        self._author.setObjectName("bookDetailsAuthor")
         layout.addWidget(self._author)
 
         # Avaliação com estrelas
@@ -81,7 +81,7 @@ class BookDetails(QWidget):
         # Metadados
         self._meta_label = QLabel()
         self._meta_label.setWordWrap(True)
-        self._meta_label.setStyleSheet("color: #71717a; font-size: 12px; line-height: 1.5;")
+        self._meta_label.setObjectName("bookDetailsMeta")
         layout.addWidget(self._meta_label)
 
         # Tags
@@ -96,7 +96,7 @@ class BookDetails(QWidget):
         self._desc = QLabel()
         self._desc.setWordWrap(True)
         self._desc.setMaximumHeight(100)
-        self._desc.setStyleSheet("color: #a1a1aa; font-size: 12px;")
+        self._desc.setObjectName("bookDetailsMutedText")
         layout.addWidget(self._desc)
 
         # Grafo de conceitos (Fase 2): conceitos do livro + livros relacionados
@@ -105,16 +105,14 @@ class BookDetails(QWidget):
         graph_lay.setContentsMargins(0, 0, 0, 0)
         graph_lay.setSpacing(6)
         self._concepts_header = QLabel("💡 Conceitos")
-        self._concepts_header.setStyleSheet(
-            "color: #71717a; font-size: 11px; font-weight: 600;")
+        self._concepts_header.setObjectName("bookDetailsSectionHeader")
         graph_lay.addWidget(self._concepts_header)
         self._concepts_label = QLabel()
         self._concepts_label.setWordWrap(True)
-        self._concepts_label.setStyleSheet("color: #a1a1aa; font-size: 12px;")
+        self._concepts_label.setObjectName("bookDetailsMutedText")
         graph_lay.addWidget(self._concepts_label)
         self._related_header = QLabel("🔗 Livros relacionados")
-        self._related_header.setStyleSheet(
-            "color: #71717a; font-size: 11px; font-weight: 600;")
+        self._related_header.setObjectName("bookDetailsSectionHeader")
         graph_lay.addWidget(self._related_header)
         self._related_btns_lay = QVBoxLayout()
         self._related_btns_lay.setSpacing(4)
@@ -176,11 +174,7 @@ class BookDetails(QWidget):
 
         self._del_btn = QPushButton("Remover")
         self._del_btn.setIcon(emoji_icon("🗑"))
-        self._del_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #3f3f46;
-                          border-radius: 8px; padding: 10px; color: #ef4444; }
-            QPushButton:hover { background: rgba(239, 68, 68, 0.1); border-color: #ef4444; }
-        """)
+        self._del_btn.setObjectName("dangerBtn")
         self._del_btn.clicked.connect(lambda: self._emit_action("delete"))
         btn_layout.addWidget(self._del_btn)
 
@@ -203,9 +197,11 @@ class BookDetails(QWidget):
                 ))
             else:
                 self._cover.setText("📖")
-                self._cover.setStyleSheet(
-                    "font-size: 64px; background: #18181b; border-radius: 8px;"
-                )
+                # Repolish: setObjectName sozinho não reavalia o QSS de um
+                # widget já exibido (precisa de unpolish/polish explícito).
+                self._cover.setObjectName("bookDetailsCoverPlaceholder")
+                self._cover.style().unpolish(self._cover)
+                self._cover.style().polish(self._cover)
 
         # Metadados
         lines = []
@@ -281,13 +277,8 @@ class BookDetails(QWidget):
         for rel in related:
             shared_n = int(rel.get("weight") or 0)
             btn = QPushButton(f"📕 {rel['title']}  ({shared_n} em comum)")
-            btn.setObjectName("secondaryBtn")
+            btn.setObjectName("bookDetailsRelatedBtn")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(
-                "QPushButton { background: transparent; border: 1px solid #3f3f46;"
-                " border-radius: 6px; padding: 6px; color: #a5b4fc; font-size: 11px;"
-                " text-align: left; }"
-                " QPushButton:hover { border-color: #6366f1; }")
             btn.setToolTip("Em comum: " + ", ".join(rel.get("shared") or []))
             btn.clicked.connect(
                 lambda _c=False, bid=rel["book_id"]: self.related_book_clicked.emit(bid))

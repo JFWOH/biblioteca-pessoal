@@ -33,7 +33,7 @@ class AnkiExportDialog(QDialog):
         # Header: Deck selection
         header_layout = QHBoxLayout()
         deck_label = QLabel("Deck:")
-        deck_label.setStyleSheet("font-weight: bold;")
+        deck_label.setObjectName("ankiDeckLabel")
         self.deck_combo = QComboBox()
         self.deck_combo.addItem("Default")
         header_layout.addWidget(deck_label)
@@ -42,7 +42,7 @@ class AnkiExportDialog(QDialog):
         
         # Front
         front_label = QLabel("Frente (Pergunta / Gatilho):")
-        front_label.setStyleSheet("font-weight: bold; color: #059669;")
+        front_label.setObjectName("ankiFrontLabel")
         layout.addWidget(front_label)
         
         self.front_edit = QTextEdit()
@@ -52,7 +52,7 @@ class AnkiExportDialog(QDialog):
         
         # Back
         back_label = QLabel("Verso (Resposta / Explicação):")
-        back_label.setStyleSheet("font-weight: bold; color: #2563eb;")
+        back_label.setObjectName("ankiBackLabel")
         layout.addWidget(back_label)
         
         self.back_edit = QTextEdit()
@@ -62,7 +62,7 @@ class AnkiExportDialog(QDialog):
         
         # Status / Info
         self.status_label = QLabel()
-        self.status_label.setStyleSheet("color: #64748b; font-size: 11px;")
+        self.status_label.setObjectName("ankiStatusChecking")
         layout.addWidget(self.status_label)
 
         # Reenvio da fila de fallback (só aparece quando há pendências e o Anki está online)
@@ -77,18 +77,7 @@ class AnkiExportDialog(QDialog):
         self.cancel_btn.clicked.connect(self.reject)
         
         self.save_btn = QPushButton("💾 Salvar no Anki")
-        self.save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #10b981;
-                color: white;
-                font-weight: bold;
-                padding: 6px 12px;
-                border-radius: 4px;
-                border: none;
-            }
-            QPushButton:hover { background-color: #059669; }
-            QPushButton:disabled { background-color: #94a3b8; }
-        """)
+        self.save_btn.setObjectName("ankiSaveBtn")
         self.save_btn.clicked.connect(self._on_save)
         
         btn_layout.addStretch()
@@ -109,13 +98,19 @@ class AnkiExportDialog(QDialog):
                     self.deck_combo.clear()
                     self.deck_combo.addItems(decks)
                 self.status_label.setText("Anki conectado. Selecione o deck.")
-                self.status_label.setStyleSheet("color: #059669; font-size: 11px;")
+                self._set_status_style("ankiStatusConnected")
                 self._refresh_pending_button()
             else:
                 self.status_label.setText("Anki fechado. O card será salvo na fila local de exportação.")
-                self.status_label.setStyleSheet("color: #d97706; font-size: 11px;")
+                self._set_status_style("ankiStatusOffline")
         except Exception as e:
             self.status_label.setText(f"Erro ao conectar: {e}")
+
+    def _set_status_style(self, object_name: str) -> None:
+        """Troca o objectName do status (estado dinâmico) e força o repolish do QSS."""
+        self.status_label.setObjectName(object_name)
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
 
     def _refresh_pending_button(self):
         """Mostra o botão de reenvio se houver notas na fila de fallback."""

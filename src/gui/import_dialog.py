@@ -77,7 +77,7 @@ class ImportDialog(QDialog):
         font.setPointSize(16)
         font.setWeight(QFont.Weight.Bold)
         title.setFont(font)
-        title.setStyleSheet("color: #e4e4e7;")
+        title.setObjectName("importDialogTitle")
         layout.addWidget(title)
 
         subtitle = QLabel(
@@ -85,7 +85,7 @@ class ImportDialog(QDialog):
             "Metadados e capas serão extraídos automaticamente."
         )
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet("color: #71717a; font-size: 13px;")
+        subtitle.setObjectName("importDialogSubtitle")
         layout.addWidget(subtitle)
 
         # Botões de seleção
@@ -106,38 +106,16 @@ class ImportDialog(QDialog):
 
         # Lista de arquivos selecionados
         files_group = QGroupBox("Arquivos selecionados")
-        files_group.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #27272a; border-radius: 8px;
-                margin-top: 12px; padding-top: 20px;
-                color: #a1a1aa; font-size: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin; left: 12px;
-                padding: 0 6px;
-            }
-        """)
+        files_group.setObjectName("importFilesGroup")
         files_layout = QVBoxLayout(files_group)
 
         self._file_list = QListWidget()
-        self._file_list.setStyleSheet("""
-            QListWidget {
-                background: #0f0f17; border: none; border-radius: 6px;
-                color: #e4e4e7; font-size: 12px;
-            }
-            QListWidget::item {
-                padding: 6px 10px;
-                border-bottom: 1px solid #1e1e24;
-            }
-            QListWidget::item:selected {
-                background: rgba(99, 102, 241, 0.15);
-            }
-        """)
+        self._file_list.setObjectName("importFileList")
         self._file_list.setMinimumHeight(120)
         files_layout.addWidget(self._file_list)
 
         self._files_count = QLabel("Nenhum arquivo selecionado")
-        self._files_count.setStyleSheet("color: #52525b; font-size: 11px;")
+        self._files_count.setObjectName("importFilesCount")
         files_layout.addWidget(self._files_count)
 
         layout.addWidget(files_group)
@@ -147,12 +125,12 @@ class ImportDialog(QDialog):
 
         self._detect_dups = QCheckBox("Detectar duplicatas")
         self._detect_dups.setChecked(True)
-        self._detect_dups.setStyleSheet("color: #a1a1aa; font-size: 12px;")
+        self._detect_dups.setObjectName("importOptionCheckbox")
         options_layout.addWidget(self._detect_dups)
 
         self._extract_meta = QCheckBox("Extrair metadados automaticamente")
         self._extract_meta.setChecked(True)
-        self._extract_meta.setStyleSheet("color: #a1a1aa; font-size: 12px;")
+        self._extract_meta.setObjectName("importOptionCheckbox")
         options_layout.addWidget(self._extract_meta)
 
         options_layout.addStretch()
@@ -168,7 +146,7 @@ class ImportDialog(QDialog):
         layout.addWidget(self._progress_bar)
 
         self._progress_label = QLabel()
-        self._progress_label.setStyleSheet("color: #71717a; font-size: 12px;")
+        self._progress_label.setObjectName("importProgressLabel")
         self._progress_label.hide()
         layout.addWidget(self._progress_label)
 
@@ -176,13 +154,7 @@ class ImportDialog(QDialog):
         self._log = QTextEdit()
         self._log.setReadOnly(True)
         self._log.setFixedHeight(80)
-        self._log.setStyleSheet("""
-            QTextEdit {
-                background: #0f0f17; border: 1px solid #27272a;
-                border-radius: 6px; padding: 8px; color: #71717a;
-                font-family: 'Consolas', monospace; font-size: 11px;
-            }
-        """)
+        self._log.setObjectName("importLog")
         self._log.hide()
         layout.addWidget(self._log)
 
