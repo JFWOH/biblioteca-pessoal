@@ -21,6 +21,7 @@ from typing import Optional
 
 from src.core.tts.base_tts_provider import BaseTTSProvider, SynthesisResult, VoiceInfo
 from src.core.tts.tts_router import TTSRouter
+from src.core.tts.voice_profile import VoiceProfile, NarrationRole
 
 
 class _BilingualProvider(BaseTTSProvider):
@@ -142,3 +143,77 @@ def test_both_slo_paths_use_mid_stream_fallback():
     _get_fallback_provider + _resolve_voice inline foi substituído)."""
     src = inspect.getsource(TTSRouter.speak)
     assert src.count("_mid_stream_fallback(") >= 2
+
+
+# ── Débito da rodada 3 corrigido: resume pós-SLO no provider já trocado ─
+#
+# Antes: sob violação de SLO, o mecanismo levantava um TTSProviderError genérico
+# capturado por um handler que RECOMPUTAVA _get_fallback_provider sobre o provider
+# JÁ TROCADO por _mid_stream_fallback. Com Kokoro+Piper, isso não achava nada
+# abaixo do Piper e dava break, PARANDO a reprodução justamente quando o reserva
+# tinha a voz e a troca deveria funcionar. Agora a troca por SLO usa um sinal
+# próprio (_SLOFallbackSwap) e o chunk é RE-sintetizado no provider já trocado.
+
+
+class _RecordingBilingual(_BilingualProvider):
+    """_BilingualProvider que registra cada síntese como (voice_id, texto)."""
+
+    def __init__(self, name="Kokoro", tier="B"):
+        super().__init__(name, tier)
+        self.calls: list[tuple] = []
+        self.is_ready = True  # evita o caminho de warmup do Kokoro no router
+
+    def synthesize(self, text, voice_id=None, rate=1.0, volume=1.0):
+        self.calls.append((voice_id, text))
+        return super().synthesize(text, voice_id, rate, volume)
+
+
+class _RecordingEnglishOnly(_EnglishOnlyProvider):
+    """Reserva que só tem voz EN e registra as chamadas de síntese."""
+
+    def __init__(self, name="Piper", tier="C"):
+        super().__init__(name, tier)
+        self.calls: list[tuple] = []
+        self.is_ready = True
+
+    def synthesize(self, text, voice_id=None, rate=1.0, volume=1.0):
+        self.calls.append((voice_id, text))
+        return super().synthesize(text, voice_id, rate, volume)
+
+
+def _speak_router(kokoro, piper):
+    router = TTSRouter()
+    router.register_provider(kokoro)
+    router.register_provider(piper)
+    router.set_book_profile(VoiceProfile(
+        role=NarrationRole.BOOK_NARRATOR, preferred_provider="kokoro",
+        language="pt-BR", style="serene"))
+    # SLO negativo: qualquer TTFB estoura no 1º chunk, sem sleeps reais.
+    router._TTFB_SLO_SECONDS = -1.0
+    return router
+
+
+def test_slo_swap_resumes_on_fallback_that_has_voice():
+    """SLO estoura + reserva TEM a voz PT → a reprodução CONTINUA no Piper (não
+    para): o chunk corrente é RE-sintetizado no provider já trocado."""
+    kokoro = _RecordingBilingual("Kokoro", "B")
+    piper = _RecordingBilingual("Piper", "C")
+    router = _speak_router(kokoro, piper)
+
+    router.speak("Ele disse que não era para todos.", language="pt-BR")
+
+    assert piper.calls, "Piper deveria ter retomado a síntese após o SLO"
+    assert all(v == "pf_dora" for v, _ in piper.calls)  # voz PT correta
+
+
+def test_slo_no_swap_keeps_current_when_fallback_lacks_language():
+    """SLO estoura + reserva SEM voz no idioma explícito → continua no Kokoro
+    (comportamento da rodada 3 preservado; nada de áudio 'anglicado')."""
+    kokoro = _RecordingBilingual("Kokoro", "B")
+    piper = _RecordingEnglishOnly("Piper", "C")
+    router = _speak_router(kokoro, piper)
+
+    router.speak("Ele disse que não era para todos.", language="pt-BR")
+
+    assert piper.calls == []  # não trocou
+    assert kokoro.calls and all(v == "pf_dora" for v, _ in kokoro.calls)
