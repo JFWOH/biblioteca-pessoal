@@ -50,15 +50,21 @@ jobs:
       # no CI Linux vira SIGABRT (exit 134) em posição NÃO-determinística
       # (cada teste passa isolado, com -v e em fatia 3x — diagnóstico no PR #14).
       # Endurecimento 2026-07-17: o antigo shard 2 (p–z) abortou inclusive no
-      # retry em 3 PRs (#22/#26/#29 — o rerun do job sempre passou), então ele
-      # foi dividido (p–s / t–z, menos acúmulo nativo por processo) e o retry
-      # virou duplo. Uma falha REAL de teste é determinística e falha em TODAS
-      # as execuções — o retry não mascara bug de lógica, só o crash flaky.
+      # retry em 3 PRs (#22/#26/#29 — o rerun do job sempre passou). Com
+      # PYTHONFAULTHANDLER, o abort apareceu em posição ESTÁVEL (~16% de p–s,
+      # região dos testes proactive) nas duas tentativas — consistente com o
+      # repro mínimo documentado no conftest.py (proactive+rag_engine no MESMO
+      # processo). Por isso proactive (p) e rag/reader (q–s) rodam em PROCESSOS
+      # SEPARADOS. Retry duplo por shard: falha REAL de teste é determinística
+      # e falha em TODAS as execuções — o retry só absorve o crash flaky.
       - name: Pytest (shard 1 — test_a..test_o)
         run: pytest tests/test_[a-o]*.py -q || pytest tests/test_[a-o]*.py -q || pytest tests/test_[a-o]*.py -q
 
-      - name: Pytest (shard 2 — test_p..test_s)
-        run: pytest tests/test_[p-s]*.py -q || pytest tests/test_[p-s]*.py -q || pytest tests/test_[p-s]*.py -q
+      - name: Pytest (shard 2 — test_p*, isolado do rag)
+        run: pytest tests/test_p*.py -q || pytest tests/test_p*.py -q || pytest tests/test_p*.py -q
 
-      - name: Pytest (shard 3 — test_t..test_z)
+      - name: Pytest (shard 3 — test_q..test_s)
+        run: pytest tests/test_[q-s]*.py -q || pytest tests/test_[q-s]*.py -q || pytest tests/test_[q-s]*.py -q
+
+      - name: Pytest (shard 4 — test_t..test_z)
         run: pytest tests/test_[t-z]*.py -q || pytest tests/test_[t-z]*.py -q || pytest tests/test_[t-z]*.py -q
