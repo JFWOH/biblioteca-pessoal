@@ -12,7 +12,8 @@ class ProactiveWorker(QThread):
     error = pyqtSignal(str)
 
     def __init__(self, model: str, page_text: str, ollama_url: str = "http://localhost:11434",
-                 parent=None, search_fn=None, book_id=None, memory_block: str = ""):
+                 parent=None, search_fn=None, book_id=None, memory_block: str = "",
+                 preference_block: str = ""):
         super().__init__(parent)
         self.model = model
         self.page_text = page_text
@@ -22,6 +23,8 @@ class ProactiveWorker(QThread):
         self.book_id = book_id
         # Continuidade (Fase 5): bloco com o que o agente já disse neste livro.
         self.memory_block = memory_block
+        # Aprendizado (Fase 6): tipos de observação que o leitor costuma dispensar.
+        self.preference_block = preference_block
         self._is_cancelled = False
 
     def cancel(self):
@@ -35,8 +38,9 @@ class ProactiveWorker(QThread):
 
     def _build_payload(self) -> dict:
         """Monta o payload do /api/chat. Isolado para ser testável."""
-        # Continuidade (Fase 5): o que o agente já disse entra entre as regras
-        # e o trecho — sem memória, o prompt é idêntico ao anterior.
+        # Continuidade (Fase 5) e aprendizado (Fase 6) entram entre as regras
+        # e o trecho — sem os blocos, o prompt é idêntico ao anterior.
+        preference = f"{self.preference_block}\n\n" if self.preference_block else ""
         memory = f"{self.memory_block}\n\n" if self.memory_block else ""
         prompt = (
             "Você é um Assistente Proativo de Leitura discreto e útil. "
@@ -47,6 +51,7 @@ class ProactiveWorker(QThread):
             '- "tipo": (deve ser exatamente "Observação do texto", "Contexto externo" ou "Hipótese interpretativa")\n'
             '- "confianca": (deve ser "Alta", "Média" ou "Baixa")\n'
             '- "texto": (A observação em si, 1 a 4 frases)\n\n'
+            f"{preference}"
             f"{memory}"
             f"Trecho para análise:\n{self.page_text}"
         )

@@ -220,3 +220,38 @@ def test_without_book_id_no_memory_lookup(qtbot):
         svc.process_page_context("Texto longo " * 30, 5, book_id=None)
         MockWorker.assert_called_once()
         assert calls == []
+
+
+# ── Fase 6: aprendizado com dispensas (contrato aprendizado_dispensas §3) ──
+
+def test_preference_block_reaches_worker(qtbot):
+    """Os tipos que o leitor dispensa entram no prompt via preference_block."""
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    svc.intensity = "Estudo"
+    history = [{"kind": "Contexto externo", "dismissed": 1} for _ in range(5)]
+    history += [{"kind": "Observação do texto", "dismissed": 0} for _ in range(3)]
+    svc.set_dismissal_history_provider(lambda: history)
+    w, hw, trg, inst = _svc_ready(svc)
+    with w as MockWorker, hw, trg, inst:
+        MockWorker.return_value.isRunning.return_value = False
+        svc.process_page_context("Texto longo " * 30, 5, book_id=7)
+        MockWorker.assert_called_once()
+        preference = MockWorker.call_args.kwargs.get("preference_block", "")
+        assert '"Contexto externo" (dispensou 5 de 5)' in preference
+        assert "EVITE" in preference
+
+
+def test_broken_dismissal_provider_degrades_gracefully(qtbot):
+    """Provider quebrado → dispara como antes, sem preferência (ADR-005)."""
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    svc.intensity = "Estudo"
+    svc.set_dismissal_history_provider(
+        lambda: (_ for _ in ()).throw(RuntimeError("db off")))
+    w, hw, trg, inst = _svc_ready(svc)
+    with w as MockWorker, hw, trg, inst:
+        MockWorker.return_value.isRunning.return_value = False
+        svc.process_page_context("Texto longo " * 30, 5, book_id=7)
+        MockWorker.assert_called_once()
+        assert MockWorker.call_args.kwargs.get("preference_block") == ""

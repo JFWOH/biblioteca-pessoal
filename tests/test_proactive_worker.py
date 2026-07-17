@@ -50,6 +50,24 @@ class TestProactiveWorkerPayload:
         assert "VOCÊ JÁ FEZ" not in prompt
         assert "Trecho para análise:\nTRECHO_XYZ" in prompt
 
+    def test_build_payload_injects_preference_block(self):
+        """Fase 6: a preferência aprendida entra antes da memória e do trecho."""
+        preference = 'PREFERÊNCIA DO LEITOR: EVITE\n- "TIPO_UNICO_DEF" (dispensou 4 de 5)'
+        memory = "VOCÊ JÁ FEZ AS OBSERVAÇÕES ABAIXO:\n- (p.3) MEMORIA_UNICA_ABC"
+        w = ProactiveWorker("m", "TRECHO_XYZ", "http://localhost:11434",
+                            memory_block=memory, preference_block=preference)
+        prompt = w._build_payload()["messages"][0]["content"]
+        assert "TIPO_UNICO_DEF" in prompt
+        assert (prompt.index("TIPO_UNICO_DEF") < prompt.index("MEMORIA_UNICA_ABC")
+                < prompt.index("TRECHO_XYZ"))
+
+    def test_build_payload_without_preference_is_unchanged(self):
+        """Regressão: sem preferência o prompt é idêntico ao da Fase 5."""
+        w = ProactiveWorker("m", "TRECHO_XYZ", "http://localhost:11434")
+        prompt = w._build_payload()["messages"][0]["content"]
+        assert "PREFERÊNCIA DO LEITOR" not in prompt
+        assert "Trecho para análise:\nTRECHO_XYZ" in prompt
+
 
 class TestProactiveWorkerRun:
     def test_run_emits_observation_on_success(self, qtbot):
