@@ -36,6 +36,23 @@ class AutoIndexWorker(QThread):
             except Exception:
                 pass
 
+    def start(self, priority: QThread.Priority = QThread.Priority.LowestPriority) -> None:
+        """Inicia a thread sempre em prioridade baixa (rodada 2 de ajustes de TTS).
+
+        Indexação em background nunca deve competir por CPU com o pipeline
+        de áudio (Kokoro é sensível a TTFB) nem com a UI — prioridade baixa
+        PERMANENTE é mais simples do que observar início/fim de narração
+        para subir/descer a prioridade dinamicamente, e continua correta
+        quando não há narração alguma (o indexador já é, por design,
+        trabalho de ocioso). Quem chamar ``.start()`` com outra prioridade
+        explicitamente ainda pode fazê-lo (default apenas).
+
+        ATENÇÃO (degradação graciosa, ADR-005): ``QThread.setPriority`` é
+        best-effort — o agendador do Windows pode não honrar a prioridade
+        estritamente. Isto reduz a MOTIVAÇÃO da contenção, não a garante.
+        """
+        super().start(priority)
+
     def run(self):
         try:
             from src.core.document_indexer_service import DocumentIndexerService

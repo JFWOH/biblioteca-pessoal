@@ -27,6 +27,15 @@ class PDFReader(BaseReader):
 
     def open(self) -> None:
         import fitz
+        # Rodada 2 de ajustes de TTS: alguns PDFs têm a árvore estrutural
+        # (structure tree, usada por acessibilidade/tagged PDF) malformada e
+        # a libmupdf despeja no stderr, por PÁGINA, mensagens como "MuPDF
+        # error: format error: No common ancestor in structure tree" — ruído
+        # benigno (não impede extração de texto/OCR) que enche o console em
+        # lotes grandes (ex.: indexação de centenas de páginas). Suprime só
+        # o DISPLAY desses erros não-fatais da lib C; exceções Python reais
+        # do fitz continuam sendo propagadas normalmente.
+        fitz.TOOLS.mupdf_display_errors(False)
         self._doc = fitz.open(str(self._filepath))
         self._total_pages = self._doc.page_count
         self._is_open = True

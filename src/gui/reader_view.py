@@ -2262,6 +2262,19 @@ class ReaderView(QWidget):
         if self._word_wise_popover.isVisible():
             self._word_wise_popover.show_error()
 
+    def is_narrating(self) -> bool:
+        """Indica se há narração TTS em andamento (worker de áudio rodando).
+
+        Encapsula o atributo privado ``_audio_worker`` para uso por serviços
+        externos (ex.: AutoIndexService, via MainWindow) sem acoplá-los à
+        implementação interna do player de áudio — o worker é recriado a
+        cada nova narração (ver ``_launch_audio_worker``), então este método
+        sempre reflete o estado atual, não uma referência potencialmente
+        obsoleta.
+        """
+        worker = getattr(self, "_audio_worker", None)
+        return bool(worker and worker.isRunning())
+
     def _toggle_audio(self):
         """Alterna a leitura de áudio (TTS) da página atual.
 
