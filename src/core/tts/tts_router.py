@@ -409,17 +409,28 @@ class TTSRouter:
                                 ttfb_ms = ttfb * 1000.0
                                 logger.info("TTS_ROUTER_TTFB_MS: %.2f ms (first segment of stream)", ttfb_ms)
                                 
-                                # Check TTFB SLO
+                                # Check TTFB SLO. Rodada 3: só troca de motor se
+                                # o reserva puder falar o idioma efetivo — senão
+                                # continua no atual (lento > "anglicado"). Ver
+                                # _mid_stream_fallback.
                                 if ttfb > 3.0:
-                                    logger.warning("TTS_ROUTER: TTFB for '%s' was %.2fs (SLO violated). Falling back.", state["provider"].name, ttfb)
-                                    fallback = self._get_fallback_provider(state["provider"])
-                                    if fallback:
+                                    logger.warning("TTS_ROUTER: TTFB for '%s' was %.2fs (SLO violated).", state["provider"].name, ttfb)
+                                    fallback, fb_voice = self._mid_stream_fallback(
+                                        state["provider"], effective_language,
+                                        profile.style, language is not None)
+                                    if fallback is not None:
                                         if state["provider"].name.lower() == "kokoro" and fallback.name.lower() == "piper":
                                             logger.info("TTS_ROUTER_FALLBACK_TO_PIPER: Falling back from Kokoro to Piper due to TTFB SLO violation (%.2fs)", ttfb)
                                         state["provider"] = fallback
                                         self._active_provider = fallback
-                                        state["voice_id"] = self._resolve_voice(fallback, effective_language, profile.style)
+                                        state["voice_id"] = fb_voice
                                         raise TTSProviderError("SLO violated, trigger fallback")
+                                    # Sem reserva utilizável (inexistente ou sem voz no
+                                    # idioma explícito): mantém o provider atual. Não
+                                    # re-dispara o SLO — first_chunk=False encerra a checagem.
+                                    logger.warning(
+                                        "TTS_ROUTER: SLO violado (%.2fs) mas mantendo '%s' — reserva ausente ou sem voz em '%s'.",
+                                        ttfb, state["provider"].name, effective_language)
                                 state["first_chunk"] = False
                                 
                             if not self._is_cancelled and segment_result.audio_data is not None:
@@ -451,19 +462,28 @@ class TTSRouter:
                                     idx, len(result.audio_data) if result.audio_data is not None else 0, result.sample_rate, ttfb, ttfb_ms)
                         logger.info("TTS_ROUTER_TTFB_MS: %.2f ms", ttfb_ms)
  
-                        # Check TTFB SLO
+                        # Check TTFB SLO. Rodada 3: só troca de motor se o
+                        # reserva puder falar o idioma efetivo — senão continua
+                        # no atual (lento > "anglicado"). Ver _mid_stream_fallback.
                         if state["first_chunk"] and ttfb > 3.0:
-                            logger.warning("TTS_ROUTER: TTFB for '%s' was %.2fs (SLO violated). Falling back.", state["provider"].name, ttfb)
-                            fallback = self._get_fallback_provider(state["provider"])
-                            if fallback:
+                            logger.warning("TTS_ROUTER: TTFB for '%s' was %.2fs (SLO violated).", state["provider"].name, ttfb)
+                            fallback, fb_voice = self._mid_stream_fallback(
+                                state["provider"], effective_language,
+                                profile.style, language is not None)
+                            if fallback is not None:
                                 if state["provider"].name.lower() == "kokoro" and fallback.name.lower() == "piper":
                                     logger.info("TTS_ROUTER_FALLBACK_TO_PIPER: Falling back from Kokoro to Piper due to TTFB SLO violation (%.2fs)", ttfb)
                                 state["provider"] = fallback
                                 self._active_provider = fallback
-                                state["voice_id"] = self._resolve_voice(fallback, effective_language, profile.style)
+                                state["voice_id"] = fb_voice
                                 logger.info("TTS_ROUTER: Switched to '%s' for next chunks", fallback.name)
                                 raise TTSProviderError("SLO violated, trigger fallback")
- 
+                            # Sem reserva utilizável (inexistente ou sem voz no idioma
+                            # explícito): mantém o provider atual e não re-dispara o SLO.
+                            logger.warning(
+                                "TTS_ROUTER: SLO violado (%.2fs) mas mantendo '%s' — reserva ausente ou sem voz em '%s'.",
+                                ttfb, state["provider"].name, effective_language)
+
                         state["first_chunk"] = False
  
                         if not self._is_cancelled and result.audio_data is not None and state["provider"].name.lower() != "pyttsx3":
@@ -698,6 +718,42 @@ class TTSRouter:
             if vlang and (vlang == target or vlang.startswith(target) or target.startswith(vlang)):
                 return True
         return False
+
+    def _mid_stream_fallback(
+        self, current: BaseTTSProvider, language: str, style: str,
+        language_explicit: bool,
+    ) -> tuple[Optional[BaseTTSProvider], Optional[str]]:
+        """Decide o fallback por violação do SLO de TTFB no meio da narração.
+
+        Retorna ``(fallback, voice_id)`` quando a troca é segura, ou
+        ``(None, None)`` quando NÃO se deve trocar — nesse caso quem chama
+        CONTINUA com o provider atual (lento, porém com o áudio correto).
+
+        Racional (rodada 3 de ajustes de TTS): sob indexação concorrente o TTFB
+        do Kokoro estourava o SLO de 3s e o roteador trocava para o Piper. Mas
+        se o motor de reserva NÃO tem voz no idioma efetivo (caso real: só o
+        modelo EN do Piper instalado e a página é PT), a troca produzia áudio
+        "anglicado" (``_resolve_voice`` devolvia ``None`` → o Piper lia PT com o
+        modelo default EN) ou abortava a narração no meio (a checagem honesta de
+        idioma no re-início). Áudio CORRETO porém lento é melhor que áudio
+        errado ou silêncio. Por isso só barramos a troca quando SABEMOS o idioma
+        (override explícito do chamador) E o reserva AFIRMA não ter voz nele
+        (``_language_support`` retorna ``False``). Sem idioma explícito, ou com
+        capacidade de idioma desconhecida (lista de vozes vazia → ``None``), o
+        comportamento antigo é preservado. Com a Tarefa A (cancelar a indexação
+        ao iniciar o áudio), a causa da lentidão some e o SLO raramente dispara.
+        """
+        fallback = self._get_fallback_provider(current)
+        if fallback is None:
+            return None, None
+        if language_explicit and self._language_support(fallback, language) is False:
+            # Reserva sem voz no idioma pedido → não troca (mantém o atual).
+            return None, None
+        # Reserva com voz no idioma (ou capacidade desconhecida): resolve a voz
+        # correta. Quando HÁ vozes no idioma, _resolve_voice devolve uma delas
+        # (nunca None), garantindo que não sintetizamos com voice_id=None tendo
+        # idioma explícito e vozes listadas no idioma.
+        return fallback, self._resolve_voice(fallback, language, style)
 
     def _get_fallback_provider(self, exclude: BaseTTSProvider) -> Optional[BaseTTSProvider]:
         """Find the next healthy provider after the excluded one, excluding legacy pyttsx3."""

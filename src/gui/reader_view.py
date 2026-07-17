@@ -56,6 +56,13 @@ class ReaderView(QWidget):
     fullscreen_toggled = pyqtSignal(bool)           # is_fullscreen
     reading_context_updated = pyqtSignal(int, str, int, str) # book_id, title, page_number, page_text
     ai_action_requested = pyqtSignal(str, str)      # action_type, text
+    # Rodada 3 de ajustes de TTS: emitido quando a narração começa DE FATO (o
+    # áudio já está tocando — ver _on_audio_started). Diferente do gating por
+    # busy_check (que só impede novos jobs de indexação), este sinal permite ao
+    # MainWindow CANCELAR uma indexação em ocioso JÁ em andamento: a contenção
+    # de CPU/GPU dos embeddings elevava o TTFB do Kokoro (24,92s medidos com 900
+    # chunks concorrentes → SLO de 3s violado → fallback indevido p/ Piper).
+    narration_started = pyqtSignal()
 
     # Tarefa 1.2 — zona de clique nas margens (só caminho PDF/imagem, ver
     # eventFilter): terço esquerdo = página anterior, terço direito = próxima.
@@ -2439,6 +2446,13 @@ class ReaderView(QWidget):
         self._translating_for_audio = False  # item E: áudio começou → limpa "Traduzindo…"
         self._set_audio_button_state("Pausar", "⏸️", "Pausar Leitura (TTS)")
         self._act_audio_stop.setEnabled(True)
+        # Rodada 3: o áudio começou de fato — avisa quem precise ceder recursos
+        # (o MainWindow cancela a auto-indexação em ocioso em andamento). Este é
+        # o ÚNICO ponto em que a reprodução realmente inicia, tanto no caminho
+        # normal (_launch_audio_worker) quanto no da pré-síntese (_play_prepared):
+        # ambos conectam playback_started → _on_audio_started, então um só emit
+        # cobre os dois.
+        self.narration_started.emit()
         # Tarefa 3.6: enquanto esta página toca, sintetiza a próxima em background.
         self._maybe_presynthesize_next()
 
