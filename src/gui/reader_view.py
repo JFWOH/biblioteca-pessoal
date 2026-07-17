@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -32,6 +33,7 @@ from src.gui.widgets.reader_dock import ReaderDock
 from src.gui.widgets.proactive_insights_panel import ProactiveInsightsPanel
 from src.gui.proactive_reader_service import ProactiveReaderService
 from src.core.proactive_observation import confidence_to_float, obs_dict_from_row
+from src.core.reading_stats import clamp_session_seconds
 from src.core.graph.graph_store import GraphStore
 from PyQt6.QtWidgets import QComboBox
 
@@ -42,7 +44,12 @@ class ReaderView(QWidget):
     """Leitor multi-formato com navegação, TOC e progresso."""
 
     closed = pyqtSignal()
-    progress_changed = pyqtSignal(int, int, int)  # book_id, page, total
+    # Tarefa 5.2: payload AMPLIADO com os segundos lidos desde a última
+    # emissão (tempo real medido por time.monotonic, com teto anti-idle —
+    # ver clamp_session_seconds). Ampliar o sinal existente (em vez de criar
+    # um paralelo) foi a opção menos invasiva: há UMA única conexão no
+    # projeto (main_window._on_progress) e um único ponto de emit.
+    progress_changed = pyqtSignal(int, int, int, int)  # book_id, page, total, seconds
     annotation_added = pyqtSignal(int, dict)       # book_id, annotation_data
     annotation_deleted = pyqtSignal(int)            # annotation_id
     annotation_renamed = pyqtSignal(int, str)       # annotation_id, novo título
@@ -89,6 +96,11 @@ class ReaderView(QWidget):
         self._presynth_cache = PreSynthesisCache()
         self._presynth_worker = None
         self._resume_banner = None  # banner "retomar leitura" (tarefa 3.7)
+        # Tarefa 5.2 — cronômetro de leitura por página: timestamp monotônico
+        # de quando a página atual entrou em exibição (None = nada correndo)
+        # e o último (page, total) emitido, para o flush no fechamento.
+        self._page_started_at: float | None = None
+        self._last_progress: tuple[int, int] | None = None
         self._footer_obs_id = None
         self._proactive_service = ProactiveReaderService(parent=self)
         self._proactive_service.observation_ready.connect(self._on_proactive_observation)
@@ -967,6 +979,11 @@ class ReaderView(QWidget):
         if not filepath:
             return
 
+        # Tarefa 5.2: tempo pendente da página do livro ANTERIOR é
+        # descarregado ANTES de trocar o _book_id (atribuição correta).
+        self._flush_reading_time()
+        self._last_progress = None
+
         self._book_id = book_data.get("id", 0)
         self._invalidate_presynth()  # troca de livro descarta pré-síntese (3.6)
         self._annotation_panel.set_book_id(self._book_id)
@@ -1084,7 +1101,18 @@ class ReaderView(QWidget):
         total = content.total_pages
         self._page_label.setText(f"{page + 1}/{total}")
         self._progress_bar.set_page_info(page + 1, total)
-        self.progress_changed.emit(self._book_id, page, total)
+        # Tarefa 5.2 — tempo real de leitura: os segundos desde o último
+        # render (tempo passado na página ANTERIOR, com teto anti-idle)
+        # seguem no próprio progress_changed e o cronômetro reinicia para a
+        # página nova. Vale para QUALQUER troca de página — inclusive as
+        # viradas automáticas da narração contínua (leitura por áudio conta
+        # como leitura). Re-render da MESMA página (zoom/tema) também
+        # descarrega e reinicia — sem contagem dupla, o timestamp é resetado
+        # a cada descarga.
+        seconds = self._take_elapsed_reading_seconds()
+        self._page_started_at = time.monotonic()
+        self._last_progress = (page, total)
+        self.progress_changed.emit(self._book_id, page, total, seconds)
         self._update_bookmark_button(page)
 
         # Emite contexto para a IA
@@ -1111,6 +1139,34 @@ class ReaderView(QWidget):
         # interseção com os conceitos do livro é barata; ver src/core/xray.py).
         if hasattr(self, "_xray_panel"):
             self._xray_panel.update_context(self._book_id, page, page_text)
+
+    # ── Tempo real de leitura (Tarefa 5.2) ──────────────────────────────
+    # time.monotonic (imune a ajuste de relógio) marca a entrada em cada
+    # página; na troca/fechamento o decorrido é normalizado pelo teto
+    # anti-idle (clamp_session_seconds, 300s/página) e emitido no
+    # progress_changed para o main_window persistir em reading_sessions.
+    # Limitação registrada: janela minimizada/app em background NÃO pausa o
+    # cronômetro nesta rodada — o teto de 300s/página limita a distorção.
+
+    def _take_elapsed_reading_seconds(self) -> int:
+        """Consome o cronômetro da página atual: devolve os segundos
+        decorridos (com teto anti-idle) e zera o timestamp. 0 se não havia
+        cronômetro correndo (primeira página após abrir o livro)."""
+        if self._page_started_at is None:
+            return 0
+        elapsed = time.monotonic() - self._page_started_at
+        self._page_started_at = None
+        return clamp_session_seconds(elapsed)
+
+    def _flush_reading_time(self) -> None:
+        """Descarrega o tempo pendente da página atual (fechar livro ou
+        trocar de livro) emitindo um progress_changed com a última posição
+        conhecida. No-op quando não há cronômetro/livro/posição (ADR-005)."""
+        seconds = self._take_elapsed_reading_seconds()
+        if seconds <= 0 or self._book_id <= 0 or self._last_progress is None:
+            return
+        page, total = self._last_progress
+        self.progress_changed.emit(self._book_id, page, total, seconds)
 
     def _go_to_page(self, page: int):
         self._stop_audio_if_running()
@@ -1257,6 +1313,9 @@ class ReaderView(QWidget):
 
     def close_reader(self):
         """Fecha o leitor atual."""
+        # Tarefa 5.2: o tempo da última página lida é descarregado no
+        # fechamento (senão a última página de cada sessão nunca contaria).
+        self._flush_reading_time()
         self._stop_audio_if_running()
         if getattr(self, "_typography_popover", None) is not None:
             self._typography_popover.hide()

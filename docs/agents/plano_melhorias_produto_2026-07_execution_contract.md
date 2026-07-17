@@ -191,11 +191,35 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   (1083→1100 com ajustes).
 
 ### Onda 5 — Busca e engajamento
-- [ ] **5.1** Busca full-text no CONTEÚDO: FTS5 do corpo/OCR (tabela nova alimentada
+- [x] **5.1** Busca full-text no CONTEÚDO: FTS5 do corpo/OCR (tabela nova alimentada
   pelo indexer em lotes) + modo "buscar no conteúdo" na busca global com trechos.
-- [ ] **5.2** Estatísticas vivas: streak de dias lidos, minutos/semana (série), meta
+- [x] **5.2** Estatísticas vivas: streak de dias lidos, minutos/semana (série), meta
   anual opcional (config).
 - Executores: F1 Opus (5.1 — cuidado com tamanho do índice/migração), F2 Sonnet (5.2).
+- **Registro (2026-07-17, executada):** (5.1) `book_content_fts` FTS5 normal (não
+  contentless — snippet() exige texto armazenado; custo ~1x do texto em disco),
+  tokenizer `unicode61 remove_diacritics 2`; alimentação na MESMA passada do
+  `DocumentIndexerService` (lotes 200 pgs/commit; desvio de whitelist aprovado:
+  a extração mora lá, não no rag_engine) e backfill idle 1-por-vez p/ livros
+  `indexed_ok`; sanitização palavra→frase-entre-aspas (query maliciosa → vazio,
+  nunca exceção, ADR-005); UX: checkbox "No conteúdo" + página de resultados no
+  stack com snippets destacados, clique abre livro na página (reusa caminho da
+  Onda 3). DÉBITOS: OCR salvo isolado só entra no próximo backfill; livros nunca
+  indexados no RAG só ganham FTS quando indexados; sem stemming/prefixo.
+  (5.2) tabela `reading_sessions` (UNIQUE book+date, upsert somando segundos)
+  alimentada DENTRO de `update_reading_progress` (mesma transação, assinatura
+  preservada); streak termina hoje OU ontem (não quebra antes do dia acabar);
+  "lido no ano" = read_status + date_modified com bump só na TRANSIÇÃO p/ read
+  (contagem retroativa aproximada — documentado); gráfico semanal com QFrames
+  (tema via QSS, zero dependência); meta anual `stats.annual_goal_books` (0=off)
+  na aba Biblioteca. FOLLOW-UP crítico executado: o tempo real de leitura NÃO era
+  medido (time_spent sempre 0 — stats nasceriam mortas); `progress_changed`
+  ampliado p/ (book_id, page, total, seconds) [única conexão no projeto],
+  cronômetro monotonic por página com cap anti-idle 300s/pág
+  (`clamp_session_seconds` puro), flush em fechar/trocar livro; narração
+  contínua conta como leitura. LIMITAÇÕES: janela minimizada não pausa (cap
+  limita distorção); StatCard antigo segue dark-only (pré-existente).
+  Testes: 1100→1201 na onda.
 
 ### Onda 6 — OPCIONAL (novidades §4 — exige GO explícito do usuário antes de iniciar)
 Vocabulary Builder → Study Guide → Leitura aumentada → Audio Overview local → STT.

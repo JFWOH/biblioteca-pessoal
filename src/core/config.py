@@ -30,6 +30,10 @@ DEFAULT_CONFIG = {
         "show_read_status": True,
         "show_progress": True,
     },
+    # Estatísticas vivas (Tarefa 5.2): meta anual opcional exibida no painel.
+    "stats": {
+        "annual_goal_books": 0,  # nº de livros a ler no ano; 0 = meta desativada
+    },
     "import": {
         "copy_to_library": False,
         "auto_extract_metadata": True,

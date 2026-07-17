@@ -98,7 +98,15 @@ class DocumentIndexerService:
             self._rag_engine._cancelled = True
 
     def _extract_book_text(self, book_id: int) -> tuple[dict, list[dict]]:
-        """Extrai todo o texto relevante de um livro e suas anotações com mapeamento de páginas."""
+        """Extrai todo o texto relevante de um livro e suas anotações com mapeamento de páginas.
+
+        Efeito colateral (Tarefa 5.1): acumula o texto ÍNTEGRO de cada página de
+        conteúdo em ``self._fts_pages`` — lista de ``(page_number, texto)`` — na
+        MESMA passada de extração, para alimentar o FTS de conteúdo sem abrir um
+        segundo pipeline de leitura do arquivo. Só páginas de conteúdo entram;
+        metadados e anotações ficam fora do índice de conteúdo.
+        """
+        self._fts_pages: list[tuple[int, str]] = []
         book_meta = self._db.get_book(book_id)
         if not book_meta:
             return {}, []
@@ -175,6 +183,7 @@ class DocumentIndexerService:
                                         print("[Indexer] WARNING: PDF escaneado detectado, mas pytesseract indisponível.", flush=True)
 
                                 if text and text.strip():
+                                    self._fts_pages.append((i, text))
                                     for c in _chunk_text(text, self._rag_engine._chunk_size, self._rag_engine._chunk_overlap):
                                         chunks.append({
                                             "text": c,
@@ -187,6 +196,7 @@ class DocumentIndexerService:
                                     break
                                 text = reader.get_chapter_text(i)
                                 if text and text.strip():
+                                    self._fts_pages.append((i, text))
                                     for c in _chunk_text(text, self._rag_engine._chunk_size, self._rag_engine._chunk_overlap):
                                         chunks.append({
                                             "text": c,
@@ -203,6 +213,7 @@ class DocumentIndexerService:
                                     soup = BeautifulSoup(page.content, "html.parser")
                                     text = soup.get_text(separator=" ")
                                     if text and text.strip():
+                                        self._fts_pages.append((i, text))
                                         for c in _chunk_text(text, self._rag_engine._chunk_size, self._rag_engine._chunk_overlap):
                                             chunks.append({
                                                 "text": c,
@@ -291,7 +302,16 @@ class DocumentIndexerService:
         try:
             print("1. Extraindo texto do livro...", flush=True)
             _, chunks = self._extract_book_text(book_id)
-            
+
+            # FTS de conteúdo (Tarefa 5.1): alimenta o índice full-text na MESMA
+            # passada de extração. É só texto (não depende de Ollama/Chroma), e
+            # ADR-005 manda que uma falha aqui NUNCA aborte a indexação RAG.
+            try:
+                self._db.fts_index_book(book_id, getattr(self, "_fts_pages", []))
+            except Exception as exc:
+                logger.warning(
+                    "Falha ao alimentar FTS de conteúdo (book_id=%s): %s", book_id, exc)
+
             book_title = book_meta.get("title", "Sem título")
             print(f"[Indexer] Livro: {book_title} | Chunks extraídos: {len(chunks)}", flush=True)
 
@@ -407,6 +427,17 @@ class DocumentIndexerService:
         except Exception as e:
             self._db.set_indexing_status(book_id, "failed", 0, str(e))
             raise e
+
+    def backfill_content_fts(self, book_id: int) -> int:
+        """Backfill do FTS de conteúdo para um livro JÁ indexado no RAG.
+
+        Roda a MESMA extração de texto (uma passada) apenas para popular o
+        índice full-text — usado pelo auto-indexador em ocioso nos livros
+        antigos, indexados antes de a busca por conteúdo existir. Não toca no
+        Chroma nem depende do Ollama. Devolve o nº de páginas indexadas.
+        """
+        self._extract_book_text(book_id)
+        return self._db.fts_index_book(book_id, getattr(self, "_fts_pages", []))
 
     def index_all_books(self) -> dict[int, int]:
         """Re-indexa (apenas os necessários) todos os livros da biblioteca."""

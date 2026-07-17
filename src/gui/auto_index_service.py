@@ -40,7 +40,12 @@ class AutoIndexService(QObject):
         self._busy_check = busy_check  # ex.: RAGWorker manual em andamento
         self._worker: AutoIndexWorker | None = None
         self._attempted: set[int] = set()  # sem loop de retry na sessão
+        # Backfill do FTS de conteúdo (Tarefa 5.1): livros já indexados no RAG
+        # mas sem busca por conteúdo. Conjunto próprio para não misturar com o
+        # retry-guard da indexação RAG e evitar re-tentar livros sem texto.
+        self._fts_attempted: set[int] = set()
         self._current: tuple[int, str] | None = None  # (book_id, título) em curso
+        self._fts_only_current = False  # o trabalho em curso é backfill de FTS?
         self._last_activity = time.monotonic()
 
         self._timer = QTimer(self)
@@ -84,17 +89,34 @@ class AutoIndexService(QObject):
         except Exception:
             return
 
+        # Prioridade: indexar livros sem RAG; só depois fazer backfill do FTS
+        # de conteúdo (mais barato) dos que já têm RAG mas não têm busca por
+        # conteúdo. Um trabalho por tick, sempre 1 livro por vez.
         book = self._pick_candidate()
+        fts_only = False
+        if book is None:
+            book = self._pick_fts_backfill_candidate()
+            fts_only = True
         if book is None:
             return
         book_id, title = book["id"], book.get("title", "")
-        self._attempted.add(book_id)
+        if fts_only:
+            self._fts_attempted.add(book_id)
+        else:
+            self._attempted.add(book_id)
         self._current = (book_id, title)
-        self._worker = AutoIndexWorker(book_id, self._db, self._rag_engine, parent=self)
+        self._fts_only_current = fts_only
+        self._worker = AutoIndexWorker(
+            book_id, self._db, self._rag_engine, fts_only=fts_only, parent=self)
         self._worker.finished_task.connect(self._on_worker_finished)
         self._worker.error.connect(self._on_worker_error)
         self._worker.start()
-        logger.info("Auto-index: indexando '%s' (book_id=%s) em background", title, book_id)
+        if fts_only:
+            logger.info(
+                "Auto-index: backfill FTS de conteúdo de '%s' (book_id=%s)", title, book_id)
+        else:
+            logger.info(
+                "Auto-index: indexando '%s' (book_id=%s) em background", title, book_id)
         self.indexing_started.emit(book_id, title)
 
     def _pick_candidate(self) -> dict | None:
@@ -108,13 +130,40 @@ class AutoIndexService(QObject):
                 return book
         return None
 
+    def _pick_fts_backfill_candidate(self) -> dict | None:
+        """Livro já indexado no RAG (indexed_ok) mas ainda SEM FTS de conteúdo.
+
+        ``_fts_attempted`` evita loop em livros que não geram nenhuma página
+        (ex.: PDF só-imagem sem OCR) — que ficariam para sempre "sem FTS".
+        """
+        try:
+            candidates = self._db.get_books_by_indexing_status("indexed_ok")
+        except Exception as exc:
+            logger.debug("Auto-index: falha ao listar backfill FTS: %s", exc)
+            return None
+        for book in candidates:
+            bid = book["id"]
+            if bid in self._fts_attempted:
+                continue
+            try:
+                if not self._db.fts_is_indexed(bid):
+                    return book
+            except Exception:
+                return None
+        return None
+
     def _on_worker_finished(self, report: dict):
         self._worker = None
         book_id, title = self._current or (report.get("book_id"), "")
         self._current = None
         status = report.get("status", "unknown")
+        self._fts_only_current = False
         if status == "indexed_ok":
             logger.info("Auto-index: '%s' indexado (%s chunks)", title, report.get("chunks"))
+        elif status == "fts_indexed":
+            logger.info(
+                "Auto-index: backfill FTS de '%s' concluído (%s páginas)",
+                title, report.get("chunks"))
         else:
             logger.warning("Auto-index: '%s' terminou com status '%s'", title, status)
         self.indexing_finished.emit(book_id or 0, title, status)
@@ -123,6 +172,7 @@ class AutoIndexService(QObject):
         self._worker = None
         book_id, title = self._current or (0, "")
         self._current = None
+        self._fts_only_current = False
         logger.warning("Auto-index: falha ao indexar '%s' (ignorado): %s", title, msg)
         self.indexing_finished.emit(book_id, title, "failed")
 

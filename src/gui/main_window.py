@@ -29,6 +29,7 @@ from src.gui.workers.rag_worker import RAGWorker
 import os
 from src.gui.widgets.stats_panel import StatsPanel
 from src.gui.widgets.rag_panel import RAGPanel
+from src.gui.widgets.content_search_results import ContentSearchResults
 from src.gui.widgets.drop_overlay import DropOverlay, supported_files_from_urls
 from src.utils.constants import FILE_FILTER, DATA_DIR
 from src.utils.export import export_annotations_markdown
@@ -325,6 +326,13 @@ class MainWindow(QMainWindow):
         self._rag_panel.source_clicked.connect(self._on_rag_source_clicked)
         self._main_stack.addWidget(self._rag_panel)  # index 3
 
+        # ── Página de resultados da busca no conteúdo (Tarefa 5.1) ──
+        self._content_results = ContentSearchResults()
+        # Clicar num resultado reusa o MESMO caminho da Onda 3 (abre livro+página).
+        self._content_results.result_activated.connect(self._on_rag_source_clicked)
+        self._content_results.back_requested.connect(self._exit_content_search)
+        self._main_stack.addWidget(self._content_results)  # index 4
+
         self._main_splitter.addWidget(self._main_stack)
         main_layout.addWidget(self._main_splitter, stretch=1)
 
@@ -445,6 +453,14 @@ class MainWindow(QMainWindow):
         self._book_details.set_collection_mode(section.startswith("collection_"))
         if section == "stats":
             stats = self._db.get_statistics()
+            # Estatísticas vivas (Tarefa 5.2): streak, minutos/semana e,
+            # quando configurada, a meta anual de livros lidos.
+            stats["streak_days"] = self._db.get_reading_streak()
+            stats["weekly_minutes"] = self._db.get_weekly_reading_minutes()
+            annual_goal = self._config.get("stats.annual_goal_books", 0)
+            if annual_goal:
+                stats["annual_goal_books"] = annual_goal
+                stats["books_read_this_year"] = self._db.get_books_read_in_year()
             self._stats_panel.update_stats(stats)
             self._main_stack.setCurrentIndex(2)
         elif section in ("ai_assistant", "global_search"):
@@ -463,8 +479,18 @@ class MainWindow(QMainWindow):
         self._load_library(getattr(self, "_current_section", "all"))
 
     def _on_search(self, query: str, filters: dict):
-        if query or filters:
-            results = self._search_engine.search(query, filters)
+        # Modo "No conteúdo" (Tarefa 5.1): busca no texto full-text das páginas,
+        # com página/resultados próprios (não a grade de cards).
+        if filters.get("content"):
+            self._run_content_search(query)
+            return
+        # Saindo do modo conteúdo (toggle desmarcado): volta à grade.
+        if self._main_stack.currentIndex() == 4:
+            self._main_stack.setCurrentIndex(0)
+        # O toggle não é um filtro de metadados — remove antes de passar adiante.
+        meta_filters = {k: v for k, v in filters.items() if k != "content"}
+        if query or meta_filters:
+            results = self._search_engine.search(query, meta_filters)
             progress_map = self._db.get_progress_map()
             # is_search=True (Tarefa 2.6): lista vazia aqui é "sem resultado
             # para a busca", não "biblioteca vazia" — estados visuais distintos.
@@ -473,6 +499,27 @@ class MainWindow(QMainWindow):
             self._library_view.load_continue_reading([])
         else:
             self._load_library()
+
+    def _run_content_search(self, query: str) -> None:
+        """Executa a busca no conteúdo (FTS5) e mostra a página de resultados."""
+        if not query:
+            # Modo conteúdo sem termo digitado: nada a buscar → volta à grade.
+            self._exit_content_search()
+            return
+        results = self._db.fts_search(query, limit=100)
+        # fts_search devolve só book_id — enriquece com o título numa consulta.
+        titles = {b["id"]: b.get("title", "") for b in self._db.get_all_books()}
+        for r in results:
+            r["title"] = titles.get(r["book_id"], "Livro")
+        pending = self._db.fts_pending_count()
+        self._content_results.show_results(query, results, pending_count=pending)
+        self._main_stack.setCurrentIndex(4)
+
+    def _exit_content_search(self) -> None:
+        """Botão 'Voltar' da busca de conteúdo: limpa a barra e volta à grade."""
+        self._search_bar.clear()
+        self._main_stack.setCurrentIndex(0)
+        self._load_library()
 
     def _on_book_selected(self, book_id: int):
         book = self._db.get_book(book_id)
@@ -552,8 +599,11 @@ class MainWindow(QMainWindow):
         self._sidebar.show()
         self._load_library()
 
-    def _on_progress(self, book_id: int, page: int, total: int):
-        self._db.update_reading_progress(book_id, page, total)
+    def _on_progress(self, book_id: int, page: int, total: int, seconds: int = 0):
+        # Tarefa 5.2: 'seconds' (tempo real medido pelo ReaderView, já com
+        # teto anti-idle) alimenta o log diário reading_sessions via
+        # update_reading_progress — que só grava sessão quando seconds > 0.
+        self._db.update_reading_progress(book_id, page, total, time_spent=seconds)
         self._reader_view.set_annotation_page(page)
 
     def _on_rag_annotation_save(self, book_id: int, page: int, content: str):
