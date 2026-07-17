@@ -19,6 +19,7 @@ from src.gui.widgets.reading_progress import ReadingProgressBar
 from src.gui.widgets.annotation_panel import AnnotationPanel
 from src.gui.widgets.search_overlay import DocumentSearchBar
 from src.gui.widgets.bookmarks_panel import BookmarksPanel
+from src.gui.widgets.xray_panel import XRayPanel
 from src.gui.widgets.reader_typography_popover import ReaderTypographyPopover
 from src.gui.styles import get_reader_css, emoji_icon
 from src.utils.constants import (
@@ -30,6 +31,7 @@ from src.gui.widgets.reader_dock import ReaderDock
 from src.gui.widgets.proactive_insights_panel import ProactiveInsightsPanel
 from src.gui.proactive_reader_service import ProactiveReaderService
 from src.core.proactive_observation import confidence_to_float, obs_dict_from_row
+from src.core.graph.graph_store import GraphStore
 from PyQt6.QtWidgets import QComboBox
 
 logger = logging.getLogger(__name__)
@@ -542,12 +544,17 @@ class ReaderView(QWidget):
         self._bookmarks_panel = BookmarksPanel()
         self._bookmarks_panel.bookmark_selected.connect(self._go_to_page)
         self._bookmarks_panel.bookmark_removed.connect(self._on_bookmark_removed)
+        # Tarefa 3.2 — aba X-Ray: conceitos do livro presentes NA PÁGINA atual e
+        # onde mais aparecem na biblioteca. Sem LLM, só o grafo (GraphStore).
+        graph_store = GraphStore(self._db) if self._db is not None else None
+        self._xray_panel = XRayPanel(graph_store=graph_store)
         self._side_panel_tabs = QTabWidget()
         self._side_panel_tabs.setObjectName("readerSidePanelTabs")
         self._side_panel_tabs.setMinimumWidth(200)
         self._side_panel_tabs.setMaximumWidth(300)
         self._side_panel_tabs.addTab(self._toc_widget, "Sumário")
         self._side_panel_tabs.addTab(self._bookmarks_panel, "Marcadores")
+        self._side_panel_tabs.addTab(self._xray_panel, "X-Ray")
         splitter.addWidget(self._side_panel_tabs)
         # Tarefa 1.3 — aplica a visibilidade persistida (reader.side_panel_visible,
         # default True) já na construção; open_book() reaplica ao abrir um livro.
@@ -1027,6 +1034,11 @@ class ReaderView(QWidget):
                 page_text[:1500]
             )
 
+        # Tarefa 3.2 — atualiza o X-Ray com o TEXTO COMPLETO da página (a
+        # interseção com os conceitos do livro é barata; ver src/core/xray.py).
+        if hasattr(self, "_xray_panel"):
+            self._xray_panel.update_context(self._book_id, page, page_text)
+
     def _go_to_page(self, page: int):
         self._stop_audio_if_running()
         if hasattr(self, "_selection_popover"):
@@ -1182,6 +1194,8 @@ class ReaderView(QWidget):
         self._toc_widget.set_theme(theme)
         if hasattr(self, "_bookmarks_panel"):
             self._bookmarks_panel.set_theme(theme)
+        if hasattr(self, "_xray_panel"):
+            self._xray_panel.set_theme(theme)
         self._annotation_panel.set_theme(theme)
         if hasattr(self, '_dock'):
             self._dock.set_theme(theme)

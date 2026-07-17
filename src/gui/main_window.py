@@ -295,6 +295,8 @@ class MainWindow(QMainWindow):
         # Auto-indexação: leitura ativa adia o processamento em ocioso.
         self._reader_view.reading_context_updated.connect(self._auto_index_service.on_activity)
         self._reader_view.ai_action_requested.connect(self._on_ai_action_requested)
+        # Tarefa 3.2 — clique num livro relacionado no X-Ray abre esse livro.
+        self._reader_view._xray_panel.open_book_requested.connect(self._on_book_open)
         self._main_stack.addWidget(self._reader_view)  # index 1
 
         # ── Página de Estatísticas ──
@@ -312,6 +314,10 @@ class MainWindow(QMainWindow):
         self._rag_panel.feedback_reason_submitted.connect(self._on_rag_feedback_reason)
         self._rag_panel.clear_chat_requested.connect(self._on_clear_chat)
         self._rag_panel.back_requested.connect(lambda: self._main_stack.setCurrentIndex(0))
+        # Tarefa 3.1 — fontes clicáveis: resolve citações [Título, p. X] → book_id
+        # e abre o livro na página citada.
+        self._rag_panel.set_books_provider(self._db.get_all_books)
+        self._rag_panel.source_clicked.connect(self._on_rag_source_clicked)
         self._main_stack.addWidget(self._rag_panel)  # index 3
 
         self._main_splitter.addWidget(self._main_stack)
@@ -517,6 +523,22 @@ class MainWindow(QMainWindow):
         # Carrega anotações existentes
         annotations = self._db.get_annotations(book_id)
         self._reader_view.load_annotations(annotations)
+
+    def _on_rag_source_clicked(self, book_id: int, page: int) -> None:
+        """Tarefa 3.1 — abre a fonte citada (livro + página 0-based) no leitor.
+
+        Reusa o fluxo de abertura de livro; se o livro já estiver aberto, apenas
+        navega. Degradação graciosa: se a abertura falhar (arquivo ausente), não
+        navega (o book_id do leitor não baterá).
+        """
+        already_open = (
+            self._main_stack.currentIndex() == 1
+            and self._reader_view._book_id == book_id
+        )
+        if not already_open:
+            self._on_book_open(book_id)
+        if self._reader_view._book_id == book_id:
+            self._reader_view._go_to_page(max(0, int(page)))
 
     def _close_reader(self):
         self._reader_view.close_reader()

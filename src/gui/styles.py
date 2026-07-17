@@ -1073,6 +1073,22 @@ QPushButton#bookmarkRemoveBtn {
 }
 QPushButton#bookmarkRemoveBtn:hover { color: #ef4444; }
 
+/* ── X-Ray da página (aba do painel lateral — Tarefa 3.2) ─────────── */
+QLabel#xrayTitle {
+    color: #10b981; font-size: 12px; font-weight: 700;
+    letter-spacing: 0.5px; padding: 4px 4px 2px 4px;
+}
+QLabel#xrayEmpty {
+    color: #64748b; font-size: 12px; padding: 12px; line-height: 1.5;
+}
+QTreeWidget#xrayTree {
+    background: #161920; border: none; color: #e5e7eb; font-size: 12px;
+    outline: 0;
+}
+QTreeWidget#xrayTree::item { padding: 5px 4px; border-radius: 4px; }
+QTreeWidget#xrayTree::item:hover { background: #20242d; color: #10b981; }
+QTreeWidget#xrayTree::item:selected { background: rgba(16,185,129,0.15); color: #10b981; }
+
 /* ── Prateleira "Continuar lendo" + card compacto (Onda 2) ───────── */
 #continueShelf { background: transparent; }
 #continueShelfTitle {
@@ -2196,6 +2212,22 @@ QPushButton#bookmarkRemoveBtn {
     background: transparent; border: none; color: #71717a; font-size: 13px;
 }
 QPushButton#bookmarkRemoveBtn:hover { color: #dc2626; }
+
+/* ── X-Ray da página (aba do painel lateral — Tarefa 3.2) ─────────── */
+QLabel#xrayTitle {
+    color: #059669; font-size: 12px; font-weight: 700;
+    letter-spacing: 0.5px; padding: 4px 4px 2px 4px;
+}
+QLabel#xrayEmpty {
+    color: #8a8a8a; font-size: 12px; padding: 12px; line-height: 1.5;
+}
+QTreeWidget#xrayTree {
+    background: #f4f4f5; border: none; color: #1A1A1A; font-size: 12px;
+    outline: 0;
+}
+QTreeWidget#xrayTree::item { padding: 5px 4px; border-radius: 4px; }
+QTreeWidget#xrayTree::item:hover { background: #e4e4e7; color: #059669; }
+QTreeWidget#xrayTree::item:selected { background: rgba(5,150,105,0.15); color: #059669; }
 
 /* ── Prateleira "Continuar lendo" + card compacto (Onda 2) ───────── */
 #continueShelf { background: transparent; }
@@ -3321,6 +3353,22 @@ QPushButton#bookmarkRemoveBtn {
     background: transparent; border: none; color: #8b7355; font-size: 13px;
 }
 QPushButton#bookmarkRemoveBtn:hover { color: #b91c1c; }
+
+/* ── X-Ray da página (aba do painel lateral — Tarefa 3.2) ─────────── */
+QLabel#xrayTitle {
+    color: #8b6c42; font-size: 12px; font-weight: 700;
+    letter-spacing: 0.5px; padding: 4px 4px 2px 4px;
+}
+QLabel#xrayEmpty {
+    color: #9c8a6f; font-size: 12px; padding: 12px; line-height: 1.5;
+}
+QTreeWidget#xrayTree {
+    background: #ebe5d9; border: none; color: #5B4636; font-size: 12px;
+    outline: 0;
+}
+QTreeWidget#xrayTree::item { padding: 5px 4px; border-radius: 4px; }
+QTreeWidget#xrayTree::item:hover { background: #dfd8c8; color: #8b6c42; }
+QTreeWidget#xrayTree::item:selected { background: rgba(139,108,66,0.15); color: #8b6c42; }
 
 /* ── Prateleira "Continuar lendo" + card compacto (Onda 2) ───────── */
 #continueShelf { background: transparent; }
