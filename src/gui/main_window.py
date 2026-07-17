@@ -310,6 +310,7 @@ class MainWindow(QMainWindow):
 
         # ── Página do Assistente IA (RAG) ──
         self._rag_panel = RAGPanel()
+        self._rag_panel.set_config(self._config)  # persiste colapso da sidebar (rag.sidebar_collapsed)
         self._rag_panel.query_requested.connect(self._on_rag_query)
         self._rag_panel.index_requested.connect(self._on_rag_index_all)
         self._rag_panel.stop_requested.connect(self._on_rag_stop)

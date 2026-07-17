@@ -100,6 +100,10 @@ DEFAULT_CONFIG = {
         "edge_min_shared": 2,
         "edge_df_cap": 0.5,
     },
+    # Painel do Assistente (RAG standalone): preferência de UI persistida.
+    "rag": {
+        "sidebar_collapsed": True,  # sidebar (fontes/modelo/indexação) recolhida por padrão
+    },
 }
 
 
