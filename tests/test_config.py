@@ -61,6 +61,11 @@ class TestConfigManager:
         assert len(recent) == 2
         assert recent[0] == "/path/to/book2.epub"  # Mais recente primeiro
 
+    def test_continuous_translate_reading_default(self, config):
+        """Onda 4, item 4.2 — leitura contínua traduzida, consumidor futuro."""
+        assert config.get("tts.continuous_translate_reading") is False
+        assert config.tts_config["continuous_translate_reading"] is False
+
     def test_recent_files_dedup(self, tmp_path):
         cfg = ConfigManager(tmp_path / "dedup_config.json")
         cfg.add_recent_file("/path/to/book.pdf")

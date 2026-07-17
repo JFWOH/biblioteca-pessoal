@@ -166,15 +166,29 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   — 2 leituras SQLite extras por abertura. Testes: +~130 na onda (998→1083).
 
 ### Onda 4 — [P2] Higiene e configuração
-- [ ] **4.1** Aba "Avançado" nas Configurações expondo `graph.*`, `auto_index.*`,
+- [x] **4.1** Aba "Avançado" nas Configurações expondo `graph.*`, `auto_index.*`,
   `translation.*` (`core/config.py:68-96`).
-- [ ] **4.2** `tts.continuous_translate_reading` no `DEFAULT_CONFIG`.
-- [ ] **4.3** Diálogo "Atalhos de teclado" (lista os 14+; entrada no menu Ajuda).
-- [ ] **4.4** Botão Remover no padrão `secondaryBtn`; `ollama_wizard` sem
+- [x] **4.2** `tts.continuous_translate_reading` no `DEFAULT_CONFIG`.
+- [x] **4.3** Diálogo "Atalhos de teclado" (lista os 14+; entrada no menu Ajuda).
+- [x] **4.4** Botão Remover no padrão `secondaryBtn`; `ollama_wizard` sem
   `setFixedSize` (mínimos + redimensionável).
-- [ ] **4.5** Acessibilidade mínima: `setAccessibleName` em todos os botões
+- [x] **4.5** Acessibilidade mínima: `setAccessibleName` em todos os botões
   ícone-apenas; tab order curado nas janelas principais.
 - Executores: F1 Sonnet (tudo; Opus só se 4.1 complicar).
+- **Registro (2026-07-17, executada; 1 executor Sonnet):** (4.1) 5ª aba "Avançado"
+  com QScrollArea (21 controles); src/tgt de tradução como QLineEdit (NLLB ~200
+  códigos); llm_model vazio↔None. (4.2) chave já era LIDA por reader_view:502 com
+  default — só faltava no DEFAULT_CONFIG. (4.3) 18 atalhos publicados, F1 abre o
+  diálogo. (4.4) wizard: setFixedSize→setMinimumSize+resize; Remover: DECISÃO —
+  mantido `dangerBtn` da Onda 0.3 em vez de `secondaryBtn` (ação destrutiva não
+  deve parecer botão comum; o objetivo do item — sair do estilo inline — já fora
+  atingido). (4.5) 18 accessibleNames (4 library_view + 14 toolbar do leitor);
+  tab order: header da biblioteca + diálogos novos; SearchBar fora (widget irmão
+  no main_window). Bônus: corrigido emoji-no-texto do botão "Excluir Selecionados"
+  (library_view:289). DÉBITO NOVO identificado: emoji-em-texto remanescente em
+  botões de collection_dialog/import_dialog/flashcards_dialog/widgets diversos
+  (fora do escopo 0.1, que cobria book_details+toolbar do leitor). Testes: +18
+  (1083→1100 com ajustes).
 
 ### Onda 5 — Busca e engajamento
 - [ ] **5.1** Busca full-text no CONTEÚDO: FTS5 do corpo/OCR (tabela nova alimentada

@@ -193,6 +193,10 @@ class MainWindow(QMainWindow):
 
         # Menu Ajuda
         help_menu = menubar.addMenu("A&juda")
+        shortcuts_action = QAction("⌨️ Atalhos de teclado", self)
+        shortcuts_action.setShortcut(QKeySequence(Qt.Key.Key_F1))
+        shortcuts_action.triggered.connect(self._show_shortcuts)
+        help_menu.addAction(shortcuts_action)
         about = QAction("Sobre", self)
         about.triggered.connect(self._show_about)
         help_menu.addAction(about)
@@ -785,6 +789,12 @@ class MainWindow(QMainWindow):
         self._statusbar.showMessage(
             f"📚 {total} livros na biblioteca"
         )
+
+    def _show_shortcuts(self):
+        """Abre o diálogo somente-leitura com os atalhos de teclado do app."""
+        from src.gui.dialogs.shortcuts_dialog import ShortcutsDialog
+        dialog = ShortcutsDialog(self)
+        dialog.exec()
 
     def _show_about(self):
         QMessageBox.about(

@@ -64,6 +64,7 @@ DEFAULT_CONFIG = {
         },
         "auto_fallback": True,
         "continuous_reading": False,  # narração vira páginas automaticamente
+        "continuous_translate_reading": False,  # leitura contínua com tradução automática (consumidor futuro)
     },
     # Tradução offline (NLLB + revisão pelo LLM local).
     "translation": {

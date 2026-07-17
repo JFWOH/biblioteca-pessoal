@@ -2,13 +2,14 @@
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QSpinBox, QCheckBox, QTabWidget, QWidget,
+    QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox, QTabWidget, QWidget,
     QGroupBox, QFontComboBox, QSlider, QListWidget, QFileDialog,
+    QLineEdit, QScrollArea,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QFont
 
-from src.core.config import ConfigManager
+from src.core.config import ConfigManager, DEFAULT_CONFIG
 from src.utils.constants import (
     THEME_DARK, THEME_LIGHT, THEME_SEPIA,
     MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_FONT_SIZE,
@@ -52,6 +53,7 @@ class SettingsDialog(QDialog):
         self._tabs.addTab(self._create_reader_tab(), "📖 Leitor")
         self._tabs.addTab(self._create_library_tab(), "📚 Biblioteca")
         self._tabs.addTab(self._create_tts_tab(), "🔊 Narração")
+        self._tabs.addTab(self._create_advanced_tab(), "⚙️ Avançado")
         layout.addWidget(self._tabs)
 
         # Botões
@@ -380,6 +382,242 @@ class SettingsDialog(QDialog):
         layout.addStretch()
         return tab
 
+    def _create_advanced_tab(self) -> QWidget:
+        """Aba "Avançado": expõe graph.*, auto_index.* e translation.* do
+        DEFAULT_CONFIG (Onda 4, item 4.1). Os padrões já funcionam bem — por
+        isso o aviso no topo — mas usuários avançados podem querer ajustar.
+        """
+        outer = QWidget()
+        outer_layout = QVBoxLayout(outer)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        warning = QLabel(
+            "Ajustes avançados — os padrões funcionam bem para a maioria dos casos."
+        )
+        warning.setObjectName("settingsAdvancedWarning")
+        warning.setWordWrap(True)
+        warning.setContentsMargins(0, 0, 0, 8)
+        outer_layout.addWidget(warning)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        outer_layout.addWidget(scroll)
+
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(16)
+        scroll.setWidget(tab)
+
+        graph_defaults = DEFAULT_CONFIG["graph"]
+        autoindex_defaults = DEFAULT_CONFIG["auto_index"]
+        translation_defaults = DEFAULT_CONFIG["translation"]
+
+        # ── Grafo de conceitos ──────────────────────────────────────────
+        graph_group = QGroupBox("Grafo de conceitos")
+        graph_group.setObjectName("settingsGroup")
+        graph_layout = QVBoxLayout(graph_group)
+
+        self._adv_graph_enabled = QCheckBox("Grafo de conceitos ativo")
+        self._adv_graph_enabled.setChecked(graph_defaults["enabled"])
+        graph_layout.addWidget(self._adv_graph_enabled)
+
+        self._adv_graph_use_llm_pages = QCheckBox("Usar LLM para extrair conceitos de páginas")
+        self._adv_graph_use_llm_pages.setChecked(graph_defaults["use_llm_pages"])
+        graph_layout.addWidget(self._adv_graph_use_llm_pages)
+
+        self._adv_graph_use_llm_annotations = QCheckBox("Usar LLM para extrair conceitos de anotações")
+        self._adv_graph_use_llm_annotations.setChecked(graph_defaults["use_llm_annotations"])
+        graph_layout.addWidget(self._adv_graph_use_llm_annotations)
+
+        self._adv_graph_use_llm_idle = QCheckBox("Usar LLM durante o processamento em ocioso")
+        self._adv_graph_use_llm_idle.setChecked(graph_defaults["use_llm_idle"])
+        graph_layout.addWidget(self._adv_graph_use_llm_idle)
+
+        model_row = QHBoxLayout()
+        model_row.addWidget(QLabel("Modelo LLM do grafo:"))
+        self._adv_graph_llm_model = QLineEdit()
+        self._adv_graph_llm_model.setPlaceholderText("padrão do sistema")
+        self._adv_graph_llm_model.setObjectName("settingsNumericInput")
+        model_row.addWidget(self._adv_graph_llm_model, stretch=1)
+        graph_layout.addLayout(model_row)
+
+        timeout_row = QHBoxLayout()
+        timeout_row.addWidget(QLabel("Timeout do LLM:"))
+        self._adv_graph_llm_timeout = QSpinBox()
+        self._adv_graph_llm_timeout.setRange(5, 300)
+        self._adv_graph_llm_timeout.setValue(graph_defaults["llm_timeout_s"])
+        self._adv_graph_llm_timeout.setSuffix(" s")
+        self._adv_graph_llm_timeout.setFixedWidth(100)
+        self._adv_graph_llm_timeout.setObjectName("settingsNumericInput")
+        timeout_row.addWidget(self._adv_graph_llm_timeout)
+        timeout_row.addStretch()
+        graph_layout.addLayout(timeout_row)
+
+        max_page_row = QHBoxLayout()
+        max_page_row.addWidget(QLabel("Máx. conceitos por página:"))
+        self._adv_graph_max_concepts_page = QSpinBox()
+        self._adv_graph_max_concepts_page.setRange(1, 50)
+        self._adv_graph_max_concepts_page.setValue(graph_defaults["max_concepts_per_page"])
+        self._adv_graph_max_concepts_page.setFixedWidth(100)
+        self._adv_graph_max_concepts_page.setObjectName("settingsNumericInput")
+        max_page_row.addWidget(self._adv_graph_max_concepts_page)
+        max_page_row.addStretch()
+        graph_layout.addLayout(max_page_row)
+
+        max_ann_row = QHBoxLayout()
+        max_ann_row.addWidget(QLabel("Máx. conceitos por anotação:"))
+        self._adv_graph_max_concepts_annotation = QSpinBox()
+        self._adv_graph_max_concepts_annotation.setRange(1, 50)
+        self._adv_graph_max_concepts_annotation.setValue(graph_defaults["max_concepts_per_annotation"])
+        self._adv_graph_max_concepts_annotation.setFixedWidth(100)
+        self._adv_graph_max_concepts_annotation.setObjectName("settingsNumericInput")
+        max_ann_row.addWidget(self._adv_graph_max_concepts_annotation)
+        max_ann_row.addStretch()
+        graph_layout.addLayout(max_ann_row)
+
+        self._adv_graph_idle_enabled = QCheckBox("Processar grafo em ocioso")
+        self._adv_graph_idle_enabled.setChecked(graph_defaults["idle_enabled"])
+        graph_layout.addWidget(self._adv_graph_idle_enabled)
+
+        idle_interval_row = QHBoxLayout()
+        idle_interval_row.addWidget(QLabel("Intervalo de verificação (ocioso):"))
+        self._adv_graph_idle_interval = QSpinBox()
+        self._adv_graph_idle_interval.setRange(10, 3600)
+        self._adv_graph_idle_interval.setValue(graph_defaults["idle_interval_s"])
+        self._adv_graph_idle_interval.setSuffix(" s")
+        self._adv_graph_idle_interval.setFixedWidth(100)
+        self._adv_graph_idle_interval.setObjectName("settingsNumericInput")
+        idle_interval_row.addWidget(self._adv_graph_idle_interval)
+        idle_interval_row.addStretch()
+        graph_layout.addLayout(idle_interval_row)
+
+        idle_inactivity_row = QHBoxLayout()
+        idle_inactivity_row.addWidget(QLabel("Inatividade mínima (ocioso):"))
+        self._adv_graph_idle_min_inactivity = QSpinBox()
+        self._adv_graph_idle_min_inactivity.setRange(10, 3600)
+        self._adv_graph_idle_min_inactivity.setValue(graph_defaults["idle_min_inactivity_s"])
+        self._adv_graph_idle_min_inactivity.setSuffix(" s")
+        self._adv_graph_idle_min_inactivity.setFixedWidth(100)
+        self._adv_graph_idle_min_inactivity.setObjectName("settingsNumericInput")
+        idle_inactivity_row.addWidget(self._adv_graph_idle_min_inactivity)
+        idle_inactivity_row.addStretch()
+        graph_layout.addLayout(idle_inactivity_row)
+
+        idle_batch_row = QHBoxLayout()
+        idle_batch_row.addWidget(QLabel("Páginas por lote (ocioso):"))
+        self._adv_graph_idle_batch_pages = QSpinBox()
+        self._adv_graph_idle_batch_pages.setRange(1, 200)
+        self._adv_graph_idle_batch_pages.setValue(graph_defaults["idle_batch_pages"])
+        self._adv_graph_idle_batch_pages.setFixedWidth(100)
+        self._adv_graph_idle_batch_pages.setObjectName("settingsNumericInput")
+        idle_batch_row.addWidget(self._adv_graph_idle_batch_pages)
+        idle_batch_row.addStretch()
+        graph_layout.addLayout(idle_batch_row)
+
+        edge_shared_row = QHBoxLayout()
+        edge_shared_row.addWidget(QLabel("Mín. de conceitos compartilhados (aresta):"))
+        self._adv_graph_edge_min_shared = QSpinBox()
+        self._adv_graph_edge_min_shared.setRange(1, 20)
+        self._adv_graph_edge_min_shared.setValue(graph_defaults["edge_min_shared"])
+        self._adv_graph_edge_min_shared.setFixedWidth(100)
+        self._adv_graph_edge_min_shared.setObjectName("settingsNumericInput")
+        edge_shared_row.addWidget(self._adv_graph_edge_min_shared)
+        edge_shared_row.addStretch()
+        graph_layout.addLayout(edge_shared_row)
+
+        edge_cap_row = QHBoxLayout()
+        edge_cap_row.addWidget(QLabel("Limite de frequência de conceito (aresta):"))
+        self._adv_graph_edge_df_cap = QDoubleSpinBox()
+        self._adv_graph_edge_df_cap.setRange(0.0, 1.0)
+        self._adv_graph_edge_df_cap.setSingleStep(0.05)
+        self._adv_graph_edge_df_cap.setDecimals(2)
+        self._adv_graph_edge_df_cap.setValue(graph_defaults["edge_df_cap"])
+        self._adv_graph_edge_df_cap.setFixedWidth(100)
+        self._adv_graph_edge_df_cap.setObjectName("settingsNumericInput")
+        edge_cap_row.addWidget(self._adv_graph_edge_df_cap)
+        edge_cap_row.addStretch()
+        graph_layout.addLayout(edge_cap_row)
+
+        layout.addWidget(graph_group)
+
+        # ── Auto-indexação RAG ──────────────────────────────────────────
+        autoindex_group = QGroupBox("Auto-indexação RAG")
+        autoindex_group.setObjectName("settingsGroup")
+        autoindex_layout = QVBoxLayout(autoindex_group)
+
+        self._adv_autoindex_enabled = QCheckBox("Auto-indexação RAG ativa")
+        self._adv_autoindex_enabled.setChecked(autoindex_defaults["enabled"])
+        autoindex_layout.addWidget(self._adv_autoindex_enabled)
+
+        ai_interval_row = QHBoxLayout()
+        ai_interval_row.addWidget(QLabel("Intervalo de verificação (ocioso):"))
+        self._adv_autoindex_idle_interval = QSpinBox()
+        self._adv_autoindex_idle_interval.setRange(10, 3600)
+        self._adv_autoindex_idle_interval.setValue(autoindex_defaults["idle_interval_s"])
+        self._adv_autoindex_idle_interval.setSuffix(" s")
+        self._adv_autoindex_idle_interval.setFixedWidth(100)
+        self._adv_autoindex_idle_interval.setObjectName("settingsNumericInput")
+        ai_interval_row.addWidget(self._adv_autoindex_idle_interval)
+        ai_interval_row.addStretch()
+        autoindex_layout.addLayout(ai_interval_row)
+
+        ai_inactivity_row = QHBoxLayout()
+        ai_inactivity_row.addWidget(QLabel("Inatividade mínima (ocioso):"))
+        self._adv_autoindex_idle_min_inactivity = QSpinBox()
+        self._adv_autoindex_idle_min_inactivity.setRange(10, 3600)
+        self._adv_autoindex_idle_min_inactivity.setValue(autoindex_defaults["idle_min_inactivity_s"])
+        self._adv_autoindex_idle_min_inactivity.setSuffix(" s")
+        self._adv_autoindex_idle_min_inactivity.setFixedWidth(100)
+        self._adv_autoindex_idle_min_inactivity.setObjectName("settingsNumericInput")
+        ai_inactivity_row.addWidget(self._adv_autoindex_idle_min_inactivity)
+        ai_inactivity_row.addStretch()
+        autoindex_layout.addLayout(ai_inactivity_row)
+
+        layout.addWidget(autoindex_group)
+
+        # ── Tradução ────────────────────────────────────────────────────
+        translation_group = QGroupBox("Tradução")
+        translation_group.setObjectName("settingsGroup")
+        translation_layout = QVBoxLayout(translation_group)
+
+        trans_model_row = QHBoxLayout()
+        trans_model_row.addWidget(QLabel("Modelo de tradução:"))
+        self._adv_translation_model = QLineEdit()
+        self._adv_translation_model.setText(translation_defaults["model"])
+        self._adv_translation_model.setObjectName("settingsNumericInput")
+        trans_model_row.addWidget(self._adv_translation_model, stretch=1)
+        translation_layout.addLayout(trans_model_row)
+
+        trans_src_row = QHBoxLayout()
+        trans_src_row.addWidget(QLabel("Idioma de origem padrão:"))
+        self._adv_translation_default_src = QLineEdit()
+        self._adv_translation_default_src.setText(translation_defaults["default_src"])
+        self._adv_translation_default_src.setFixedWidth(80)
+        self._adv_translation_default_src.setObjectName("settingsNumericInput")
+        trans_src_row.addWidget(self._adv_translation_default_src)
+        trans_src_row.addStretch()
+        translation_layout.addLayout(trans_src_row)
+
+        trans_tgt_row = QHBoxLayout()
+        trans_tgt_row.addWidget(QLabel("Idioma de destino padrão:"))
+        self._adv_translation_default_tgt = QLineEdit()
+        self._adv_translation_default_tgt.setText(translation_defaults["default_tgt"])
+        self._adv_translation_default_tgt.setFixedWidth(80)
+        self._adv_translation_default_tgt.setObjectName("settingsNumericInput")
+        trans_tgt_row.addWidget(self._adv_translation_default_tgt)
+        trans_tgt_row.addStretch()
+        translation_layout.addLayout(trans_tgt_row)
+
+        self._adv_translation_revise_llm = QCheckBox("Revisar tradução com LLM local")
+        self._adv_translation_revise_llm.setChecked(translation_defaults["revise_with_llm"])
+        translation_layout.addWidget(self._adv_translation_revise_llm)
+
+        layout.addWidget(translation_group)
+        layout.addStretch()
+        return outer
+
     def _load_settings(self):
         """Carrega configurações atuais nos widgets."""
         # Tema
@@ -447,6 +685,34 @@ class SettingsDialog(QDialog):
 
         self._tts_auto_fallback.setChecked(tts_cfg.get("auto_fallback", True))
 
+        # Avançado — grafo de conceitos, auto-indexação e tradução (Onda 4, item 4.1)
+        graph_cfg = self._config.get("graph", DEFAULT_CONFIG["graph"])
+        self._adv_graph_enabled.setChecked(graph_cfg.get("enabled", True))
+        self._adv_graph_use_llm_pages.setChecked(graph_cfg.get("use_llm_pages", False))
+        self._adv_graph_use_llm_annotations.setChecked(graph_cfg.get("use_llm_annotations", True))
+        self._adv_graph_use_llm_idle.setChecked(graph_cfg.get("use_llm_idle", False))
+        self._adv_graph_llm_model.setText(graph_cfg.get("llm_model") or "")
+        self._adv_graph_llm_timeout.setValue(graph_cfg.get("llm_timeout_s", 20))
+        self._adv_graph_max_concepts_page.setValue(graph_cfg.get("max_concepts_per_page", 8))
+        self._adv_graph_max_concepts_annotation.setValue(graph_cfg.get("max_concepts_per_annotation", 5))
+        self._adv_graph_idle_enabled.setChecked(graph_cfg.get("idle_enabled", True))
+        self._adv_graph_idle_interval.setValue(graph_cfg.get("idle_interval_s", 60))
+        self._adv_graph_idle_min_inactivity.setValue(graph_cfg.get("idle_min_inactivity_s", 90))
+        self._adv_graph_idle_batch_pages.setValue(graph_cfg.get("idle_batch_pages", 25))
+        self._adv_graph_edge_min_shared.setValue(graph_cfg.get("edge_min_shared", 2))
+        self._adv_graph_edge_df_cap.setValue(graph_cfg.get("edge_df_cap", 0.5))
+
+        autoindex_cfg = self._config.get("auto_index", DEFAULT_CONFIG["auto_index"])
+        self._adv_autoindex_enabled.setChecked(autoindex_cfg.get("enabled", True))
+        self._adv_autoindex_idle_interval.setValue(autoindex_cfg.get("idle_interval_s", 120))
+        self._adv_autoindex_idle_min_inactivity.setValue(autoindex_cfg.get("idle_min_inactivity_s", 120))
+
+        translation_cfg = self._config.get("translation", DEFAULT_CONFIG["translation"])
+        self._adv_translation_model.setText(translation_cfg.get("model", DEFAULT_CONFIG["translation"]["model"]))
+        self._adv_translation_default_src.setText(translation_cfg.get("default_src", "en"))
+        self._adv_translation_default_tgt.setText(translation_cfg.get("default_tgt", "pt"))
+        self._adv_translation_revise_llm.setChecked(translation_cfg.get("revise_with_llm", True))
+
     def _save_and_close(self):
         """Salva configurações e fecha o diálogo."""
         self._config.set("theme", self._theme_combo.currentData())
@@ -471,6 +737,32 @@ class SettingsDialog(QDialog):
         self._config.set("tts.assistant.style", self._tts_asst_style.currentData())
         self._config.set("tts.assistant.rate", self._tts_asst_rate.value() / 100)
         self._config.set("tts.auto_fallback", self._tts_auto_fallback.isChecked())
+
+        # Avançado — grafo de conceitos, auto-indexação e tradução (Onda 4, item 4.1)
+        self._config.set("graph.enabled", self._adv_graph_enabled.isChecked())
+        self._config.set("graph.use_llm_pages", self._adv_graph_use_llm_pages.isChecked())
+        self._config.set("graph.use_llm_annotations", self._adv_graph_use_llm_annotations.isChecked())
+        self._config.set("graph.use_llm_idle", self._adv_graph_use_llm_idle.isChecked())
+        llm_model = self._adv_graph_llm_model.text().strip()
+        self._config.set("graph.llm_model", llm_model or None)
+        self._config.set("graph.llm_timeout_s", self._adv_graph_llm_timeout.value())
+        self._config.set("graph.max_concepts_per_page", self._adv_graph_max_concepts_page.value())
+        self._config.set("graph.max_concepts_per_annotation", self._adv_graph_max_concepts_annotation.value())
+        self._config.set("graph.idle_enabled", self._adv_graph_idle_enabled.isChecked())
+        self._config.set("graph.idle_interval_s", self._adv_graph_idle_interval.value())
+        self._config.set("graph.idle_min_inactivity_s", self._adv_graph_idle_min_inactivity.value())
+        self._config.set("graph.idle_batch_pages", self._adv_graph_idle_batch_pages.value())
+        self._config.set("graph.edge_min_shared", self._adv_graph_edge_min_shared.value())
+        self._config.set("graph.edge_df_cap", self._adv_graph_edge_df_cap.value())
+
+        self._config.set("auto_index.enabled", self._adv_autoindex_enabled.isChecked())
+        self._config.set("auto_index.idle_interval_s", self._adv_autoindex_idle_interval.value())
+        self._config.set("auto_index.idle_min_inactivity_s", self._adv_autoindex_idle_min_inactivity.value())
+
+        self._config.set("translation.model", self._adv_translation_model.text().strip() or DEFAULT_CONFIG["translation"]["model"])
+        self._config.set("translation.default_src", self._adv_translation_default_src.text().strip() or "en")
+        self._config.set("translation.default_tgt", self._adv_translation_default_tgt.text().strip() or "pt")
+        self._config.set("translation.revise_with_llm", self._adv_translation_revise_llm.isChecked())
 
         self.settings_changed.emit()
         self.accept()

@@ -16,6 +16,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import QPushButton
 
 from src.gui.book_details import BookDetails
+from src.gui.library_view import LibraryView
 
 # Faixas Unicode de emoji/pictogramas. NÃO inclui setas (← ◀ ▶ = U+2190/25xx),
 # operadores (− ⋯ = U+2212/22EF) nem box-drawing (│ = U+2502): glifos
@@ -67,6 +68,25 @@ def test_book_details_favorite_toggle_keeps_text_clean(qtbot):
         panel.show_book({"id": 1, "title": "T", "is_favorite": is_fav})
         assert not _has_emoji(panel._fav_btn.text())
         assert not panel._fav_btn.icon().isNull()
+
+
+# ── LibraryView (widget ao vivo) — Onda 4, item 4.5 ─────────────────────
+# Mesmo bug de classe da Onda 0.1, achado em library_view.py:289 durante a
+# revisão da Onda 4: o botão "Excluir Selecionados" da barra de ação em
+# lote embutia o emoji no texto. Corrigido com o mesmo padrão (emoji_icon).
+
+def test_library_view_bulk_delete_button_has_no_emoji_in_text(qtbot):
+    view = LibraryView()
+    qtbot.addWidget(view)
+
+    delete_buttons = [
+        b for b in view.findChildren(QPushButton)
+        if "Excluir Selecionados" in b.text()
+    ]
+    assert delete_buttons, "esperava o botão de exclusão em lote"
+    for btn in delete_buttons:
+        assert not _has_emoji(btn.text()), f"emoji no texto do botão: {btn.text()!r}"
+        assert not btn.icon().isNull(), "botão de excluir sem ícone-emoji"
 
 
 # ── ReaderView (checagem estática do fonte) ────────────────────────────
