@@ -132,6 +132,40 @@ class AutoIndexService(QObject):
                 "Auto-index: indexando '%s' (book_id=%s) em background", title, book_id)
         self.indexing_started.emit(book_id, title)
 
+    def cancel_active(self) -> None:
+        """Cancela IMEDIATAMENTE a indexação em ocioso em andamento, se houver.
+
+        Gatilho (rodada 3 de ajustes de TTS): início real da narração TTS
+        (ReaderView.narration_started, via MainWindow). Complementa — não
+        substitui — o gating por ``busy_check``: aquele só impede que um NOVO
+        job comece durante a narração; este interrompe um job JÁ em curso,
+        porque a contenção de CPU/GPU dos embeddings elevava o TTFB do Kokoro
+        (24,92s medidos com 900 chunks concorrentes) e disparava um fallback
+        indevido para o Piper.
+
+        Cancelamento COOPERATIVO e NÃO-bloqueante: apenas sinaliza o worker
+        (que checa o flag nos loops de OCR — por página — e de embeddings —
+        entre lotes de ~50 chunks) e retorna. Roda na thread da GUI, então
+        NUNCA faz ``wait()`` aqui. Cobre tanto a indexação RAG completa quanto
+        o backfill de FTS (``fts_only``): ambos usam o mesmo
+        ``AutoIndexWorker.cancel()``. O job re-entra naturalmente pelo
+        agendador de ocioso quando a narração terminar — o gating por narração
+        (rodada 2) impede o reinício enquanto ela dura.
+
+        Idempotente/seguro: no-op quando não há worker ativo.
+        """
+        worker = self._worker
+        if worker is None or not worker.isRunning():
+            return
+        title = self._current[1] if self._current else "?"
+        logger.info(
+            "Auto-index: narração iniciou — cancelando indexação ativa de '%s'.",
+            title)
+        try:
+            worker.cancel()
+        except Exception as exc:  # ADR-005: cancelar nunca derruba o app
+            logger.debug("Auto-index: falha ao cancelar worker ativo: %s", exc)
+
     def _pick_candidate(self) -> dict | None:
         try:
             candidates = self._db.get_unindexed_books()

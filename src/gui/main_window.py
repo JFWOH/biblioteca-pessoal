@@ -315,6 +315,11 @@ class MainWindow(QMainWindow):
         self._reader_view.reading_context_updated.connect(self._graph_service.on_page_context)
         # Auto-indexação: leitura ativa adia o processamento em ocioso.
         self._reader_view.reading_context_updated.connect(self._auto_index_service.on_activity)
+        # Rodada 3 de ajustes de TTS: o INÍCIO real da narração cancela uma
+        # indexação em ocioso já em andamento (não só impede novos jobs). A
+        # contenção de CPU/GPU dos embeddings elevava o TTFB do Kokoro e
+        # disparava fallback indevido p/ Piper (ver cancel_active()).
+        self._reader_view.narration_started.connect(self._auto_index_service.cancel_active)
         self._reader_view.ai_action_requested.connect(self._on_ai_action_requested)
         # Tarefa 3.2 — clique num livro relacionado no X-Ray abre esse livro.
         self._reader_view._xray_panel.open_book_requested.connect(self._on_book_open)
