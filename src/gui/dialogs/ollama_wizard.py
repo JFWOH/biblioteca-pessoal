@@ -28,7 +28,8 @@ class OllamaWizardDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Configurar Assistente de IA")
-        self.setFixedSize(520, 420)
+        self.setMinimumSize(520, 420)
+        self.resize(520, 420)
         self.setModal(True)
         self._worker: OllamaInstallWorker | None = None
         self.setObjectName("wizardDialog")

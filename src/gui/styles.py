@@ -711,6 +711,23 @@ QGroupBox#settingsGroup QCheckBox {
     color: #e4e4e7;
     font-size: 12px;
 }
+#settingsAdvancedWarning {
+    color: #d97706;
+    font-size: 11px;
+    font-style: italic;
+}
+
+/* ── Diálogo de Atalhos de Teclado ──────────────────── */
+QGroupBox#settingsGroup QLabel#shortcutKeyBadge {
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 4px;
+    padding: 2px 8px;
+    color: #e4e4e7;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-weight: 600;
+    font-size: 11px;
+}
 
 /* ── Diálogo de Flashcards ─────────────────────────── */
 QFrame#flashcardItem {
@@ -1891,6 +1908,23 @@ QGroupBox#settingsGroup QCheckBox {
     border-radius: 6px;
     color: #1A1A1A;
     font-size: 12px;
+}
+#settingsAdvancedWarning {
+    color: #d97706;
+    font-size: 11px;
+    font-style: italic;
+}
+
+/* ── Diálogo de Atalhos de Teclado ──────────────────── */
+QGroupBox#settingsGroup QLabel#shortcutKeyBadge {
+    background: #f4f4f5;
+    border: 1px solid #d4d4d8;
+    border-radius: 4px;
+    padding: 2px 8px;
+    color: #1A1A1A;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-weight: 600;
+    font-size: 11px;
 }
 
 /* ── Diálogo de Flashcards ─────────────────────────── */
@@ -3073,6 +3107,23 @@ QGroupBox#settingsGroup QCheckBox {
     border-radius: 6px;
     color: #433422;
     font-size: 12px;
+}
+#settingsAdvancedWarning {
+    color: #d97706;
+    font-size: 11px;
+    font-style: italic;
+}
+
+/* ── Diálogo de Atalhos de Teclado ──────────────────── */
+QGroupBox#settingsGroup QLabel#shortcutKeyBadge {
+    background: #F4ECD8;
+    border: 1px solid #d4cbb8;
+    border-radius: 4px;
+    padding: 2px 8px;
+    color: #433422;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-weight: 600;
+    font-size: 11px;
 }
 
 /* ── Diálogo de Flashcards ─────────────────────────── */

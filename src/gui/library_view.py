@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QCursor
 
 from src.gui.widgets.book_card import BookCard
+from src.gui.styles import emoji_icon
 from src.utils.constants import CARD_WIDTH, GRID_SPACING
 
 # ── Dimensões do card compacto da prateleira "Continuar lendo" ─────────────
@@ -174,12 +175,14 @@ class LibraryView(QWidget):
         self._sort_order_btn.setCheckable(True)
         self._sort_order_btn.setFixedSize(28, 28)
         self._sort_order_btn.setToolTip("Ordem decrescente")
+        self._sort_order_btn.setAccessibleName("Inverter ordem de classificação")
         self._sort_order_btn.toggled.connect(self._on_sort_order_toggled)
         header_layout.addWidget(self._sort_order_btn)
 
         # Botão "Mostrar apenas quebrados"
         self._broken_btn = QPushButton("⚠️ Mostrar quebrados")
         self._broken_btn.setCheckable(True)
+        self._broken_btn.setAccessibleName("Mostrar apenas livros com caminho quebrado")
         self._broken_btn.setFixedHeight(28)
         self._broken_btn.setStyleSheet("""
             QPushButton {
@@ -198,6 +201,7 @@ class LibraryView(QWidget):
         # Botões de visualização
         self._grid_btn = QPushButton("▦")
         self._grid_btn.setToolTip("Visualização em grade")
+        self._grid_btn.setAccessibleName("Visualização em grade")
         self._grid_btn.setFixedSize(32, 32)
         self._grid_btn.setStyleSheet("""
             QPushButton { background: #27272a; border: none; border-radius: 6px;
@@ -208,6 +212,7 @@ class LibraryView(QWidget):
 
         self._list_btn = QPushButton("☰")
         self._list_btn.setToolTip("Visualização em lista")
+        self._list_btn.setAccessibleName("Visualização em lista")
         self._list_btn.setFixedSize(32, 32)
         self._list_btn.setStyleSheet("""
             QPushButton { background: transparent; border: none; border-radius: 6px;
@@ -215,6 +220,18 @@ class LibraryView(QWidget):
             QPushButton:hover { background: #27272a; color: #e4e4e7; }
         """)
         header_layout.addWidget(self._list_btn)
+
+        # Ordem de tabulação curada do header (Onda 4, item 4.5): ordenação →
+        # asc/desc → quebrados → grade → lista. O campo de busca (SearchBar)
+        # é um widget IRMÃO fora do LibraryView (instanciado em
+        # MainWindow._setup_ui, acima do splitter da biblioteca) — encadeá-lo
+        # aqui exigiria tocar a construção de UI do main_window.py, fora do
+        # escopo desta Onda (whitelist restringe main_window.py a "menu Ajuda
+        # + integração"). Documentado como não coberto.
+        self.setTabOrder(self._sort_combo, self._sort_order_btn)
+        self.setTabOrder(self._sort_order_btn, self._broken_btn)
+        self.setTabOrder(self._broken_btn, self._grid_btn)
+        self.setTabOrder(self._grid_btn, self._list_btn)
 
         layout.addWidget(header)
 
@@ -286,7 +303,11 @@ class LibraryView(QWidget):
         select_broken_btn.clicked.connect(self._select_all_broken)
         bulk_layout.addWidget(select_broken_btn)
 
-        delete_btn = QPushButton("🗑️ Excluir Selecionados")
+        # Emoji vai como ÍCONE (setIcon), nunca embutido no texto: no Windows o
+        # emoji-no-texto renderiza sobreposto ao rótulo (bug visual). Ver
+        # src/gui/styles.py::emoji_icon (mesma correção da Onda 0.1).
+        delete_btn = QPushButton("Excluir Selecionados")
+        delete_btn.setIcon(emoji_icon("🗑️", 14))
         delete_btn.setFixedHeight(30)
         delete_btn.setStyleSheet("""
             QPushButton { background: #7f1d1d; color: #fca5a5;

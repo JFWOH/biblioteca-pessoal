@@ -186,6 +186,7 @@ class ReaderView(QWidget):
 
         # Navegação de páginas
         self._prev_btn = QPushButton("◀")
+        self._prev_btn.setAccessibleName("Página anterior")
         self._prev_btn.setFixedSize(32, 32)
         self._prev_btn.setStyleSheet("""
             QPushButton { background: #161920; border: none; border-radius: 6px;
@@ -202,6 +203,7 @@ class ReaderView(QWidget):
         tb_layout.addWidget(self._page_label)
 
         self._next_btn = QPushButton("▶")
+        self._next_btn.setAccessibleName("Próxima página")
         self._next_btn.setFixedSize(32, 32)
         self._next_btn.setStyleSheet("""
             QPushButton { background: #161920; border: none; border-radius: 6px;
@@ -213,6 +215,7 @@ class ReaderView(QWidget):
 
         # Zoom
         zoom_out = QPushButton("−")
+        zoom_out.setAccessibleName("Diminuir zoom")
         zoom_out.setFixedSize(28, 28)
         zoom_out.setStyleSheet("""
             QPushButton { background: transparent; border: 1px solid #2d333f;
@@ -223,6 +226,7 @@ class ReaderView(QWidget):
         tb_layout.addWidget(zoom_out)
 
         zoom_in = QPushButton("+")
+        zoom_in.setAccessibleName("Aumentar zoom")
         zoom_in.setFixedSize(28, 28)
         zoom_in.setStyleSheet(zoom_out.styleSheet())
         zoom_in.clicked.connect(self._zoom_in)
@@ -234,6 +238,7 @@ class ReaderView(QWidget):
         self._typography_btn.setFixedSize(36, 32)
         self._typography_btn.setCheckable(True)
         self._typography_btn.setToolTip("Tipografia do leitor (fonte, tamanho, tema)")
+        self._typography_btn.setAccessibleName("Tipografia do leitor")
         self._typography_btn.setStyleSheet("""
             QPushButton { background: transparent; border: 1px solid #2d333f;
                           border-radius: 6px; color: #cbd5e1; font-size: 13px;
@@ -257,6 +262,7 @@ class ReaderView(QWidget):
         self._annotations_btn.setIcon(emoji_icon("📝"))
         self._annotations_btn.setFixedSize(32, 32)
         self._annotations_btn.setToolTip("Painel de Anotações")
+        self._annotations_btn.setAccessibleName("Painel de Anotações")
         self._annotations_btn.setCheckable(True)
         self._annotations_btn.setStyleSheet("""
             QPushButton { background: transparent; border: 1px solid #2d333f;
@@ -276,6 +282,7 @@ class ReaderView(QWidget):
         self._bookmark_btn.setFixedSize(32, 32)
         self._bookmark_btn.setCheckable(True)
         self._bookmark_btn.setToolTip("Marcar página")
+        self._bookmark_btn.setAccessibleName("Marcar página atual")
         self._bookmark_btn.setStyleSheet("""
             QPushButton { background: transparent; border: 1px solid #2d333f;
                           border-radius: 6px; font-size: 16px; }
@@ -295,6 +302,7 @@ class ReaderView(QWidget):
         self._side_panel_toggle_btn.setFixedSize(32, 32)
         self._side_panel_toggle_btn.setCheckable(True)
         self._side_panel_toggle_btn.setToolTip("Sumário/Marcadores")
+        self._side_panel_toggle_btn.setAccessibleName("Painel Sumário/Marcadores")
         self._side_panel_toggle_btn.setStyleSheet("""
             QPushButton { background: transparent; border: 1px solid #2d333f;
                           border-radius: 6px; font-size: 16px; }
@@ -310,6 +318,7 @@ class ReaderView(QWidget):
         search_btn.setIcon(emoji_icon("🔍"))
         search_btn.setFixedSize(32, 32)
         search_btn.setToolTip("Buscar no documento (Ctrl+F)")
+        search_btn.setAccessibleName("Buscar no documento")
         search_btn.setStyleSheet("""
             QPushButton { background: transparent; border: 1px solid #2d333f;
                           border-radius: 6px; font-size: 14px; }
@@ -323,6 +332,7 @@ class ReaderView(QWidget):
         self._fullscreen_btn.setIcon(emoji_icon("⛶"))
         self._fullscreen_btn.setFixedSize(32, 32)
         self._fullscreen_btn.setToolTip("Tela cheia (F11)")
+        self._fullscreen_btn.setAccessibleName("Alternar tela cheia")
         self._fullscreen_btn.setStyleSheet("""
             QPushButton { background: transparent; border: 1px solid #2d333f;
                           border-radius: 6px; font-size: 14px; }
@@ -359,6 +369,7 @@ class ReaderView(QWidget):
             "3. Clique DIREITO dentro da seleção azul\n"
             "4. Escolha '🖍️ Destacar' no menu"
         )
+        self._highlight_mode_btn.setAccessibleName("Modo Marca-Texto")
         self._highlight_mode_btn.setStyleSheet("""
             QPushButton { background: transparent; border: 1px solid #2d333f;
                           border-radius: 6px; font-size: 14px; }
@@ -374,6 +385,7 @@ class ReaderView(QWidget):
         self._study_btn.setIcon(emoji_icon("🎓"))
         self._study_btn.setFixedSize(32, 32)
         self._study_btn.setToolTip("Estudar a página: explicar · resumir · flashcards · glossário")
+        self._study_btn.setAccessibleName("Estudar a página")
         self._study_btn.setStyleSheet("""
             QPushButton { background: transparent; border: 1px solid #2d333f;
                           border-radius: 6px; font-size: 14px; }
@@ -388,6 +400,7 @@ class ReaderView(QWidget):
         self._ai_panel_btn.setFixedSize(32, 32)
         self._ai_panel_btn.setCheckable(True)
         self._ai_panel_btn.setToolTip("Assistente IA")
+        self._ai_panel_btn.setAccessibleName("Assistente IA")
         self._ai_panel_btn.setStyleSheet("""
             QPushButton { background: transparent; border: 1px solid #2d333f;
                           border-radius: 6px; font-size: 14px; }
@@ -469,6 +482,7 @@ class ReaderView(QWidget):
         self._overflow_btn.setText("⋯")
         self._overflow_btn.setFixedSize(32, 32)
         self._overflow_btn.setToolTip("Mais opções")
+        self._overflow_btn.setAccessibleName("Mais opções")
         self._overflow_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._overflow_btn.setStyleSheet("""
             QToolButton { background: transparent; border: 1px solid #2d333f;

@@ -32,6 +32,7 @@ from src.gui.widgets.tag_manager import TagManager, TagBadge, AddTagDialog
 from src.gui.settings_dialog import SettingsDialog
 from src.gui.dialogs.flashcards_dialog import FlashcardsDialog
 from src.gui.dialogs.ollama_wizard import OllamaWizardDialog
+from src.gui.dialogs.shortcuts_dialog import ShortcutsDialog
 
 
 @pytest.fixture(autouse=True)
@@ -100,6 +101,7 @@ def test_widgets_build_under_every_theme(qtbot, db, config, theme_css):
         (lambda: SettingsDialog(config), None),
         (lambda: FlashcardsDialog(db, current_book_id=bid), None),
         (lambda: OllamaWizardDialog(), None),
+        (lambda: ShortcutsDialog(), None),  # Onda 4 — novo diálogo, mesmo padrão de objectName
     ]
     for factory, exercise in cases:
         widget = factory()
