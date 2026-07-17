@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGraphicsDropShadowEffect,
+    QProgressBar, QMenu,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QColor, QFont, QCursor
@@ -21,6 +22,9 @@ class BookCard(QWidget):
     clicked = pyqtSignal(int)            # book_id
     double_clicked = pyqtSignal(int)     # book_id — abre o leitor
     selected_changed = pyqtSignal(int, bool)  # book_id, selecionado?
+    # book_id, ação escolhida no menu de contexto (Tarefa 2.5):
+    # "open" | "favorite" | "collection" | "fetch_metadata" | "delete"
+    context_action = pyqtSignal(int, str)
 
     def __init__(self, book_data: dict, parent=None):
         super().__init__(parent)
@@ -73,6 +77,25 @@ class BookCard(QWidget):
                 self._set_placeholder_cover()
 
         layout.addWidget(self._cover_label)
+
+        # Barra fina de progresso de leitura (Tarefa 2.1): só aparece com
+        # progresso > 0 — discreta, sob a capa, sem disputar espaço com o
+        # badge de "quebrado" (que fica na linha de indicadores, abaixo).
+        pct = self._book.get("percentage") or 0
+        try:
+            pct = max(0, min(100, int(round(float(pct)))))
+        except (TypeError, ValueError):
+            pct = 0
+        self._progress_bar = None
+        if pct > 0:
+            self._progress_bar = QProgressBar()
+            self._progress_bar.setObjectName("bookCardProgress")
+            self._progress_bar.setRange(0, 100)
+            self._progress_bar.setValue(pct)
+            self._progress_bar.setTextVisible(False)
+            self._progress_bar.setFixedHeight(4)
+            self._progress_bar.setToolTip(f"{pct}% lido")
+            layout.addWidget(self._progress_bar)
 
         # Título
         title = self._book.get("title", "Sem título")
@@ -162,6 +185,49 @@ class BookCard(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self.double_clicked.emit(self._book_id)
         super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event):
+        """Botão direito (Tarefa 2.5): ações rápidas sem abrir o livro.
+
+        Reaproveita o roteamento de ações já existente no MainWindow (via
+        LibraryView → context_action) — nenhuma lógica de negócio nova aqui,
+        só o menu e o sinal.
+        """
+        menu = self._build_context_menu()
+        chosen = menu.exec(self.mapToGlobal(event.pos()))
+        self._handle_context_action(chosen)
+
+    def _build_context_menu(self) -> QMenu:
+        """Monta o QMenu de contexto. Separado de ``contextMenuEvent`` para
+        ser testável sem precisar chamar ``exec()`` (que bloqueia esperando
+        interação do usuário)."""
+        menu = QMenu(self)
+        menu.setObjectName("bookCardContextMenu")
+
+        self._ctx_open = menu.addAction("📂 Abrir")
+        fav_label = "☆ Desfavoritar" if self._book.get("is_favorite") else "⭐ Favoritar"
+        self._ctx_favorite = menu.addAction(fav_label)
+        self._ctx_collection = menu.addAction("📁 Adicionar à coleção…")
+        self._ctx_metadata = menu.addAction("🌐 Buscar metadados")
+        menu.addSeparator()
+        self._ctx_delete = menu.addAction("🗑️ Remover")
+        return menu
+
+    def _handle_context_action(self, chosen) -> None:
+        """Traduz a QAction escolhida (ou None, se o menu foi fechado sem
+        escolha) no sinal ``context_action(book_id, action)``."""
+        if chosen is None:
+            return
+        mapping = {
+            self._ctx_open: "open",
+            self._ctx_favorite: "favorite",
+            self._ctx_collection: "collection",
+            self._ctx_metadata: "fetch_metadata",
+            self._ctx_delete: "delete",
+        }
+        action = mapping.get(chosen)
+        if action:
+            self.context_action.emit(self._book_id, action)
 
     @property
     def book_data(self) -> dict:

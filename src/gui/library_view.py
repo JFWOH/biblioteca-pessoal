@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QLabel, QGridLayout,
-    QHBoxLayout, QPushButton, QFrame, QProgressBar,
+    QHBoxLayout, QPushButton, QFrame, QProgressBar, QComboBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QCursor
@@ -115,11 +115,30 @@ class LibraryView(QWidget):
     book_selected = pyqtSignal(int)          # book_id — clique simples
     book_open = pyqtSignal(int)              # book_id — abre o leitor
     bulk_delete_requested = pyqtSignal(list) # list[int] — ids a excluir
+    sort_changed = pyqtSignal(str, str)      # sort_by, sort_order ("asc"/"desc")
+    # Ações do menu de contexto do card (Tarefa 2.5), repassadas 1:1 aos
+    # handlers que o MainWindow já usa para o BookDetails — sem duplicar
+    # lógica de negócio aqui.
+    favorite_toggle_requested = pyqtSignal(int)   # book_id
+    add_to_collection_requested = pyqtSignal(int) # book_id
+    fetch_metadata_requested = pyqtSignal(int)    # book_id
+    delete_requested = pyqtSignal(int)            # book_id — exclusão única
+
+    # Colunas de ordenação exibidas no combo do header — MESMOS valores de
+    # settings_dialog.py (fonte única com library.sort_by/library.sort_order
+    # em config.py, Tarefa 2.3).
+    _SORT_OPTIONS = [
+        ("Data de adição", "date_added"),
+        ("Título", "title"),
+        ("Autor", "author"),
+        ("Avaliação", "rating"),
+    ]
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._cards: list[BookCard] = []
         self._selected_ids: set[int] = set()
+        self._is_search_result = False
         self._setup_ui()
 
     def _setup_ui(self):
@@ -138,6 +157,25 @@ class LibraryView(QWidget):
         )
         header_layout.addWidget(self._count_label)
         header_layout.addStretch()
+
+        # Ordenação (Tarefa 2.3): combo + botão asc/desc. Persistência nas
+        # MESMAS chaves library.sort_by/library.sort_order do settings_dialog
+        # — quem grava/recarrega é o MainWindow (fonte única de verdade).
+        self._sort_combo = QComboBox()
+        self._sort_combo.setObjectName("librarySortCombo")
+        for label, value in self._SORT_OPTIONS:
+            self._sort_combo.addItem(label, value)
+        self._sort_combo.setFixedWidth(150)
+        self._sort_combo.currentIndexChanged.connect(self._emit_sort_changed)
+        header_layout.addWidget(self._sort_combo)
+
+        self._sort_order_btn = QPushButton("↓")
+        self._sort_order_btn.setObjectName("librarySortOrderBtn")
+        self._sort_order_btn.setCheckable(True)
+        self._sort_order_btn.setFixedSize(28, 28)
+        self._sort_order_btn.setToolTip("Ordem decrescente")
+        self._sort_order_btn.toggled.connect(self._on_sort_order_toggled)
+        header_layout.addWidget(self._sort_order_btn)
 
         # Botão "Mostrar apenas quebrados"
         self._broken_btn = QPushButton("⚠️ Mostrar quebrados")
@@ -322,13 +360,90 @@ class LibraryView(QWidget):
         layout.addWidget(self._empty_widget)
         self._empty_widget.hide()
 
+        # ── Estado "busca sem resultado" (Tarefa 2.6) ──────────────────────────
+        # Distinto do estado "biblioteca vazia": sem convite de importação,
+        # já que os livros existem — só não bateram com a busca/filtro atual.
+        self._search_empty_widget = QWidget()
+        search_empty_layout = QVBoxLayout(self._search_empty_widget)
+        search_empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        search_empty_icon = QLabel("🔍")
+        search_empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        search_empty_icon.setObjectName("searchEmptyIcon")
+        search_empty_layout.addWidget(search_empty_icon)
+
+        search_empty_text = QLabel("Nenhum resultado para sua busca")
+        search_empty_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        search_empty_text.setObjectName("searchEmptyText")
+        search_empty_layout.addWidget(search_empty_text)
+
+        search_empty_hint = QLabel("Tente outros termos ou limpe a busca")
+        search_empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        search_empty_hint.setObjectName("searchEmptyHint")
+        search_empty_layout.addWidget(search_empty_hint)
+
+        layout.addWidget(self._search_empty_widget)
+        self._search_empty_widget.hide()
+
         self._all_books: list[dict] = []
+
+    # ── Ordenação (Tarefa 2.3) ──────────────────────────────────────────────
+
+    def _emit_sort_changed(self, *_args):
+        sort_by = self._sort_combo.currentData()
+        sort_order = "asc" if self._sort_order_btn.isChecked() else "desc"
+        self.sort_changed.emit(sort_by, sort_order)
+
+    def _on_sort_order_toggled(self, checked: bool):
+        self._sort_order_btn.setText("↑" if checked else "↓")
+        self._sort_order_btn.setToolTip(
+            "Ordem crescente" if checked else "Ordem decrescente"
+        )
+        self._emit_sort_changed()
+
+    def set_sort_state(self, sort_by: str, sort_order: str) -> None:
+        """Sincroniza combo/botão de ordenação com a config, SEM emitir
+        ``sort_changed`` (evita recarregar a biblioteca em duplicidade —
+        quem chama isto já está prestes a carregar os livros com o mesmo
+        valor). Usado pelo MainWindow para refletir a config no início."""
+        self._sort_combo.blockSignals(True)
+        self._sort_order_btn.blockSignals(True)
+        try:
+            idx = self._sort_combo.findData(sort_by)
+            if idx >= 0:
+                self._sort_combo.setCurrentIndex(idx)
+            ascending = str(sort_order).strip().lower() == "asc"
+            self._sort_order_btn.setChecked(ascending)
+            self._sort_order_btn.setText("↑" if ascending else "↓")
+            self._sort_order_btn.setToolTip(
+                "Ordem crescente" if ascending else "Ordem decrescente"
+            )
+        finally:
+            self._sort_combo.blockSignals(False)
+            self._sort_order_btn.blockSignals(False)
 
     # ── API pública ───────────────────────────────────────────────────────────
 
-    def load_books(self, books: list[dict]):
-        """Carrega a lista de livros na grade."""
+    def load_books(self, books: list[dict], progress_map: dict | None = None,
+                   is_search: bool = False):
+        """Carrega a lista de livros na grade.
+
+        ``progress_map`` (book_id → percentual, Tarefa 2.1) enriquece cada
+        dict com ``percentage`` antes de criar os cards — consulta em lote
+        feita pelo chamador (``LibraryDB.get_progress_map()``); uma consulta
+        por card seria inaceitável (N+1).
+
+        ``is_search`` sinaliza que ``books`` é resultado de busca/filtro
+        (Tarefa 2.6): uma lista vazia nesse caso mostra o estado "sem
+        resultado" em vez do convite de importação da biblioteca vazia.
+        """
+        if progress_map:
+            books = [
+                {**b, "percentage": progress_map.get(b.get("id"), b.get("percentage", 0))}
+                for b in books
+            ]
         self._all_books = books
+        self._is_search_result = is_search
         self._selected_ids.clear()
         self._refresh_grid(books)
 
@@ -363,12 +478,18 @@ class LibraryView(QWidget):
         self._clear_grid()
 
         if not books:
-            self._empty_widget.show()
+            if self._is_search_result:
+                self._empty_widget.hide()
+                self._search_empty_widget.show()
+            else:
+                self._search_empty_widget.hide()
+                self._empty_widget.show()
             self._count_label.setText("0 livros")
             self._update_bulk_bar()
             return
 
         self._empty_widget.hide()
+        self._search_empty_widget.hide()
         total = len(self._all_books)
         shown = len(books)
         if shown < total:
@@ -385,6 +506,7 @@ class LibraryView(QWidget):
             card = BookCard(book)
             card.clicked.connect(self._on_card_clicked)
             card.double_clicked.connect(self.book_open.emit)
+            card.context_action.connect(self._on_card_context_action)
             self._cards.append(card)
             self._grid_layout.addWidget(card, i // cols, i % cols)
 
@@ -401,6 +523,22 @@ class LibraryView(QWidget):
         else:
             self._clear_selection()
             self.book_selected.emit(book_id)
+
+    def _on_card_context_action(self, book_id: int, action: str) -> None:
+        """Repassa a ação do menu de contexto do card (Tarefa 2.5) ao sinal
+        correspondente. O MainWindow conecta esses sinais diretamente aos
+        handlers que já existem para o BookDetails — nenhuma lógica de
+        negócio nova aqui, só o roteamento."""
+        if action == "open":
+            self.book_open.emit(book_id)
+        elif action == "favorite":
+            self.favorite_toggle_requested.emit(book_id)
+        elif action == "collection":
+            self.add_to_collection_requested.emit(book_id)
+        elif action == "fetch_metadata":
+            self.fetch_metadata_requested.emit(book_id)
+        elif action == "delete":
+            self.delete_requested.emit(book_id)
 
     def _toggle_selection(self, book_id: int):
         card = self._card_by_id(book_id)
@@ -466,8 +604,12 @@ class LibraryView(QWidget):
             broken = [b for b in self._all_books
                       if b.get("file_path") and
                       not __import__("pathlib").Path(b["file_path"]).exists()]
+            # Filtro sem resultado != biblioteca vazia (Tarefa 2.6): mesmo
+            # tratamento do estado "sem resultado" da busca.
+            self._is_search_result = True
             self._refresh_grid(broken)
         else:
+            self._is_search_result = False
             self._refresh_grid(self._all_books)
 
     # ── Utilitários ───────────────────────────────────────────────────────────

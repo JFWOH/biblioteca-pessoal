@@ -247,6 +247,20 @@ class MainWindow(QMainWindow):
         self._library_view.book_selected.connect(self._on_book_selected)
         self._library_view.book_open.connect(self._on_book_open)
         self._library_view.bulk_delete_requested.connect(self._on_bulk_delete)
+        self._library_view.sort_changed.connect(self._on_sort_changed)
+        # Ações do menu de contexto do card (Tarefa 2.5) — reaproveitam os
+        # MESMOS handlers já conectados ao BookDetails, sem duplicar lógica.
+        self._library_view.favorite_toggle_requested.connect(self._on_favorite_toggle)
+        self._library_view.add_to_collection_requested.connect(self._add_book_to_collection)
+        self._library_view.fetch_metadata_requested.connect(self._on_fetch_metadata)
+        self._library_view.delete_requested.connect(self._on_delete_book)
+        # Sincroniza o combo/botão de ordenação com a config ANTES da 1ª carga
+        # (sem emitir sort_changed — _load_library() já vai aplicar o mesmo
+        # valor logo em seguida).
+        self._library_view.set_sort_state(
+            self._config.get("library.sort_by", "date_added"),
+            self._config.get("library.sort_order", "desc"),
+        )
         lib_splitter.addWidget(self._library_view)
 
         self._book_details = BookDetails(db=self._db)
@@ -361,8 +375,16 @@ class MainWindow(QMainWindow):
 
     def _load_library(self, section: str = "all"):
         """Carrega livros baseado na seção selecionada."""
+        # Ordenação (Tarefa 2.3): mesma chave de config que o settings_dialog
+        # usa (library.sort_by/library.sort_order) — fonte única de verdade.
+        # Só se aplica às chamadas de get_all_books; as demais seções têm
+        # ordenação própria fixa (favoritos por título, status por
+        # modificação, coleção por título) e não foram alteradas aqui.
+        sort_by = self._config.get("library.sort_by", "date_added")
+        sort_order = self._config.get("library.sort_order", "desc")
+
         if section == "all":
-            books = self._db.get_all_books()
+            books = self._db.get_all_books(sort_by=sort_by, sort_order=sort_order)
         elif section == "favorites":
             books = self._db.get_favorite_books()
         elif section in ("unread", "reading", "read"):
@@ -372,12 +394,15 @@ class MainWindow(QMainWindow):
                 col_id = int(section.split("_")[1])
                 books = self._db.get_books_in_collection(col_id)
             except ValueError:
-                books = self._db.get_all_books()
+                books = self._db.get_all_books(sort_by=sort_by, sort_order=sort_order)
         else:
-            books = self._db.get_all_books()
+            books = self._db.get_all_books(sort_by=sort_by, sort_order=sort_order)
 
         self._load_collections()
-        self._library_view.load_books(books)
+        # Progresso de leitura em lote (Tarefa 2.1) — uma única consulta para
+        # todos os cards, nunca N+1.
+        progress_map = self._db.get_progress_map()
+        self._library_view.load_books(books, progress_map=progress_map)
         # Prateleira "Continuar lendo": só na seção "all" (Tarefa 2.2). Nas
         # demais seções (favoritos/coleções/status) a faixa é suprimida.
         if section == "all":
@@ -419,10 +444,20 @@ class MainWindow(QMainWindow):
             self._main_stack.setCurrentIndex(0)
             self._load_library(section)
 
+    def _on_sort_changed(self, sort_by: str, sort_order: str) -> None:
+        """Persiste a ordenação escolhida no header (Tarefa 2.3) e recarrega
+        a seção atual — MESMAS chaves de config que o settings_dialog usa."""
+        self._config.set("library.sort_by", sort_by)
+        self._config.set("library.sort_order", sort_order)
+        self._load_library(getattr(self, "_current_section", "all"))
+
     def _on_search(self, query: str, filters: dict):
         if query or filters:
             results = self._search_engine.search(query, filters)
-            self._library_view.load_books(results)
+            progress_map = self._db.get_progress_map()
+            # is_search=True (Tarefa 2.6): lista vazia aqui é "sem resultado
+            # para a busca", não "biblioteca vazia" — estados visuais distintos.
+            self._library_view.load_books(results, progress_map=progress_map, is_search=True)
             # A prateleira "Continuar lendo" não aparece durante a busca.
             self._library_view.load_continue_reading([])
         else:

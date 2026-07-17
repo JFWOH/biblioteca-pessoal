@@ -153,6 +153,21 @@ QToolButton:pressed {
     font-size: 8px;
     font-weight: 700;
 }
+QProgressBar#bookCardProgress {
+    background-color: #2d333f; border: none; border-radius: 2px;
+}
+QProgressBar#bookCardProgress::chunk {
+    background-color: #10b981; border-radius: 2px;
+}
+QMenu#bookCardContextMenu {
+    background-color: #161920; border: 1px solid #2d333f;
+    border-radius: 8px; padding: 4px;
+}
+QMenu#bookCardContextMenu::item {
+    padding: 8px 24px; border-radius: 4px; color: #e5e7eb;
+}
+QMenu#bookCardContextMenu::item:selected { background-color: #10b981; color: #06281e; }
+QMenu#bookCardContextMenu::separator { height: 1px; background: #2d333f; margin: 4px 8px; }
 
 /* ── Busca ─────────────────────────────────────────── */
 #searchContainer {
@@ -1082,6 +1097,30 @@ QProgressBar#continueProgress::chunk {
     background-color: #10b981; border-radius: 3px;
 }
 
+/* ── Ordenação do header da biblioteca (Tarefa 2.3) ───────────────── */
+QComboBox#librarySortCombo {
+    background: #161920; border: 1px solid #2d333f; border-radius: 6px;
+    padding: 4px 8px; color: #e4e4e7; font-size: 12px;
+}
+QComboBox#librarySortCombo:hover { border-color: #10b981; }
+QComboBox#librarySortCombo QAbstractItemView {
+    background: #161920; color: #e4e4e7; selection-background-color: #10b981;
+    selection-color: #06281e;
+}
+QPushButton#librarySortOrderBtn {
+    background: #161920; border: 1px solid #2d333f; border-radius: 6px;
+    color: #e4e4e7; font-size: 13px;
+}
+QPushButton#librarySortOrderBtn:hover { border-color: #10b981; color: #10b981; }
+QPushButton#librarySortOrderBtn:checked {
+    background: #064e3b; border-color: #10b981; color: #10b981;
+}
+
+/* ── Estado "sem resultado" da busca/filtro (Tarefa 2.6) ──────────── */
+#searchEmptyIcon { font-size: 64px; background: transparent; }
+#searchEmptyText { color: #94a3b8; font-size: 18px; font-weight: 600; background: transparent; }
+#searchEmptyHint { color: #64748b; font-size: 13px; background: transparent; }
+
 /* ── Sobreposição de arraste-e-solte (Onda 2) ────────────────────── */
 #dropOverlay {
     background-color: rgba(15, 17, 21, 0.82);
@@ -1233,6 +1272,21 @@ QToolButton:pressed {
     color: #f59e0b;
     border: 2px solid #f59e0b;
 }
+QProgressBar#bookCardProgress {
+    background-color: #e4e4e7; border: none; border-radius: 2px;
+}
+QProgressBar#bookCardProgress::chunk {
+    background-color: #059669; border-radius: 2px;
+}
+QMenu#bookCardContextMenu {
+    background-color: #ffffff; border: 1px solid #e4e4e7;
+    border-radius: 8px; padding: 4px;
+}
+QMenu#bookCardContextMenu::item {
+    padding: 8px 24px; border-radius: 4px; color: #1A1A1A;
+}
+QMenu#bookCardContextMenu::item:selected { background-color: #059669; color: #ffffff; }
+QMenu#bookCardContextMenu::separator { height: 1px; background: #e4e4e7; margin: 4px 8px; }
 #bookCardBrokenBadge {
     color: #f59e0b;
     font-size: 8px;
@@ -2167,6 +2221,30 @@ QProgressBar#continueProgress::chunk {
     background-color: #059669; border-radius: 3px;
 }
 
+/* ── Ordenação do header da biblioteca (Tarefa 2.3) ───────────────── */
+QComboBox#librarySortCombo {
+    background: #ffffff; border: 1px solid #e4e4e7; border-radius: 6px;
+    padding: 4px 8px; color: #1A1A1A; font-size: 12px;
+}
+QComboBox#librarySortCombo:hover { border-color: #059669; }
+QComboBox#librarySortCombo QAbstractItemView {
+    background: #ffffff; color: #1A1A1A; selection-background-color: #059669;
+    selection-color: #ffffff;
+}
+QPushButton#librarySortOrderBtn {
+    background: #ffffff; border: 1px solid #e4e4e7; border-radius: 6px;
+    color: #1A1A1A; font-size: 13px;
+}
+QPushButton#librarySortOrderBtn:hover { border-color: #059669; color: #059669; }
+QPushButton#librarySortOrderBtn:checked {
+    background: #d1fae5; border-color: #059669; color: #059669;
+}
+
+/* ── Estado "sem resultado" da busca/filtro (Tarefa 2.6) ──────────── */
+#searchEmptyIcon { font-size: 64px; background: transparent; }
+#searchEmptyText { color: #71717a; font-size: 18px; font-weight: 600; background: transparent; }
+#searchEmptyHint { color: #a1a1aa; font-size: 13px; background: transparent; }
+
 /* ── Sobreposição de arraste-e-solte (Onda 2) ────────────────────── */
 #dropOverlay {
     background-color: rgba(244, 244, 245, 0.86);
@@ -2319,6 +2397,21 @@ QToolButton:pressed {
     color: #d97706;
     border: 2px solid #d97706;
 }
+QProgressBar#bookCardProgress {
+    background-color: #d4cbb8; border: none; border-radius: 2px;
+}
+QProgressBar#bookCardProgress::chunk {
+    background-color: #8b6c42; border-radius: 2px;
+}
+QMenu#bookCardContextMenu {
+    background-color: #EADFCA; border: 1px solid #d4cbb8;
+    border-radius: 8px; padding: 4px;
+}
+QMenu#bookCardContextMenu::item {
+    padding: 8px 24px; border-radius: 4px; color: #433422;
+}
+QMenu#bookCardContextMenu::item:selected { background-color: #8b6c42; color: #F4ECD8; }
+QMenu#bookCardContextMenu::separator { height: 1px; background: #d4cbb8; margin: 4px 8px; }
 #bookCardBrokenBadge {
     color: #d97706;
     font-size: 8px;
@@ -3252,6 +3345,30 @@ QProgressBar#continueProgress {
 QProgressBar#continueProgress::chunk {
     background-color: #8b6c42; border-radius: 3px;
 }
+
+/* ── Ordenação do header da biblioteca (Tarefa 2.3) ───────────────── */
+QComboBox#librarySortCombo {
+    background: #EADFCA; border: 1px solid #d4cbb8; border-radius: 6px;
+    padding: 4px 8px; color: #433422; font-size: 12px;
+}
+QComboBox#librarySortCombo:hover { border-color: #8b6c42; }
+QComboBox#librarySortCombo QAbstractItemView {
+    background: #EADFCA; color: #433422; selection-background-color: #8b6c42;
+    selection-color: #F4ECD8;
+}
+QPushButton#librarySortOrderBtn {
+    background: #EADFCA; border: 1px solid #d4cbb8; border-radius: 6px;
+    color: #433422; font-size: 13px;
+}
+QPushButton#librarySortOrderBtn:hover { border-color: #8b6c42; color: #8b6c42; }
+QPushButton#librarySortOrderBtn:checked {
+    background: #d8c4a0; border-color: #8b6c42; color: #5c4426;
+}
+
+/* ── Estado "sem resultado" da busca/filtro (Tarefa 2.6) ──────────── */
+#searchEmptyIcon { font-size: 64px; background: transparent; }
+#searchEmptyText { color: #7a6a4f; font-size: 18px; font-weight: 600; background: transparent; }
+#searchEmptyHint { color: #9c8a6f; font-size: 13px; background: transparent; }
 
 /* ── Sobreposição de arraste-e-solte (Onda 2) ────────────────────── */
 #dropOverlay {
