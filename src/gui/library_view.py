@@ -13,7 +13,7 @@ from src.utils.constants import CARD_WIDTH, GRID_SPACING
 
 # ── Dimensões do card compacto da prateleira "Continuar lendo" ─────────────
 CONTINUE_CARD_W = 132
-CONTINUE_CARD_H = 238
+CONTINUE_CARD_H = 232  # soma exata do conteúdo (capa+título+barra+meta+margens)
 CONTINUE_THUMB_W = 112
 CONTINUE_THUMB_H = 150
 
@@ -161,6 +161,16 @@ class LibraryView(QWidget):
             "color: #71717a; font-size: 13px; font-weight: 500;"
         )
         header_layout.addWidget(self._count_label)
+
+        # Título da prateleira "Continuar lendo" na MESMA linha da contagem
+        # (ajuste de layout 2026-07-17: a faixa ocupava uma linha própria com
+        # vãos verticais — o usuário pediu a informação compartilhando a linha
+        # do header). Visível só quando a prateleira aparece.
+        self._continue_title_lbl = QLabel("·  Continuar lendo")
+        self._continue_title_lbl.setObjectName("continueShelfTitle")
+        self._continue_title_lbl.hide()
+        header_layout.addSpacing(10)
+        header_layout.addWidget(self._continue_title_lbl)
         header_layout.addStretch()
 
         # Ordenação (Tarefa 2.3): combo + botão asc/desc. Persistência nas
@@ -245,12 +255,10 @@ class LibraryView(QWidget):
         self._continue_widget = QWidget()
         self._continue_widget.setObjectName("continueShelf")
         cont_layout = QVBoxLayout(self._continue_widget)
-        cont_layout.setContentsMargins(24, 12, 24, 4)
-        cont_layout.setSpacing(8)
-
-        cont_title = QLabel("Continuar lendo")
-        cont_title.setObjectName("continueShelfTitle")
-        cont_layout.addWidget(cont_title)
+        # Faixa compacta: o título mora no header (mesma linha da contagem),
+        # então a prateleira é só a fileira de cards, colada ao header.
+        cont_layout.setContentsMargins(24, 0, 24, 4)
+        cont_layout.setSpacing(0)
 
         self._continue_scroll = QScrollArea()
         self._continue_scroll.setObjectName("continueShelfScroll")
@@ -262,7 +270,7 @@ class LibraryView(QWidget):
         self._continue_scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
-        self._continue_scroll.setFixedHeight(CONTINUE_CARD_H + 18)
+        self._continue_scroll.setFixedHeight(CONTINUE_CARD_H + 14)
 
         self._continue_container = QWidget()
         self._continue_layout = QHBoxLayout(self._continue_container)
@@ -495,6 +503,7 @@ class LibraryView(QWidget):
         self._clear_continue()
         if not books:
             self._continue_widget.hide()
+            self._continue_title_lbl.hide()
             return
         for book in books:
             card = _ContinueReadingCard(book)
@@ -503,6 +512,7 @@ class LibraryView(QWidget):
             self._continue_cards.append(card)
             self._continue_layout.addWidget(card)
         self._continue_widget.show()
+        self._continue_title_lbl.show()
 
     def _clear_continue(self):
         for card in self._continue_cards:
