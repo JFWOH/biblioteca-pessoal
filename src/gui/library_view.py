@@ -2,12 +2,107 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QLabel, QGridLayout,
-    QHBoxLayout, QPushButton, QFrame,
+    QHBoxLayout, QPushButton, QFrame, QProgressBar, QComboBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QPixmap, QCursor
 
 from src.gui.widgets.book_card import BookCard
 from src.utils.constants import CARD_WIDTH, GRID_SPACING
+
+# ── Dimensões do card compacto da prateleira "Continuar lendo" ─────────────
+CONTINUE_CARD_W = 132
+CONTINUE_CARD_H = 238
+CONTINUE_THUMB_W = 112
+CONTINUE_THUMB_H = 150
+
+
+class _ContinueReadingCard(QWidget):
+    """Card compacto da prateleira "Continuar lendo" (capa + título + progresso).
+
+    Variante enxuta do ``BookCard``: além do essencial, exibe a barra de
+    progresso da leitura — o dado central desta prateleira, que o ``BookCard``
+    padrão não mostra. Reutilizar o ``BookCard`` (fixo em 180×300 e sem
+    progresso) deixaria a faixa alta demais e sem a informação-chave; por isso
+    um card próprio, definido aqui em ``library_view`` (whitelist), sem tocar
+    em ``book_card.py``. Emite os mesmos sinais que o ``BookCard``
+    (``clicked``/``double_clicked``) para reaproveitar o roteamento existente.
+    """
+
+    clicked = pyqtSignal(int)          # book_id — clique simples seleciona
+    double_clicked = pyqtSignal(int)   # book_id — duplo clique abre o leitor
+
+    def __init__(self, book: dict, parent=None):
+        super().__init__(parent)
+        self._book_id = book.get("id", 0)
+        self.setObjectName("continueCard")
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.setFixedSize(CONTINUE_CARD_W, CONTINUE_CARD_H)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(4)
+
+        cover = QLabel()
+        cover.setFixedSize(CONTINUE_THUMB_W, CONTINUE_THUMB_H)
+        cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cover_path = book.get("cover_path", "")
+        pixmap = QPixmap(cover_path) if cover_path else QPixmap()
+        if not pixmap.isNull():
+            cover.setPixmap(
+                pixmap.scaled(
+                    CONTINUE_THUMB_W, CONTINUE_THUMB_H,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+            cover.setObjectName("continueCardCover")
+        else:
+            cover.setText("📖")
+            cover.setObjectName("continueCardCoverPlaceholder")
+        layout.addWidget(cover, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        title = QLabel(book.get("title", "Sem título"))
+        title.setObjectName("continueCardTitle")
+        title.setWordWrap(True)
+        title.setMaximumHeight(32)
+        title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(title)
+
+        pct = int(round(book.get("percentage", 0) or 0))
+        pct = max(0, min(100, pct))
+
+        bar = QProgressBar()
+        bar.setObjectName("continueProgress")
+        bar.setRange(0, 100)
+        bar.setValue(pct)
+        bar.setTextVisible(False)
+        bar.setFixedHeight(6)
+        layout.addWidget(bar)
+
+        meta = QLabel(self._meta_text(book, pct))
+        meta.setObjectName("continueCardMeta")
+        layout.addWidget(meta)
+
+        layout.addStretch()
+
+    @staticmethod
+    def _meta_text(book: dict, pct: int) -> str:
+        cur = book.get("current_page") or 0
+        total = book.get("total_pages") or 0
+        if total > 0:
+            return f"{pct}% · pág. {cur}/{total}"
+        return f"{pct}%"
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self._book_id)
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.double_clicked.emit(self._book_id)
+        super().mouseDoubleClickEvent(event)
 
 
 class LibraryView(QWidget):
@@ -20,11 +115,30 @@ class LibraryView(QWidget):
     book_selected = pyqtSignal(int)          # book_id — clique simples
     book_open = pyqtSignal(int)              # book_id — abre o leitor
     bulk_delete_requested = pyqtSignal(list) # list[int] — ids a excluir
+    sort_changed = pyqtSignal(str, str)      # sort_by, sort_order ("asc"/"desc")
+    # Ações do menu de contexto do card (Tarefa 2.5), repassadas 1:1 aos
+    # handlers que o MainWindow já usa para o BookDetails — sem duplicar
+    # lógica de negócio aqui.
+    favorite_toggle_requested = pyqtSignal(int)   # book_id
+    add_to_collection_requested = pyqtSignal(int) # book_id
+    fetch_metadata_requested = pyqtSignal(int)    # book_id
+    delete_requested = pyqtSignal(int)            # book_id — exclusão única
+
+    # Colunas de ordenação exibidas no combo do header — MESMOS valores de
+    # settings_dialog.py (fonte única com library.sort_by/library.sort_order
+    # em config.py, Tarefa 2.3).
+    _SORT_OPTIONS = [
+        ("Data de adição", "date_added"),
+        ("Título", "title"),
+        ("Autor", "author"),
+        ("Avaliação", "rating"),
+    ]
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._cards: list[BookCard] = []
         self._selected_ids: set[int] = set()
+        self._is_search_result = False
         self._setup_ui()
 
     def _setup_ui(self):
@@ -43,6 +157,25 @@ class LibraryView(QWidget):
         )
         header_layout.addWidget(self._count_label)
         header_layout.addStretch()
+
+        # Ordenação (Tarefa 2.3): combo + botão asc/desc. Persistência nas
+        # MESMAS chaves library.sort_by/library.sort_order do settings_dialog
+        # — quem grava/recarrega é o MainWindow (fonte única de verdade).
+        self._sort_combo = QComboBox()
+        self._sort_combo.setObjectName("librarySortCombo")
+        for label, value in self._SORT_OPTIONS:
+            self._sort_combo.addItem(label, value)
+        self._sort_combo.setFixedWidth(150)
+        self._sort_combo.currentIndexChanged.connect(self._emit_sort_changed)
+        header_layout.addWidget(self._sort_combo)
+
+        self._sort_order_btn = QPushButton("↓")
+        self._sort_order_btn.setObjectName("librarySortOrderBtn")
+        self._sort_order_btn.setCheckable(True)
+        self._sort_order_btn.setFixedSize(28, 28)
+        self._sort_order_btn.setToolTip("Ordem decrescente")
+        self._sort_order_btn.toggled.connect(self._on_sort_order_toggled)
+        header_layout.addWidget(self._sort_order_btn)
 
         # Botão "Mostrar apenas quebrados"
         self._broken_btn = QPushButton("⚠️ Mostrar quebrados")
@@ -84,6 +217,43 @@ class LibraryView(QWidget):
         header_layout.addWidget(self._list_btn)
 
         layout.addWidget(header)
+
+        # ── Prateleira "Continuar lendo" (topo, acima da grade) ──────────────
+        # Só aparece quando há livros em progresso E a seção é "all" — o
+        # MainWindow controla isso via load_continue_reading([]) nas demais.
+        self._continue_widget = QWidget()
+        self._continue_widget.setObjectName("continueShelf")
+        cont_layout = QVBoxLayout(self._continue_widget)
+        cont_layout.setContentsMargins(24, 12, 24, 4)
+        cont_layout.setSpacing(8)
+
+        cont_title = QLabel("Continuar lendo")
+        cont_title.setObjectName("continueShelfTitle")
+        cont_layout.addWidget(cont_title)
+
+        self._continue_scroll = QScrollArea()
+        self._continue_scroll.setObjectName("continueShelfScroll")
+        self._continue_scroll.setWidgetResizable(True)
+        self._continue_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._continue_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._continue_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self._continue_scroll.setFixedHeight(CONTINUE_CARD_H + 18)
+
+        self._continue_container = QWidget()
+        self._continue_layout = QHBoxLayout(self._continue_container)
+        self._continue_layout.setContentsMargins(0, 0, 0, 0)
+        self._continue_layout.setSpacing(GRID_SPACING)
+        self._continue_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self._continue_scroll.setWidget(self._continue_container)
+        cont_layout.addWidget(self._continue_scroll)
+
+        self._continue_cards: list[_ContinueReadingCard] = []
+        self._continue_widget.hide()
+        layout.addWidget(self._continue_widget)
 
         # ── Barra de ação em lote (flutuante, visível ao selecionar) ─────────
         self._bulk_bar = QFrame()
@@ -173,7 +343,10 @@ class LibraryView(QWidget):
         empty_text.setStyleSheet("color: #71717a; font-size: 18px; font-weight: 600;")
         empty_layout.addWidget(empty_text)
 
-        empty_sub = QLabel("Importe livros usando o menu Arquivo → Importar")
+        empty_sub = QLabel(
+            "Importe pelo menu Arquivo → Importar\n"
+            "ou arraste arquivos para esta janela"
+        )
         empty_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_sub.setStyleSheet("color: #52525b; font-size: 13px;")
         empty_layout.addWidget(empty_sub)
@@ -187,27 +360,136 @@ class LibraryView(QWidget):
         layout.addWidget(self._empty_widget)
         self._empty_widget.hide()
 
+        # ── Estado "busca sem resultado" (Tarefa 2.6) ──────────────────────────
+        # Distinto do estado "biblioteca vazia": sem convite de importação,
+        # já que os livros existem — só não bateram com a busca/filtro atual.
+        self._search_empty_widget = QWidget()
+        search_empty_layout = QVBoxLayout(self._search_empty_widget)
+        search_empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        search_empty_icon = QLabel("🔍")
+        search_empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        search_empty_icon.setObjectName("searchEmptyIcon")
+        search_empty_layout.addWidget(search_empty_icon)
+
+        search_empty_text = QLabel("Nenhum resultado para sua busca")
+        search_empty_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        search_empty_text.setObjectName("searchEmptyText")
+        search_empty_layout.addWidget(search_empty_text)
+
+        search_empty_hint = QLabel("Tente outros termos ou limpe a busca")
+        search_empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        search_empty_hint.setObjectName("searchEmptyHint")
+        search_empty_layout.addWidget(search_empty_hint)
+
+        layout.addWidget(self._search_empty_widget)
+        self._search_empty_widget.hide()
+
         self._all_books: list[dict] = []
+
+    # ── Ordenação (Tarefa 2.3) ──────────────────────────────────────────────
+
+    def _emit_sort_changed(self, *_args):
+        sort_by = self._sort_combo.currentData()
+        sort_order = "asc" if self._sort_order_btn.isChecked() else "desc"
+        self.sort_changed.emit(sort_by, sort_order)
+
+    def _on_sort_order_toggled(self, checked: bool):
+        self._sort_order_btn.setText("↑" if checked else "↓")
+        self._sort_order_btn.setToolTip(
+            "Ordem crescente" if checked else "Ordem decrescente"
+        )
+        self._emit_sort_changed()
+
+    def set_sort_state(self, sort_by: str, sort_order: str) -> None:
+        """Sincroniza combo/botão de ordenação com a config, SEM emitir
+        ``sort_changed`` (evita recarregar a biblioteca em duplicidade —
+        quem chama isto já está prestes a carregar os livros com o mesmo
+        valor). Usado pelo MainWindow para refletir a config no início."""
+        self._sort_combo.blockSignals(True)
+        self._sort_order_btn.blockSignals(True)
+        try:
+            idx = self._sort_combo.findData(sort_by)
+            if idx >= 0:
+                self._sort_combo.setCurrentIndex(idx)
+            ascending = str(sort_order).strip().lower() == "asc"
+            self._sort_order_btn.setChecked(ascending)
+            self._sort_order_btn.setText("↑" if ascending else "↓")
+            self._sort_order_btn.setToolTip(
+                "Ordem crescente" if ascending else "Ordem decrescente"
+            )
+        finally:
+            self._sort_combo.blockSignals(False)
+            self._sort_order_btn.blockSignals(False)
 
     # ── API pública ───────────────────────────────────────────────────────────
 
-    def load_books(self, books: list[dict]):
-        """Carrega a lista de livros na grade."""
+    def load_books(self, books: list[dict], progress_map: dict | None = None,
+                   is_search: bool = False):
+        """Carrega a lista de livros na grade.
+
+        ``progress_map`` (book_id → percentual, Tarefa 2.1) enriquece cada
+        dict com ``percentage`` antes de criar os cards — consulta em lote
+        feita pelo chamador (``LibraryDB.get_progress_map()``); uma consulta
+        por card seria inaceitável (N+1).
+
+        ``is_search`` sinaliza que ``books`` é resultado de busca/filtro
+        (Tarefa 2.6): uma lista vazia nesse caso mostra o estado "sem
+        resultado" em vez do convite de importação da biblioteca vazia.
+        """
+        if progress_map:
+            books = [
+                {**b, "percentage": progress_map.get(b.get("id"), b.get("percentage", 0))}
+                for b in books
+            ]
         self._all_books = books
+        self._is_search_result = is_search
         self._selected_ids.clear()
         self._refresh_grid(books)
+
+    def load_continue_reading(self, books: list[dict]):
+        """Preenche (ou esconde) a prateleira "Continuar lendo".
+
+        ``books`` já vem filtrado/ordenado pelo core
+        (``LibraryDB.get_in_progress_books``). Lista vazia esconde a faixa —
+        é assim que o MainWindow a suprime fora da seção "all" (coleções,
+        favoritos, busca): basta chamar ``load_continue_reading([])``.
+        """
+        self._clear_continue()
+        if not books:
+            self._continue_widget.hide()
+            return
+        for book in books:
+            card = _ContinueReadingCard(book)
+            card.clicked.connect(self.book_selected.emit)
+            card.double_clicked.connect(self.book_open.emit)
+            self._continue_cards.append(card)
+            self._continue_layout.addWidget(card)
+        self._continue_widget.show()
+
+    def _clear_continue(self):
+        for card in self._continue_cards:
+            self._continue_layout.removeWidget(card)
+            card.deleteLater()
+        self._continue_cards.clear()
 
     def _refresh_grid(self, books: list[dict]):
         """Renderiza a grade com a lista fornecida."""
         self._clear_grid()
 
         if not books:
-            self._empty_widget.show()
+            if self._is_search_result:
+                self._empty_widget.hide()
+                self._search_empty_widget.show()
+            else:
+                self._search_empty_widget.hide()
+                self._empty_widget.show()
             self._count_label.setText("0 livros")
             self._update_bulk_bar()
             return
 
         self._empty_widget.hide()
+        self._search_empty_widget.hide()
         total = len(self._all_books)
         shown = len(books)
         if shown < total:
@@ -224,6 +506,7 @@ class LibraryView(QWidget):
             card = BookCard(book)
             card.clicked.connect(self._on_card_clicked)
             card.double_clicked.connect(self.book_open.emit)
+            card.context_action.connect(self._on_card_context_action)
             self._cards.append(card)
             self._grid_layout.addWidget(card, i // cols, i % cols)
 
@@ -240,6 +523,22 @@ class LibraryView(QWidget):
         else:
             self._clear_selection()
             self.book_selected.emit(book_id)
+
+    def _on_card_context_action(self, book_id: int, action: str) -> None:
+        """Repassa a ação do menu de contexto do card (Tarefa 2.5) ao sinal
+        correspondente. O MainWindow conecta esses sinais diretamente aos
+        handlers que já existem para o BookDetails — nenhuma lógica de
+        negócio nova aqui, só o roteamento."""
+        if action == "open":
+            self.book_open.emit(book_id)
+        elif action == "favorite":
+            self.favorite_toggle_requested.emit(book_id)
+        elif action == "collection":
+            self.add_to_collection_requested.emit(book_id)
+        elif action == "fetch_metadata":
+            self.fetch_metadata_requested.emit(book_id)
+        elif action == "delete":
+            self.delete_requested.emit(book_id)
 
     def _toggle_selection(self, book_id: int):
         card = self._card_by_id(book_id)
@@ -305,8 +604,12 @@ class LibraryView(QWidget):
             broken = [b for b in self._all_books
                       if b.get("file_path") and
                       not __import__("pathlib").Path(b["file_path"]).exists()]
+            # Filtro sem resultado != biblioteca vazia (Tarefa 2.6): mesmo
+            # tratamento do estado "sem resultado" da busca.
+            self._is_search_result = True
             self._refresh_grid(broken)
         else:
+            self._is_search_result = False
             self._refresh_grid(self._all_books)
 
     # ── Utilitários ───────────────────────────────────────────────────────────

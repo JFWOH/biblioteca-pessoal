@@ -91,18 +91,35 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   Débito menor: entrada redundante "⚙️ Voz/Narração" no menu de overflow mantida.
 
 ### Onda 2 — [P1] Biblioteca
-- [ ] **2.1** Overlay de % de progresso nos cards (`book_card.py`; dados de
+- [x] **2.1** Overlay de % de progresso nos cards (`book_card.py`; dados de
   `reading_progress`), só para progresso>0.
-- [ ] **2.2** Prateleira "Continuar lendo" no topo de Todos os Livros (progresso>0,
+- [x] **2.2** Prateleira "Continuar lendo" no topo de Todos os Livros (progresso>0,
   ordenada por último acesso).
-- [ ] **2.3** Controle de ordenação no header da biblioteca (hoje só em Config).
-- [ ] **2.4** Drag-and-drop de importação (`setAcceptDrops` no MainWindow + overlay);
+- [x] **2.3** Controle de ordenação no header da biblioteca (hoje só em Config).
+- [x] **2.4** Drag-and-drop de importação (`setAcceptDrops` no MainWindow + overlay);
   estado vazio vira alvo de drop com convite.
-- [ ] **2.5** Menu de contexto (botão direito) nos cards: Abrir, Favoritar, Coleção,
+- [x] **2.5** Menu de contexto (botão direito) nos cards: Abrir, Favoritar, Coleção,
   Metadados, Remover.
-- [ ] **2.6** Estado "busca sem resultado" distinto de "biblioteca vazia"
+- [x] **2.6** Estado "busca sem resultado" distinto de "biblioteca vazia"
   (`library_view.py:200-214`).
 - Executores: F1 Opus (2.2+2.4), F2 Sonnet (2.1+2.3+2.5+2.6).
+- **Registro (2026-07-16, executada):** decisões: (a) prateleira usa card compacto
+  próprio (`_ContinueReadingCard`) com barra de progresso — BookCard 180×300 seria
+  alto demais; consulta `get_in_progress_books` (0<pct<99.5, last_read DESC);
+  (b) DnD no MainWindow com `DropOverlay` (filho da janela, transparente a mouse);
+  drop abre ImportDialog com `initial_files` (API nova retrocompatível) — nunca
+  importa direto (preserva opções de OCR); (c) % nos cards via `get_progress_map()`
+  em lote (sem N+1) + QProgressBar 4px sob a capa; (d) BUG corrigido: o sort da
+  config nunca era aplicado em `_load_library`; combo/asc-desc no header persiste
+  nas mesmas chaves `library.sort_*`, e `get_all_books` ganhou WHITELIST de
+  colunas/direções (antes interpolava sort_by sem validação — endurecimento de
+  segurança); (e) menu de contexto emite `context_action(id, acao)` roteado a
+  handlers existentes do MainWindow (zero duplicação); (f) busca vazia mostra
+  estado 🔍 próprio (idem filtro "quebrados" — mesma classe de bug). Testes novos:
+  63 (continue_reading/drag_drop 23; card_progress/library_sort/context_menu/
+  search_empty 40). Débitos menores: combo de sort visível mas sem efeito em
+  favoritos/status/coleção; edge case filtro-quebrados-após-busca documentado;
+  prateleira sem menu de contexto.
 
 ### Onda 3 — Leitura + IA
 - [ ] **3.1** **Fontes clicáveis no RAG**: parsear `[Título, p. X]` nas respostas

@@ -29,6 +29,7 @@ from src.gui.workers.rag_worker import RAGWorker
 import os
 from src.gui.widgets.stats_panel import StatsPanel
 from src.gui.widgets.rag_panel import RAGPanel
+from src.gui.widgets.drop_overlay import DropOverlay, supported_files_from_urls
 from src.utils.constants import FILE_FILTER, DATA_DIR
 from src.utils.export import export_annotations_markdown
 from src.gui.watcher import DirectoryWatcher
@@ -107,6 +108,8 @@ class MainWindow(QMainWindow):
         h = self._config.get("window.height", 800)
         self.resize(w, h)
         self.setMinimumSize(QSize(900, 600))
+        # Habilita o arraste-e-solte de arquivos para importação (Tarefa 2.4).
+        self.setAcceptDrops(True)
         if self._config.get("window.maximized", False):
             self.showMaximized()
 
@@ -197,6 +200,11 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
+
+        # Sobreposição do arraste-e-solte (Tarefa 2.4): filha da janela, fica
+        # escondida até um arraste válido entrar (dragEnterEvent).
+        self._drop_overlay = DropOverlay(self)
+
         main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
@@ -239,6 +247,20 @@ class MainWindow(QMainWindow):
         self._library_view.book_selected.connect(self._on_book_selected)
         self._library_view.book_open.connect(self._on_book_open)
         self._library_view.bulk_delete_requested.connect(self._on_bulk_delete)
+        self._library_view.sort_changed.connect(self._on_sort_changed)
+        # Ações do menu de contexto do card (Tarefa 2.5) — reaproveitam os
+        # MESMOS handlers já conectados ao BookDetails, sem duplicar lógica.
+        self._library_view.favorite_toggle_requested.connect(self._on_favorite_toggle)
+        self._library_view.add_to_collection_requested.connect(self._add_book_to_collection)
+        self._library_view.fetch_metadata_requested.connect(self._on_fetch_metadata)
+        self._library_view.delete_requested.connect(self._on_delete_book)
+        # Sincroniza o combo/botão de ordenação com a config ANTES da 1ª carga
+        # (sem emitir sort_changed — _load_library() já vai aplicar o mesmo
+        # valor logo em seguida).
+        self._library_view.set_sort_state(
+            self._config.get("library.sort_by", "date_added"),
+            self._config.get("library.sort_order", "desc"),
+        )
         lib_splitter.addWidget(self._library_view)
 
         self._book_details = BookDetails(db=self._db)
@@ -353,8 +375,16 @@ class MainWindow(QMainWindow):
 
     def _load_library(self, section: str = "all"):
         """Carrega livros baseado na seção selecionada."""
+        # Ordenação (Tarefa 2.3): mesma chave de config que o settings_dialog
+        # usa (library.sort_by/library.sort_order) — fonte única de verdade.
+        # Só se aplica às chamadas de get_all_books; as demais seções têm
+        # ordenação própria fixa (favoritos por título, status por
+        # modificação, coleção por título) e não foram alteradas aqui.
+        sort_by = self._config.get("library.sort_by", "date_added")
+        sort_order = self._config.get("library.sort_order", "desc")
+
         if section == "all":
-            books = self._db.get_all_books()
+            books = self._db.get_all_books(sort_by=sort_by, sort_order=sort_order)
         elif section == "favorites":
             books = self._db.get_favorite_books()
         elif section in ("unread", "reading", "read"):
@@ -364,12 +394,27 @@ class MainWindow(QMainWindow):
                 col_id = int(section.split("_")[1])
                 books = self._db.get_books_in_collection(col_id)
             except ValueError:
-                books = self._db.get_all_books()
+                books = self._db.get_all_books(sort_by=sort_by, sort_order=sort_order)
         else:
-            books = self._db.get_all_books()
+            books = self._db.get_all_books(sort_by=sort_by, sort_order=sort_order)
 
         self._load_collections()
-        self._library_view.load_books(books)
+        # Progresso de leitura em lote (Tarefa 2.1) — uma única consulta para
+        # todos os cards, nunca N+1.
+        progress_map = self._db.get_progress_map()
+        self._library_view.load_books(books, progress_map=progress_map)
+        # Prateleira "Continuar lendo": só na seção "all" (Tarefa 2.2). Nas
+        # demais seções (favoritos/coleções/status) a faixa é suprimida.
+        if section == "all":
+            try:
+                self._library_view.load_continue_reading(
+                    self._db.get_in_progress_books()
+                )
+            except Exception as exc:
+                logger.warning(f"Falha ao carregar 'Continuar lendo' (ignorado): {exc}")
+                self._library_view.load_continue_reading([])
+        else:
+            self._library_view.load_continue_reading([])
         stats = self._db.get_statistics()
         self._sidebar.update_stats(stats)
         self._update_statusbar()
@@ -399,10 +444,22 @@ class MainWindow(QMainWindow):
             self._main_stack.setCurrentIndex(0)
             self._load_library(section)
 
+    def _on_sort_changed(self, sort_by: str, sort_order: str) -> None:
+        """Persiste a ordenação escolhida no header (Tarefa 2.3) e recarrega
+        a seção atual — MESMAS chaves de config que o settings_dialog usa."""
+        self._config.set("library.sort_by", sort_by)
+        self._config.set("library.sort_order", sort_order)
+        self._load_library(getattr(self, "_current_section", "all"))
+
     def _on_search(self, query: str, filters: dict):
         if query or filters:
             results = self._search_engine.search(query, filters)
-            self._library_view.load_books(results)
+            progress_map = self._db.get_progress_map()
+            # is_search=True (Tarefa 2.6): lista vazia aqui é "sem resultado
+            # para a busca", não "biblioteca vazia" — estados visuais distintos.
+            self._library_view.load_books(results, progress_map=progress_map, is_search=True)
+            # A prateleira "Continuar lendo" não aparece durante a busca.
+            self._library_view.load_continue_reading([])
         else:
             self._load_library()
 
@@ -619,6 +676,48 @@ class MainWindow(QMainWindow):
     def _show_import_dialog(self):
         """Abre o diálogo rico de importação."""
         dialog = ImportDialog(self._library, self)
+        dialog.import_completed.connect(self._load_library)
+        dialog.exec()
+        self._load_library()
+
+    # ── Arraste-e-solte de importação (Tarefa 2.4) ─────────────────────
+
+    def dragEnterEvent(self, event):
+        """Aceita o arraste quando há ao menos um arquivo suportado."""
+        mime = event.mimeData()
+        if mime.hasUrls() and supported_files_from_urls(mime.urls()):
+            event.acceptProposedAction()
+            self._drop_overlay.cover(self.rect())
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        """Mantém o arraste aceito enquanto se move sobre a janela."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self._drop_overlay.hide()
+        event.accept()
+
+    def dropEvent(self, event):
+        """Abre o ImportDialog já carregado com os arquivos soltos."""
+        self._drop_overlay.hide()
+        files = supported_files_from_urls(event.mimeData().urls())
+        if not files:
+            self._statusbar.showMessage(
+                "⚠️ Nenhum arquivo em formato suportado foi solto.", 4000
+            )
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self._open_import_dialog_with_files(files)
+
+    def _open_import_dialog_with_files(self, files: list):
+        """ImportDialog pré-carregado (o diálogo mantém as opções de OCR etc.)."""
+        dialog = ImportDialog(self._library, self, initial_files=files)
         dialog.import_completed.connect(self._load_library)
         dialog.exec()
         self._load_library()

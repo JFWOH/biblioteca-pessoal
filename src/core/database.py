@@ -268,9 +268,20 @@ class LibraryDB:
         r = self.conn.execute("SELECT * FROM books WHERE file_hash = ?", (file_hash,)).fetchone()
         return dict(r) if r else None
 
+    # Whitelist de colunas/direções aceitas em ``get_all_books`` — os valores
+    # de ``sort_by``/``sort_order`` são interpolados direto na SQL (f-string),
+    # então nunca podem vir do chamador sem validação (Tarefa 2.3). Cobre as
+    # 4 opções oferecidas na UI (settings_dialog e o novo combo do header da
+    # biblioteca); qualquer valor fora da whitelist cai no padrão em vez de
+    # propagar texto arbitrário para o SQL.
+    _SORT_COLUMNS = {"date_added", "title", "author", "rating"}
+    _SORT_ORDERS = {"asc": "ASC", "desc": "DESC"}
+
     def get_all_books(self, sort_by="date_added", sort_order="DESC",
                       limit=None, offset=0) -> list[dict]:
-        sql = f"SELECT * FROM books ORDER BY {sort_by} {sort_order}"
+        column = sort_by if sort_by in self._SORT_COLUMNS else "date_added"
+        order = self._SORT_ORDERS.get(str(sort_order).strip().lower(), "DESC")
+        sql = f"SELECT * FROM books ORDER BY {column} {order}"
         if limit:
             sql += f" LIMIT {limit} OFFSET {offset}"
         return [dict(r) for r in self.conn.execute(sql).fetchall()]
@@ -340,6 +351,39 @@ class LibraryDB:
         r = self.conn.execute(
             "SELECT * FROM reading_progress WHERE book_id = ?", (book_id,)).fetchone()
         return dict(r) if r else None
+
+    def get_in_progress_books(self, limit: int = 10) -> list[dict]:
+        """Livros em andamento para a prateleira 'Continuar lendo'.
+
+        Retorna os livros cujo progresso está iniciado mas não concluído
+        (``0 < percentage < 99.5``), do mais recente para o mais antigo
+        (``last_read DESC``). Cada dict traz os campos do livro (``books.*``)
+        acrescidos de ``percentage``, ``current_page``, ``total_pages`` e
+        ``last_read`` do progresso — o suficiente para o card compacto exibir
+        a barra de progresso sem uma segunda consulta.
+        """
+        rows = self.conn.execute(
+            """SELECT b.*, rp.percentage, rp.current_page,
+                      rp.total_pages, rp.last_read
+               FROM books b
+               JOIN reading_progress rp ON rp.book_id = b.id
+               WHERE rp.percentage > 0 AND rp.percentage < 99.5
+               ORDER BY rp.last_read DESC
+               LIMIT ?""",
+            (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_progress_map(self) -> dict[int, float]:
+        """Percentual de leitura de TODOS os livros em uma única consulta.
+
+        Usado pelos cards da grade (Tarefa 2.1) para exibir o progresso sem
+        N+1 — uma consulta por card seria inaceitável. Livros sem linha em
+        ``reading_progress`` simplesmente não aparecem no dict; o chamador
+        trata a ausência como 0%.
+        """
+        rows = self.conn.execute(
+            "SELECT book_id, percentage FROM reading_progress").fetchall()
+        return {r["book_id"]: r["percentage"] for r in rows}
 
     # ── OCR ────────────────────────────────────────────────────────────
 
