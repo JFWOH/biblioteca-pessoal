@@ -336,7 +336,21 @@ class TTSRouter:
             and self._primary_language(effective_language)
             != self._primary_language(profile.language)
         )
-        if not voice_id or was_fallback or language_mismatch:
+        # Consistência voz×idioma (caso real 2026-07-17): usuário em leitura
+        # TRADUZIDA (language="pt" explícito) escolheu uma voz INGLESA no menu
+        # querendo "ouvir em inglês" — o perfil é pt-BR, então não havia
+        # mismatch de PERFIL e a tradução PT saía na voz EN ("anglicado").
+        # Com idioma explícito, a voz CONFIGURADA só vale se for do idioma do
+        # texto; senão resolvemos pelo idioma do texto (rate/estilo mantidos).
+        voice_language_mismatch = False
+        if language is not None and voice_id:
+            vlang = self._voice_language(provider, voice_id)
+            voice_language_mismatch = (
+                vlang is not None
+                and self._primary_language(vlang)
+                != self._primary_language(effective_language)
+            )
+        if not voice_id or was_fallback or language_mismatch or voice_language_mismatch:
             voice_id = self._resolve_voice(provider, effective_language, profile.style)
 
         # Chunk the text for interruptible playback
@@ -788,6 +802,22 @@ class TTSRouter:
             if vlang and (vlang == target or vlang.startswith(target) or target.startswith(vlang)):
                 return True
         return False
+
+    def _voice_language(self, provider: BaseTTSProvider, voice_id: str) -> Optional[str]:
+        """Idioma da voz *voice_id* segundo ``available_voices()`` do provider.
+
+        ``None`` quando a voz não está listada ou a lista é indisponível —
+        nesse caso NÃO dá para afirmar mismatch e a voz configurada é mantida
+        (degradação graciosa, ADR-005).
+        """
+        try:
+            voices = provider.available_voices()
+        except Exception:
+            return None
+        for voice in voices or []:
+            if voice.voice_id == voice_id:
+                return voice.language or None
+        return None
 
     def _mid_stream_fallback(
         self, current: BaseTTSProvider, language: str, style: str,
