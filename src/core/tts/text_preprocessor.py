@@ -19,6 +19,8 @@ ADR-006 compliance: No PyQt6 imports.
 import re
 import logging
 
+from src.core.tts.text_preprocess import mark_heading_pauses
+
 logger = logging.getLogger(__name__)
 
 
@@ -113,6 +115,12 @@ class TTSTextPreprocessor:
 
         # 2. Remove reference markers (reuse existing logic)
         result = self.clean_reference_markers(result)
+
+        # 2.5 Marca pausa em títulos/subtítulos (linhas curtas isoladas por
+        # quebras) para que a síntese não os cole na frase seguinte (sintoma
+        # "...a vida real. companheirismo Harold e Erica..."). PRECISA rodar
+        # ANTES de normalize_whitespace, que colapsa as quebras simples.
+        result = mark_heading_pauses(result)
 
         # 3. Normalize whitespace and line breaks
         result = self.normalize_whitespace(result)

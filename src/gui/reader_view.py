@@ -90,6 +90,7 @@ class ReaderView(QWidget):
         self._continuous_translate_mode: bool = False
         self._audio_stopped_by_user: bool = False  # stop manual não encadeia a próxima
         self._chain_continuous: bool = False       # só narração de página encadeia (tradução não)
+        self._translating_for_audio: bool = False  # item E: feedback "Traduzindo…" no botão
         # Pré-síntese TTS da próxima página (tarefa 3.6): cache PURO (core) de
         # 1 página à frente + worker de síntese na GUI. Corta o gap entre páginas.
         from src.core.audio.continuous_player import PreSynthesisCache
@@ -1168,8 +1169,16 @@ class ReaderView(QWidget):
         page, total = self._last_progress
         self.progress_changed.emit(self._book_id, page, total, seconds)
 
-    def _go_to_page(self, page: int):
-        self._stop_audio_if_running()
+    def _go_to_page(self, page: int, *, preserve_audio: bool = False):
+        """Renderiza ``page``. Por padrão para a narração (navegação real).
+
+        ``preserve_audio=True``: re-render da MESMA página (zoom +/-, tipografia
+        do popover "Aa") — NÃO deve parar/invalidar o áudio nem a pré-síntese
+        (item C). A navegação real para OUTRA página continua parando o áudio
+        (chamadas sem o argumento).
+        """
+        if not preserve_audio:
+            self._stop_audio_if_running()
         if hasattr(self, "_selection_popover"):
             self._selection_popover.hide()
         if hasattr(self, "_word_wise_popover"):
@@ -1300,14 +1309,16 @@ class ReaderView(QWidget):
     def _zoom_in(self):
         if self._reader and hasattr(self._reader, 'zoom'):
             self._reader.zoom = self._reader.zoom + 0.25
-            self._go_to_page(self._reader.current_page)
+            # Mesma página, só re-render: preserva a narração em curso (item C).
+            self._go_to_page(self._reader.current_page, preserve_audio=True)
         elif self._content_stack.currentIndex() == 1:
             self._web_view.setZoomFactor(self._web_view.zoomFactor() + 0.1)
 
     def _zoom_out(self):
         if self._reader and hasattr(self._reader, 'zoom'):
             self._reader.zoom = self._reader.zoom - 0.25
-            self._go_to_page(self._reader.current_page)
+            # Mesma página, só re-render: preserva a narração em curso (item C).
+            self._go_to_page(self._reader.current_page, preserve_audio=True)
         elif self._content_stack.currentIndex() == 1:
             self._web_view.setZoomFactor(self._web_view.zoomFactor() - 0.1)
 
@@ -1761,7 +1772,8 @@ class ReaderView(QWidget):
         afeta o render; o re-render é inócuo.
         """
         if self._reader and self._reader.is_open:
-            self._go_to_page(self._reader.current_page)
+            # Mesma página, só re-render tipográfico: preserva o áudio (item C).
+            self._go_to_page(self._reader.current_page, preserve_audio=True)
 
     def _on_reader_theme_changed(self, theme: str) -> None:
         """Troca o tema do leitor a partir do popover.
@@ -2283,6 +2295,7 @@ class ReaderView(QWidget):
             # Modo traduzido: cada página passa pelo NLLB (via MainWindow)
             # antes de narrar; a cadeia continua em _on_audio_finished igual
             # ao modo normal (chain_continuous é setado por narrate_text lá).
+            self._begin_translation_feedback()  # item E: feedback imediato
             self.ai_action_requested.emit("read_translated_page_chained", page_text)
             return
 
@@ -2359,8 +2372,47 @@ class ReaderView(QWidget):
             self._audio_paused = False
             self._set_audio_button_state("Pausar", "⏸️", "Pausar Leitura (TTS)")
 
+    def _begin_translation_feedback(self) -> None:
+        """Feedback imediato ao acionar a narração TRADUZIDA (item E).
+
+        O NLLB leva um tempo antes de o áudio começar; sem isto o botão "Ouvir"
+        parece inerte. Mostra "Traduzindo…" no próprio botão e na statusbar
+        assim que o usuário aciona. O estado é limpo quando o áudio começa
+        (_on_audio_started), quando falha (_on_audio_error) ou quando a tradução
+        termina sem gerar áudio (watchdog _poll_translation_feedback).
+        """
+        self._translating_for_audio = True
+        self._set_audio_button_state(
+            "Traduzindo…", "🌐", "Traduzindo a página para leitura…",
+            menu_label="Traduzindo página…")
+        self._show_status("🌐 Iniciando tradução para leitura…", 4000)
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(600, self._poll_translation_feedback)
+
+    def _poll_translation_feedback(self) -> None:
+        """Restaura o botão se a tradução terminar SEM iniciar áudio (falha/vazia).
+
+        Sucesso e "já em português" viram áudio → _on_audio_started limpa o
+        estado. Aqui cobrimos só o caso em que nenhum áudio começa: enquanto o
+        MainWindow sinaliza tradução pendente, reagenda; quando o flag baixa
+        sem worker de áudio ativo, devolve o botão para "Ouvir".
+        """
+        if not getattr(self, "_translating_for_audio", False):
+            return
+        worker = getattr(self, "_audio_worker", None)
+        if worker is not None and worker.isRunning():
+            self._translating_for_audio = False  # áudio começou; _on_audio_started cuida do botão
+            return
+        if getattr(self.window(), "_page_translation_pending", False):
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(600, self._poll_translation_feedback)
+            return
+        self._translating_for_audio = False
+        self._set_audio_button_state("Ouvir", "🔊", "Ouvir Página (TTS)", menu_label="Ouvir página")
+
     def _on_audio_started(self):
         self._audio_paused = False
+        self._translating_for_audio = False  # item E: áudio começou → limpa "Traduzindo…"
         self._set_audio_button_state("Pausar", "⏸️", "Pausar Leitura (TTS)")
         self._act_audio_stop.setEnabled(True)
         # Tarefa 3.6: enquanto esta página toca, sintetiza a próxima em background.
@@ -2384,6 +2436,7 @@ class ReaderView(QWidget):
         if not page_text:
             self._show_status("⚠️ Página sem texto para traduzir/narrar.", 4000)
             return
+        self._begin_translation_feedback()  # item E: feedback imediato
         self.ai_action_requested.emit("read_translated_page", page_text)
 
     def _on_translate_page(self):
@@ -2589,7 +2642,13 @@ class ReaderView(QWidget):
         self._audio_worker.start()
 
     def _on_audio_error(self, err_msg):
+        # item E: se falhou antes de tocar (ex.: durante "Traduzindo…"), não
+        # deixa o botão preso nesse estado.
+        self._translating_for_audio = False
         self._show_status(f"Erro de Áudio: {err_msg}", 5000)
+        worker = getattr(self, "_audio_worker", None)
+        if not (worker is not None and worker.isRunning()):
+            self._set_audio_button_state("Ouvir", "🔊", "Ouvir Página (TTS)", menu_label="Ouvir página")
 
     def _on_audio_worker_finished(self):
         """Garante a limpeza de referências e restaura o estado visual do botão."""

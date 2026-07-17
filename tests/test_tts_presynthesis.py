@@ -238,3 +238,39 @@ def test_audio_worker_has_prepared_mode_and_presynth_worker():
     assert "def _run_prepared" in src
     assert "class PreSynthesisWorker" in src
     assert "prepared: list | None = None" in src
+
+
+# ── Item C: zoom/tipografia re-renderizam SEM parar o áudio ───────────
+
+def test_go_to_page_can_preserve_audio_on_same_page_rerender():
+    body = _READER_VIEW.split("def _go_to_page")[1].split("\n    def ")[0]
+    assert "preserve_audio" in body
+    # o stop só acontece quando NÃO se pede para preservar (navegação real)
+    assert "if not preserve_audio:" in body
+    assert "self._stop_audio_if_running()" in body
+
+
+def test_zoom_rerender_preserves_audio():
+    for method in ("_zoom_in", "_zoom_out"):
+        body = _READER_VIEW.split(f"def {method}")[1].split("\n    def ")[0]
+        assert "preserve_audio=True" in body, method
+
+
+def test_typography_rerender_preserves_audio():
+    body = _READER_VIEW.split("def _apply_reader_typography")[1].split("\n    def ")[0]
+    assert "preserve_audio=True" in body
+
+
+# ── Item E: feedback imediato na narração traduzida ───────────────────
+
+def test_translated_narration_shows_immediate_feedback():
+    assert "_begin_translation_feedback" in _READER_VIEW
+    toggle = _READER_VIEW.split("def _toggle_audio")[1].split("\n    def ")[0]
+    assert "_begin_translation_feedback()" in toggle
+    read_tr = _READER_VIEW.split("def _on_read_translated_page")[1].split("\n    def ")[0]
+    assert "_begin_translation_feedback()" in read_tr
+
+
+def test_audio_start_clears_translation_feedback():
+    started = _READER_VIEW.split("def _on_audio_started")[1].split("\n    def ")[0]
+    assert "self._translating_for_audio = False" in started

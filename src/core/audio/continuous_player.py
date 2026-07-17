@@ -88,6 +88,14 @@ class ContinuousAudioPlayer:
         if status:
             logger.debug("PLAYER_UNDERFLOW: OutputStream status warning: %s", status)
 
+        # Pausa NÃO-BLOQUEANTE (item D): enquanto pausado, emite silêncio SEM
+        # consumir buffer/fila, preservando o ponto exato para o resume(). O
+        # stream continua aberto, então pause()/resume() não precisam de
+        # Pa_StopStream/Pa_StartStream (que bloqueariam a thread da GUI).
+        if self._is_paused:
+            outdata.fill(0)
+            return
+
         # If buffer is too small, try to get more data from queue
         while len(self._buffer) < frames and not self._queue.empty():
             try:
@@ -175,29 +183,25 @@ class ContinuousAudioPlayer:
                 continue
 
     def pause(self):
-        """Pausa a reprodução preservando buffer e fila (retomada no mesmo ponto).
+        """Pausa NÃO-BLOQUEANTE: apenas sinaliza (o callback passa a emitir silêncio).
 
-        Usa ``stream.stop()`` (sem ``close()``): o PortAudio para de chamar o
-        callback, mas o estado do stream e os dados já bufferizados permanecem,
-        então ``resume()`` continua exatamente de onde parou.
+        NÃO chama ``stream.stop()``: no PortAudio isso é ``Pa_StopStream``, que
+        BLOQUEIA a thread chamadora até o buffer drenar — e pode travar por muito
+        mais tempo se a thread de pré-síntese estiver segurando o GIL, impedindo
+        o callback de progredir. Como a pausa é acionada pela thread da GUI, esse
+        bloqueio CONGELA a interface (item D dos ajustes pós-teste). Mantendo o
+        stream aberto e emitindo zeros, preservamos buffer e fila para retomar
+        exatamente no mesmo ponto — sem qualquer chamada bloqueante na GUI.
         """
-        if self._stream is not None and self._is_playing and not self._is_paused:
-            try:
-                self._stream.stop()
-                self._is_paused = True
-                logger.info("PLAYER_PAUSED: playback paused.")
-            except Exception as e:
-                logger.error("PLAYER_PAUSE_ERROR: %s", e)
+        if self._is_playing and not self._is_paused:
+            self._is_paused = True
+            logger.info("PLAYER_PAUSED: playback paused (non-blocking).")
 
     def resume(self):
-        """Retoma a reprodução pausada a partir do ponto exato."""
-        if self._stream is not None and self._is_paused:
-            try:
-                self._stream.start()
-                self._is_paused = False
-                logger.info("PLAYER_RESUMED: playback resumed.")
-            except Exception as e:
-                logger.error("PLAYER_RESUME_ERROR: %s", e)
+        """Retoma a reprodução pausada a partir do ponto exato (não-bloqueante)."""
+        if self._is_playing and self._is_paused:
+            self._is_paused = False
+            logger.info("PLAYER_RESUMED: playback resumed (non-blocking).")
 
     def stop(self):
         logger.info("PLAYER_STOPPED: stop requested.")
