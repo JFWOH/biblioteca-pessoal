@@ -6,7 +6,8 @@ def test_popover_has_all_actions(qtbot):
     pop = SelectionActionPopover()
     qtbot.addWidget(pop)
     assert set(pop._buttons.keys()) == {
-        "highlight", "explain", "translate", "search", "save_note", "flashcard"
+        "highlight", "explain", "translate", "search", "save_note", "flashcard",
+        "word_wise",
     }
 
 

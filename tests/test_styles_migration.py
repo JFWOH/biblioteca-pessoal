@@ -68,7 +68,11 @@ def _exercise_card(card):
     card.set_selected(False)
 
 
-@pytest.mark.parametrize("theme_css", [DARK_THEME, LIGHT_THEME, SEPIA_THEME])
+# ids curtos: sem eles, o nodeid embute os ~27KB do QSS de cada tema; ascii-
+# escapado passa de 32767 chars e o Windows recusa gravar PYTEST_CURRENT_TEST
+# (limite de env var só no Windows). Os ids não mudam o que o teste exercita.
+@pytest.mark.parametrize("theme_css", [DARK_THEME, LIGHT_THEME, SEPIA_THEME],
+                         ids=["dark", "light", "sepia"])
 def test_widgets_build_under_every_theme(qtbot, db, config, theme_css):
     """Constrói os 10 widgets/diálogos da whitelist sob cada tema, sem erro.
 

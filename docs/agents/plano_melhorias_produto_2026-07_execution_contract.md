@@ -122,24 +122,48 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   prateleira sem menu de contexto.
 
 ### Onda 3 — Leitura + IA
-- [ ] **3.1** **Fontes clicáveis no RAG**: parsear `[Título, p. X]` nas respostas
+- [x] **3.1** **Fontes clicáveis no RAG**: parsear `[Título, p. X]` nas respostas
   (formato já exigido pelo prompt) e navegar o reader ao clique.
-- [ ] **3.2** **X-Ray da página**: painel/aba com conceitos da página atual + onde mais
+- [x] **3.2** **X-Ray da página**: painel/aba com conceitos da página atual + onde mais
   aparecem na biblioteca — SEM LLM (reusa `graph_book_concepts`/`graph_concept_lookup`).
-- [ ] **3.3** Flashcards enriquecidos: injetar `graph_book_concepts` no gerador; ação
+- [x] **3.3** Flashcards enriquecidos: injetar `graph_book_concepts` no gerador; ação
   "gerar cards dos meus destaques" (highlights → P/R em lote com preview).
-- [ ] **3.4** Word Wise: ação de seleção "definição rápida" (LLM `fast`, resposta curta
+- [x] **3.4** Word Wise: ação de seleção "definição rápida" (LLM `fast`, resposta curta
   inline no popover).
-- [ ] **3.5** Cache de tradução por página (padrão fingerprint do dossiê).
-- [ ] **3.6** Pré-síntese TTS da próxima página em background (corta o gap da leitura
+- [x] **3.5** Cache de tradução por página (padrão fingerprint do dossiê).
+- [x] **3.6** Pré-síntese TTS da próxima página em background (corta o gap da leitura
   contínua).
-- [ ] **3.7** Retomar leitura com mini-resumo da última sessão (reusa dossiê+progresso).
-- [ ] **3.8** Feedback 👎: baixar limiares (`_MIN_NEGATIVES` 4→2, `_MIN_CATEGORY_HITS`
+- [x] **3.7** Retomar leitura com mini-resumo da última sessão (reusa dossiê+progresso).
+- [x] **3.8** Feedback 👎: baixar limiares (`_MIN_NEGATIVES` 4→2, `_MIN_CATEGORY_HITS`
   3→2) + botão "🔁 Responder de novo considerando isto" imediatamente após o 👎 com
   motivo (reenvia a query com a instrução do motivo no prompt).
-- [ ] **3.9** Dossiê: injetar progresso/anotações reais do leitor no "perfil".
+- [x] **3.9** Dossiê: injetar progresso/anotações reais do leitor no "perfil".
 - Executores: F1 Opus (3.1+3.2), F2 Opus (3.3+3.6+3.7), F3 Sonnet (3.4+3.5+3.8+3.9).
   ATENÇÃO 3.6: threads/timers SÓ na GUI (ADR-006).
+- **Registro (2026-07-17, executada; 3 executores sequenciais):**
+  (3.1) parser puro `source_citations.py` (regex tolerante p/pp/pág/página; fuzzy
+  título→id exato→palavra-inteira→difflib≥0.82); só a LISTA de fontes é clicável —
+  linkificar o corpo exigiria trocar QTextEdit streaming por QTextBrowser (débito
+  registrado); página do sinal `source_clicked` é 0-based. (3.2) X-Ray = 3ª aba do
+  painel lateral; conceitos do livro cacheados 1x, interseção por página eager
+  (string matching, `core/xray.py` puro), "onde mais aparece" lazy ao expandir.
+  (3.3) `build_study_prompt(concepts=)` retrocompatível; "🃏 Dos destaques" no
+  flashcards_dialog com preview editável; teto 40 highlights; `think=False` mantido
+  (tarefa fast). (3.6) fronteira ADR-006: `PreSynthesisCache` puro no core +
+  `PreSynthesisWorker(QThread)` na GUI; invalidação por nav manual/stop/troca de
+  livro/voz; máx 1 página à frente; DÉBITO: reusa helpers privados do TTSRouter
+  (síntese-sem-tocar deveria virar API pública). (3.7) `resume_summary.py` puro;
+  banner auto-fecha 10s; nunca LLM síncrono ao abrir (dossiê só se cacheado).
+  (3.4) `build_word_wise_prompt` puro + worker fast (`think=False`, qualifica);
+  popover inline próprio; só seleção ≤4 palavras; só caminho PDF (mesmo escopo do
+  SelectionActionPopover — EPUB é débito pré-existente). (3.5) tabela
+  `page_translation_cache` (PK book+page+langs, fingerprint sha256 do texto);
+  integrado no fluxo texto (`_translate_page_as_text`); fluxo traduzir-e-narrar
+  ficou sem cache (débito menor). (3.8) limiares 4→2/3→2 + botão retry via
+  `retry_with_reason_requested` prefixando a query no main_window (query RAG normal
+  COM thinking; zero mudança no orchestrator). (3.9) perfil real no prompt do
+  dossiê; invalidação (a): fingerprint composta grafo+sha256(progresso+n_anotações)
+  — 2 leituras SQLite extras por abertura. Testes: +~130 na onda (998→1083).
 
 ### Onda 4 — [P2] Higiene e configuração
 - [ ] **4.1** Aba "Avançado" nas Configurações expondo `graph.*`, `auto_index.*`,

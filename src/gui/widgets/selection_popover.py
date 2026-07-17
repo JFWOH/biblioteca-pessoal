@@ -13,7 +13,11 @@ class SelectionActionPopover(QFrame):
 
     Emite ``action_requested`` com a chave da ação escolhida e se oculta.
     Chaves: ``highlight``, ``explain``, ``translate``, ``search``,
-    ``save_note``, ``flashcard``.
+    ``save_note``, ``flashcard``, ``word_wise``.
+
+    ``word_wise`` (Tarefa 3.4 — definição rápida) só deve ser incluída pelo
+    chamador via :meth:`set_actions` quando a seleção for curta (palavra/
+    termo, ~4 palavras); o botão não decide isso sozinho.
     """
 
     action_requested = pyqtSignal(str)
@@ -25,6 +29,7 @@ class SelectionActionPopover(QFrame):
         ("🔍", "Web", "search"),
         ("📝", "Anotar", "save_note"),
         ("🃏", "Flashcard", "flashcard"),
+        ("📖", "Definição rápida", "word_wise"),
     ]
 
     def __init__(self, parent=None):

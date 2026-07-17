@@ -33,3 +33,31 @@ def find_next_readable_page(get_text, current: int, total: int,
         page += 1
         skipped += 1
     return None
+
+
+def next_readable_page_with_text(get_text, current: int, total: int,
+                                 max_skip: int = 10) -> tuple[int, str] | None:
+    """Próxima página narrável junto com o seu texto (uma só varredura).
+
+    Usada pela pré-síntese TTS (tarefa 3.6): enquanto a página atual toca,
+    precisamos saber QUAL é a próxima página E o seu texto para sintetizá-lo
+    em background. Mesma regra de ``find_next_readable_page`` (pula vazias até
+    ``max_skip``), mas devolve ``(página, texto_já_limpo)`` para não pedir o
+    texto duas vezes. Lógica pura (ADR-006): sem threads/GUI.
+
+    Returns:
+        ``(page, text)`` da próxima página com texto, ou ``None`` (fim do
+        livro / só páginas vazias adiante dentro do limite).
+    """
+    page = current + 1
+    skipped = 0
+    while page < total and skipped <= max_skip:
+        try:
+            text = (get_text(page) or "").strip()
+        except Exception:
+            text = ""
+        if text:
+            return page, text
+        page += 1
+        skipped += 1
+    return None

@@ -78,12 +78,78 @@ def parse_flashcard_qa(content: Optional[str]) -> Optional[tuple[str, str]]:
     return front, back
 
 
-def build_study_prompt(action_type: str, text: Optional[str]) -> Optional[str]:
+def _format_concepts(concepts: Optional[list[str]]) -> str:
+    """Bloco de contexto com os conceitos-chave do livro (ou vazio).
+
+    Degradação graciosa (ADR-005): grafo vazio / sem conceitos → string vazia,
+    e o prompt fica idêntico ao anterior.
+    """
+    if not concepts:
+        return ""
+    names = [str(c).strip() for c in concepts if str(c).strip()]
+    if not names:
+        return ""
+    # Limita para não inflar o prompt; os conceitos vêm ordenados por peso.
+    joined = ", ".join(names[:12])
+    return (
+        "\n\nConceitos-chave deste livro (segundo o grafo de conceitos da "
+        f"biblioteca), para orientar o foco: {joined}."
+    )
+
+
+_WORD_WISE_PROMPT = (
+    "Explique em português, de forma curta e direta (1 a 2 frases), o que "
+    "significa o termo abaixo NO CONTEXTO em que ele aparece. Vá direto à "
+    "definição — sem repetir o termo como se fosse a resposta, sem "
+    "introduções do tipo 'o termo significa'.\n\n"
+    "TERMO: {term}{context_block}"
+)
+
+
+def _format_word_wise_context(context: Optional[str]) -> str:
+    """Bloco de contexto (trecho da página) para desambiguar o termo.
+
+    Degradação graciosa (ADR-005): sem contexto, o prompt define o termo
+    isoladamente (string vazia, o prompt fica só com o termo).
+    """
+    clean = (context or "").strip()
+    if not clean:
+        return ""
+    return f"\n\nCONTEXTO (trecho da página onde o termo aparece):\n'''\n{clean[:800]}\n'''"
+
+
+def build_word_wise_prompt(term: Optional[str], context: Optional[str] = None) -> Optional[str]:
+    """Monta a instrução da definição rápida (Word Wise, tarefa 3.4).
+
+    Args:
+        term: a seleção curta (palavra/termo, tipicamente até ~4 palavras)
+            que o leitor quer entender rapidamente.
+        context: trecho da página onde o termo aparece, usado para
+            desambiguar o sentido (ex.: "banco" financeiro vs. móvel).
+            Opcional — sem ele, o termo é definido isoladamente.
+
+    Returns:
+        A instrução completa, ou ``None`` se o termo estiver vazio. Tarefa
+        rápida: o chamador deve usar o LLM com ``think=False`` e pedir
+        resposta curta (mesmo padrão de build_flashcard_qa_prompt).
+    """
+    clean_term = (term or "").strip()
+    if not clean_term:
+        return None
+    return _WORD_WISE_PROMPT.format(
+        term=clean_term, context_block=_format_word_wise_context(context))
+
+
+def build_study_prompt(action_type: str, text: Optional[str],
+                       concepts: Optional[list[str]] = None) -> Optional[str]:
     """Monta a instrução para uma ação de estudo.
 
     Args:
         action_type: uma das chaves em ``STUDY_ACTIONS``.
         text: texto da página/trecho atual.
+        concepts: conceitos-chave do livro (grafo) para enriquecer o foco —
+            especialmente na geração de flashcards (tarefa 3.3). Quando vazio
+            ou ausente, o prompt é idêntico ao anterior (degradação graciosa).
 
     Returns:
         A instrução completa, ou ``None`` se a ação for desconhecida ou o
@@ -95,4 +161,4 @@ def build_study_prompt(action_type: str, text: Optional[str]) -> Optional[str]:
     clean = (text or "").strip()
     if not clean:
         return None
-    return f"{template}\n\nTrecho:\n'''\n{clean}\n'''"
+    return f"{template}{_format_concepts(concepts)}\n\nTrecho:\n'''\n{clean}\n'''"

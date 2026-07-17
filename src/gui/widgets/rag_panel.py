@@ -42,6 +42,8 @@ class RAGPanel(QWidget):
     clear_chat_requested = pyqtSignal()  # limpar a memória conversacional do contexto atual
     feedback_submitted = pyqtSignal(int, dict)  # rating (+1/-1), context dict
     feedback_reason_submitted = pyqtSignal(int, str)  # feedback_id, reason (motivo do 👎)
+    source_clicked = pyqtSignal(int, int)  # book_id, page (0-based do leitor) — Tarefa 3.1
+    retry_with_reason_requested = pyqtSignal(str, str)  # query, reason — Tarefa 3.8
 
     # Chips de motivo do 👎: rótulo exibido → chave canônica gravada em reason.
     _REASON_CHIPS = (
@@ -66,6 +68,11 @@ class RAGPanel(QWidget):
         # e motivo escolhido antes do id (defensivo — ADR-005, nunca quebra a UI).
         self._last_feedback_id: int | None = None
         self._pending_reason: str | None = None
+        # 3.8: motivo do último 👎 (habilita o botão "Responder de novo").
+        self._last_reason_for_retry: str | None = None
+        # Fontes clicáveis (Tarefa 3.1): provedor da lista de livros do banco,
+        # usado para resolver citações [Título, p. X] → book_id (fuzzy match).
+        self._books_provider = None
         self._setup_ui()
 
     # ── Construção da UI ───────────────────────────────────────────────────────
@@ -322,6 +329,28 @@ class RAGPanel(QWidget):
 
         action_btns_layout.addWidget(self._reason_container)
 
+        # "Responder de novo considerando isto" (Tarefa 3.8): aparece assim
+        # que o motivo do 👎 é registrado — reenvia a última pergunta com o
+        # motivo anexado ao prompt (consulta RAG normal, com thinking).
+        self._retry_btn = QPushButton("🔁 Responder de novo considerando isto")
+        self._retry_btn.setObjectName("RagRetryWithReasonButton")
+        self._retry_btn.setVisible(False)
+        self._retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._retry_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 1px solid #6366f1;
+                border-radius: 8px;
+                color: #818cf8;
+                padding: 8px 12px;
+                font-size: 12px;
+            }
+            QPushButton:hover { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; }
+            QPushButton:disabled { color: #52525b; border-color: #3f3f46; }
+        """)
+        self._retry_btn.clicked.connect(self._on_retry_with_reason_clicked)
+        action_btns_layout.addWidget(self._retry_btn)
+
         chat_layout.addLayout(action_btns_layout)
 
         # Progress bar (visível durante geração/indexação)
@@ -507,6 +536,10 @@ class RAGPanel(QWidget):
         sb_layout.addWidget(sources_title)
 
         self._sources_list = QListWidget()
+        # Fontes clicáveis (Tarefa 3.1): itens que carregam (book_id, page)
+        # abrem o livro na página citada via source_clicked.
+        self._sources_list.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._sources_list.itemClicked.connect(self._on_source_item_clicked)
         sb_layout.addWidget(self._sources_list)
 
         # ── Dicas ─────────────────────────────────────────────────────────────
@@ -886,7 +919,11 @@ class RAGPanel(QWidget):
         """Chamado quando a geração termina."""
         self._full_answer = full_answer
         self._set_generating(False)
-        
+
+        # Fontes clicáveis (Tarefa 3.1): enriquece a lista com as citações
+        # [Título, p. X] presentes na resposta, resolvidas para book_id.
+        self._augment_sources_with_citations(full_answer)
+
         # Human-in-the-loop: Mostrar botão de salvar anotação se houver contexto de livro
         is_global = getattr(self, "_is_standalone", False)
         if self._reading_context and not is_global and self._reading_context.get("book_id", 0) > 0 and full_answer.strip():
@@ -914,6 +951,7 @@ class RAGPanel(QWidget):
     def _hide_feedback_buttons(self) -> None:
         self._thumbs_up_btn.setVisible(False)
         self._thumbs_down_btn.setVisible(False)
+        self._retry_btn.setVisible(False)
         self._hide_reason_chips()
 
     def _on_feedback_clicked(self, rating: int) -> None:
@@ -929,6 +967,7 @@ class RAGPanel(QWidget):
         # Voto novo: zera qualquer estado de motivo herdado.
         self._last_feedback_id = None
         self._pending_reason = None
+        self._last_reason_for_retry = None
         ctx = self._reading_context or {}
         book_id = ctx.get("book_id") or None
         if book_id == 0:
@@ -1010,7 +1049,12 @@ class RAGPanel(QWidget):
 
     def _submit_reason(self, reason: str) -> None:
         """Emite o motivo (se o id já chegou) ou o guarda para quando chegar,
-        esconde os chips e confirma visualmente ("✅ Obrigado!")."""
+        esconde os chips e confirma visualmente ("✅ Obrigado!").
+
+        Tarefa 3.8: também libera o botão "Responder de novo considerando
+        isto" — motivo registrado é o gatilho para reenviar a última
+        pergunta com essa instrução extra.
+        """
         self._hide_reason_chips()
         if self._last_feedback_id is not None:
             self.feedback_reason_submitted.emit(self._last_feedback_id, reason)
@@ -1021,6 +1065,9 @@ class RAGPanel(QWidget):
         self._thumbs_down_btn.setText("✅ Obrigado!")
         self._thumbs_down_btn.setEnabled(False)
         self._thumbs_down_btn.setVisible(True)
+        self._last_reason_for_retry = reason
+        self._retry_btn.setEnabled(True)
+        self._retry_btn.setVisible(True)
 
     def eventFilter(self, obj, event):  # noqa: N802 (assinatura do Qt)
         """Esc no campo de texto livre volta aos chips (sem perder o voto)."""
@@ -1067,8 +1114,22 @@ class RAGPanel(QWidget):
         # Emite sinal para o MainWindow persistir no banco
         self.save_annotation_requested.emit(book_id, page, content)
 
+    def set_books_provider(self, provider) -> None:
+        """Define o provedor da lista de livros (``db.get_all_books``).
+
+        Usado para resolver as citações ``[Título, p. X]`` da resposta em
+        ``book_id`` (Tarefa 3.1). Sem provedor, a lista de fontes ainda funciona
+        a partir dos metadados dos trechos recuperados (que já trazem book_id).
+        """
+        self._books_provider = provider
+
     def on_sources_found(self, sources: list) -> None:
-        """Popula o painel de fontes consultadas."""
+        """Popula o painel de fontes consultadas.
+
+        Cada trecho recuperado já traz ``book_id`` e ``page_number`` (0-based) nos
+        metadados — guardamos ``(book_id, page)`` no item para torná-lo clicável
+        (Tarefa 3.1). Itens sem esses dados ficam informativos (não clicáveis).
+        """
         self._sources_list.clear()
         for src in sources:
             meta = src.get("metadata", {})
@@ -1076,13 +1137,75 @@ class RAGPanel(QWidget):
             author = meta.get("author", "")
             dist = src.get("distance", 0.0)
             similarity = max(0, round((1 - dist) * 100))
+            book_id = meta.get("book_id")
+            page = meta.get("page_number")
             text = f"📖 {title}"
             if author:
                 text += f"\n    {author}"
-            text += f"\n    {similarity}% relevante"
+            if book_id is not None and page is not None:
+                text += f"\n    p. {int(page) + 1} · {similarity}% relevante"
+            else:
+                text += f"\n    {similarity}% relevante"
             item = QListWidgetItem(text)
             item.setToolTip(src.get("document", "")[:200] + "…")
+            self._tag_source_item(item, book_id, page)
             self._sources_list.addItem(item)
+
+    def _tag_source_item(self, item, book_id, page) -> None:
+        """Marca o item com ``(book_id, page0)`` se ambos existirem — clicável."""
+        if book_id is None or page is None:
+            return
+        page0 = max(0, int(page))
+        item.setData(Qt.ItemDataRole.UserRole, (int(book_id), page0))
+        item.setToolTip("Clique para abrir na fonte · " + (item.toolTip() or ""))
+
+    def _augment_sources_with_citations(self, answer: str) -> None:
+        """Acrescenta à lista de fontes as citações ``[Título, p. X]`` da resposta.
+
+        Resolve o título → book_id via fuzzy match (``resolve_citation``) contra os
+        livros do banco. Só adiciona pares ``(book_id, page)`` ainda não presentes
+        (dedup com os trechos recuperados). Título não resolvido → ignorado
+        (degradação graciosa, ADR-005).
+        """
+        if not answer or not answer.strip() or self._books_provider is None:
+            return
+        from src.core.rag.source_citations import parse_citations, resolve_citation
+
+        citations = parse_citations(answer)
+        if not citations:
+            return
+        try:
+            books = self._books_provider() or []
+        except Exception:
+            books = []
+        if not books:
+            return
+
+        existing: set[tuple[int, int]] = set()
+        for i in range(self._sources_list.count()):
+            data = self._sources_list.item(i).data(Qt.ItemDataRole.UserRole)
+            if isinstance(data, tuple):
+                existing.add(data)
+
+        for cit in citations:
+            book_id, page1 = resolve_citation(cit, books)
+            if book_id is None:
+                continue
+            page0 = max(0, int(page1) - 1)  # citação é 1-based; leitor é 0-based
+            key = (int(book_id), page0)
+            if key in existing:
+                continue
+            existing.add(key)
+            item = QListWidgetItem(f"🔖 {cit.title} · p. {page1}")
+            item.setData(Qt.ItemDataRole.UserRole, key)
+            item.setToolTip("Citação da resposta · clique para abrir")
+            self._sources_list.addItem(item)
+
+    def _on_source_item_clicked(self, item) -> None:
+        """Emite ``source_clicked`` se o item carregar ``(book_id, page0)``."""
+        data = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if isinstance(data, tuple) and len(data) == 2:
+            self.source_clicked.emit(int(data[0]), int(data[1]))
 
     def on_progress_updated(self, current: int, total: int, message: str) -> None:
         """Atualiza o progresso da indexação."""
@@ -1111,6 +1234,14 @@ class RAGPanel(QWidget):
         question = self._question_input.text().strip()
         if not question or self._is_generating:
             return
+        self._begin_new_query(question)
+        self.query_requested.emit(question)
+
+    def _begin_new_query(self, question: str) -> None:
+        """Prepara a UI para uma nova pergunta (limpa resposta, reinicia o
+        estado de feedback/sessão). Usado pelo envio normal (_on_send) e
+        pelo reenvio com motivo (3.8, _on_retry_with_reason_clicked) — as
+        duas entradas de uma nova rodada de consulta."""
         self._response_area.clear()
         self._sources_list.clear()
         self._set_generating(True)
@@ -1122,7 +1253,18 @@ class RAGPanel(QWidget):
         self._last_feedback_id = None
         self._pending_reason = None
         self._gen_status.setText(f'🔍 Consultando: "{question[:60]}..."')
-        self.query_requested.emit(question)
+
+    def _on_retry_with_reason_clicked(self) -> None:
+        """'Responder de novo considerando isto' (3.8): reenvia a ÚLTIMA
+        pergunta com o motivo do 👎 anexado. A augmentação do prompt fica a
+        cargo do MainWindow (retry_with_reason_requested); aqui só prepara a
+        UI como uma consulta nova e emite a query original + o motivo."""
+        query = self._last_query
+        reason = self._last_reason_for_retry
+        if not query or not reason or self._is_generating:
+            return
+        self._begin_new_query(query)
+        self.retry_with_reason_requested.emit(query, reason)
 
     def _on_stop(self) -> None:
         self.stop_requested.emit()

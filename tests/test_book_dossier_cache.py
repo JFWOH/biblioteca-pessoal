@@ -71,6 +71,41 @@ def test_ingest_fingerprint_stable_without_new_ingestion(db, store):
     assert store.ingest_fingerprint(bid) == store.ingest_fingerprint(bid)
 
 
+# ── invalidação pelo perfil do leitor (Tarefa 3.9, opção (a)) ───────────
+
+def test_cache_invalidated_when_reading_progress_changes(db, store):
+    bid = _book(db)
+    store.add_mentions(bid, "page:1", [("x", "X", 0.5)], page=1)
+    db.update_reading_progress(bid, current_page=1, total_pages=4)
+    save_synthesis_cache(db, store, bid, "Síntese com progresso inicial.")
+    assert get_cached_synthesis(db, store, bid) == "Síntese com progresso inicial."
+
+    # Leitor avança a leitura → perfil muda → fingerprint composta muda.
+    db.update_reading_progress(bid, current_page=3, total_pages=4)
+    assert get_cached_synthesis(db, store, bid) is None
+
+
+def test_cache_invalidated_when_annotation_added(db, store):
+    bid = _book(db)
+    store.add_mentions(bid, "page:1", [("x", "X", 0.5)], page=1)
+    save_synthesis_cache(db, store, bid, "Síntese sem anotações.")
+    assert get_cached_synthesis(db, store, bid) == "Síntese sem anotações."
+
+    db.add_annotation(bid, 1, content="nova anotação do leitor")
+    assert get_cached_synthesis(db, store, bid) is None
+
+
+def test_cache_stable_when_profile_unchanged(db, store):
+    bid = _book(db)
+    store.add_mentions(bid, "page:1", [("x", "X", 0.5)], page=1)
+    db.update_reading_progress(bid, current_page=2, total_pages=4)
+    db.add_annotation(bid, 1, content="nota")
+    save_synthesis_cache(db, store, bid, "Síntese estável.")
+    # Reconsultar sem mudar nada (grafo, progresso, anotações) mantém o cache.
+    assert get_cached_synthesis(db, store, bid) == "Síntese estável."
+    assert get_cached_synthesis(db, store, bid) == "Síntese estável."
+
+
 # ── wiring: BookDossierDialog usa o cache antes de iniciar o worker ─────
 
 def test_dialog_uses_cache_and_skips_worker(qtbot, db, store, no_worker_start):

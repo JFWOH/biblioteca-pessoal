@@ -295,6 +295,8 @@ class MainWindow(QMainWindow):
         # Auto-indexação: leitura ativa adia o processamento em ocioso.
         self._reader_view.reading_context_updated.connect(self._auto_index_service.on_activity)
         self._reader_view.ai_action_requested.connect(self._on_ai_action_requested)
+        # Tarefa 3.2 — clique num livro relacionado no X-Ray abre esse livro.
+        self._reader_view._xray_panel.open_book_requested.connect(self._on_book_open)
         self._main_stack.addWidget(self._reader_view)  # index 1
 
         # ── Página de Estatísticas ──
@@ -310,8 +312,13 @@ class MainWindow(QMainWindow):
         self._rag_panel.save_annotation_requested.connect(self._on_rag_annotation_save)
         self._rag_panel.feedback_submitted.connect(self._on_rag_feedback)
         self._rag_panel.feedback_reason_submitted.connect(self._on_rag_feedback_reason)
+        self._rag_panel.retry_with_reason_requested.connect(self._on_rag_retry_with_reason)
         self._rag_panel.clear_chat_requested.connect(self._on_clear_chat)
         self._rag_panel.back_requested.connect(lambda: self._main_stack.setCurrentIndex(0))
+        # Tarefa 3.1 — fontes clicáveis: resolve citações [Título, p. X] → book_id
+        # e abre o livro na página citada.
+        self._rag_panel.set_books_provider(self._db.get_all_books)
+        self._rag_panel.source_clicked.connect(self._on_rag_source_clicked)
         self._main_stack.addWidget(self._rag_panel)  # index 3
 
         self._main_splitter.addWidget(self._main_stack)
@@ -517,6 +524,22 @@ class MainWindow(QMainWindow):
         # Carrega anotações existentes
         annotations = self._db.get_annotations(book_id)
         self._reader_view.load_annotations(annotations)
+
+    def _on_rag_source_clicked(self, book_id: int, page: int) -> None:
+        """Tarefa 3.1 — abre a fonte citada (livro + página 0-based) no leitor.
+
+        Reusa o fluxo de abertura de livro; se o livro já estiver aberto, apenas
+        navega. Degradação graciosa: se a abertura falhar (arquivo ausente), não
+        navega (o book_id do leitor não baterá).
+        """
+        already_open = (
+            self._main_stack.currentIndex() == 1
+            and self._reader_view._book_id == book_id
+        )
+        if not already_open:
+            self._on_book_open(book_id)
+        if self._reader_view._book_id == book_id:
+            self._reader_view._go_to_page(max(0, int(page)))
 
     def _close_reader(self):
         self._reader_view.close_reader()
@@ -1105,6 +1128,22 @@ class MainWindow(QMainWindow):
         self._rag_worker.start()
         self._statusbar.showMessage("🧠 Consultando Assistente IA…")
 
+    def _on_rag_retry_with_reason(self, query: str, reason: str) -> None:
+        """'Responder de novo considerando isto' (Tarefa 3.8).
+
+        Reenvia a ÚLTIMA pergunta com o motivo do 👎 anexado como instrução
+        extra. Reusa _on_rag_query integralmente (mesmo pipeline de contexto
+        de leitura, streaming, fontes e THINKING — é uma consulta RAG normal,
+        só com o prompt prefixado; nenhuma mudança no Orchestrator/RAGWorker).
+        """
+        if not query.strip():
+            return
+        augmented = (
+            f"O usuário reportou sobre a resposta anterior: '{reason}'. "
+            f"Refaça atendendo a isso.\n\n{query}"
+        )
+        self._on_rag_query(augmented)
+
     def _on_clear_chat(self) -> None:
         """Limpa a memória conversacional do contexto atual (livro ou global)."""
         if self._rag_engine is None:
@@ -1188,7 +1227,12 @@ class MainWindow(QMainWindow):
             return
         elif action_type in ("explain_page", "summarize", "glossary", "flashcards"):
             from src.core.study_prompts import build_study_prompt
-            question = build_study_prompt(action_type, text)
+            # Tarefa 3.3: injeta os conceitos-chave do livro (grafo) no prompt de
+            # geração de flashcards. Grafo vazio → concepts=[] → prompt igual ao
+            # anterior (degradação graciosa, ADR-005).
+            concepts = (self._book_graph_concepts()
+                        if action_type == "flashcards" else None)
+            question = build_study_prompt(action_type, text, concepts=concepts)
             if not question:
                 self._statusbar.showMessage("⚠️ Nenhum texto na página para estudar.", 3000)
                 return
@@ -1204,6 +1248,26 @@ class MainWindow(QMainWindow):
         # Preenche o input e envia automaticamente
         self._rag_panel._question_input.setText(question)
         self._rag_panel._on_send()
+
+    def _book_graph_concepts(self, limit: int = 10) -> list[str]:
+        """Conceitos-chave do livro aberto, do grafo (tarefa 3.3).
+
+        Vazio quando não há livro aberto, DB ausente, ou o grafo ainda não
+        ingeriu conceitos — o chamador degrada graciosamente (ADR-005).
+        """
+        book_id = getattr(self._reader_view, "_book_id", 0)
+        if not book_id or self._db is None:
+            return []
+        try:
+            from src.core.graph.graph_store import GraphStore
+            from src.core.rag.tools.graph_tools import graph_book_concepts
+            out = graph_book_concepts(GraphStore(self._db), book_id, limit=limit)
+            data = getattr(out, "data", None)
+            if data is None and isinstance(out, dict):
+                data = out.get("data")
+            return [d.get("concept") for d in (data or []) if d.get("concept")]
+        except Exception:
+            return []
 
     def _show_flashcards(self) -> None:
         """Abre o diálogo de Flashcards (lista + modo estudo)."""
@@ -1276,15 +1340,25 @@ class MainWindow(QMainWindow):
         (evita chamar o NLLB à toa). Graceful (ADR-005): erro vira aviso na
         statusbar. O "aviso do que está sendo processado" é a contagem de
         caracteres na statusbar + no header do cartão.
+
+        Cache por página (Tarefa 3.5): antes de chamar o NLLB, consulta
+        ``page_translation_cache`` (fingerprint = sha256 do texto normalizado
+        — invalida sozinho se o texto da página mudar, ex.: reprocessamento
+        de OCR); depois de traduzir, grava o resultado no cache.
         """
         from src.core.tts.language_detect import detect_language
+        from src.core.database import page_translation_fingerprint
 
         if getattr(self, "_page_translation_pending", False):
             self._statusbar.showMessage("🌐 Já estou traduzindo uma página — aguarde…", 3000)
             return
 
-        page = self._reader_view._reader.current_page + 1 if self._reader_view._reader else 0
+        reader = self._reader_view._reader
+        page_number = reader.current_page if reader else 0
+        page = page_number + 1
         source_desc = f"Página {page} inteira"
+        book_id = getattr(self._reader_view, "_book_id", 0)
+        src_lang, tgt_lang = "en", "pt"
 
         if self._rag_panel.parentWidget() != self._reader_view:
             self._reader_view.set_ai_panel(self._rag_panel)
@@ -1294,6 +1368,19 @@ class MainWindow(QMainWindow):
             self._statusbar.showMessage("ℹ️ A página já está em português.", 4000)
             self._rag_panel.show_translation_card(source_desc, text, text)
             return
+
+        fingerprint = page_translation_fingerprint(text)
+        if self._db is not None and book_id > 0:
+            try:
+                cached = self._db.get_cached_page_translation(
+                    book_id, page_number, src_lang, tgt_lang, fingerprint)
+            except Exception as exc:
+                logger.warning(f"Falha ao consultar cache de tradução (ignorado): {exc}")
+                cached = None
+            if cached:
+                self._statusbar.showMessage("🌐 Tradução em cache.", 3000)
+                self._rag_panel.show_translation_card(source_desc, text, cached)
+                return
 
         self._statusbar.showMessage(
             f"🌐 Traduzindo {source_desc.lower()} ({len(text)} caracteres)…", 60000)
@@ -1306,6 +1393,12 @@ class MainWindow(QMainWindow):
                 return
             self._statusbar.clearMessage()
             self._rag_panel.show_translation_card(source_desc, text, result)
+            if self._db is not None and book_id > 0:
+                try:
+                    self._db.set_page_translation_cache(
+                        book_id, page_number, src_lang, tgt_lang, fingerprint, result)
+                except Exception as exc:
+                    logger.warning(f"Falha ao gravar cache de tradução (ignorado): {exc}")
 
         def _on_error(err: str):
             self._page_translation_pending = False
@@ -1314,7 +1407,7 @@ class MainWindow(QMainWindow):
         try:
             from src.gui.translation_service import TranslationService
             TranslationService.get_instance().translate_async(
-                text, src_lang="en", tgt_lang="pt",
+                text, src_lang=src_lang, tgt_lang=tgt_lang,
                 on_success=_on_success, on_error=_on_error)
         except Exception as exc:
             self._page_translation_pending = False

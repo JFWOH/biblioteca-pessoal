@@ -19,6 +19,7 @@ from src.gui.widgets.reading_progress import ReadingProgressBar
 from src.gui.widgets.annotation_panel import AnnotationPanel
 from src.gui.widgets.search_overlay import DocumentSearchBar
 from src.gui.widgets.bookmarks_panel import BookmarksPanel
+from src.gui.widgets.xray_panel import XRayPanel
 from src.gui.widgets.reader_typography_popover import ReaderTypographyPopover
 from src.gui.styles import get_reader_css, emoji_icon
 from src.utils.constants import (
@@ -26,10 +27,12 @@ from src.utils.constants import (
 )
 from src.gui.widgets.proactive_footer import ProactiveFooterWidget
 from src.gui.widgets.selection_popover import SelectionActionPopover
+from src.gui.widgets.word_wise_popover import WordWisePopover
 from src.gui.widgets.reader_dock import ReaderDock
 from src.gui.widgets.proactive_insights_panel import ProactiveInsightsPanel
 from src.gui.proactive_reader_service import ProactiveReaderService
 from src.core.proactive_observation import confidence_to_float, obs_dict_from_row
+from src.core.graph.graph_store import GraphStore
 from PyQt6.QtWidgets import QComboBox
 
 logger = logging.getLogger(__name__)
@@ -50,6 +53,10 @@ class ReaderView(QWidget):
     # Tarefa 1.2 — zona de clique nas margens (só caminho PDF/imagem, ver
     # eventFilter): terço esquerdo = página anterior, terço direito = próxima.
     _PAGE_TURN_ZONE_RATIO = 1 / 3
+
+    # Tarefa 3.4 — Word Wise só aparece no popover de seleção para termos
+    # curtos (palavra/expressão), não para trechos/frases inteiras.
+    _WORD_WISE_MAX_WORDS = 4
 
     def __init__(self, parent=None, tts_router=None, rag_engine=None, db=None):
         super().__init__(parent)
@@ -76,6 +83,12 @@ class ReaderView(QWidget):
         self._continuous_translate_mode: bool = False
         self._audio_stopped_by_user: bool = False  # stop manual não encadeia a próxima
         self._chain_continuous: bool = False       # só narração de página encadeia (tradução não)
+        # Pré-síntese TTS da próxima página (tarefa 3.6): cache PURO (core) de
+        # 1 página à frente + worker de síntese na GUI. Corta o gap entre páginas.
+        from src.core.audio.continuous_player import PreSynthesisCache
+        self._presynth_cache = PreSynthesisCache()
+        self._presynth_worker = None
+        self._resume_banner = None  # banner "retomar leitura" (tarefa 3.7)
         self._footer_obs_id = None
         self._proactive_service = ProactiveReaderService(parent=self)
         self._proactive_service.observation_ready.connect(self._on_proactive_observation)
@@ -542,12 +555,17 @@ class ReaderView(QWidget):
         self._bookmarks_panel = BookmarksPanel()
         self._bookmarks_panel.bookmark_selected.connect(self._go_to_page)
         self._bookmarks_panel.bookmark_removed.connect(self._on_bookmark_removed)
+        # Tarefa 3.2 — aba X-Ray: conceitos do livro presentes NA PÁGINA atual e
+        # onde mais aparecem na biblioteca. Sem LLM, só o grafo (GraphStore).
+        graph_store = GraphStore(self._db) if self._db is not None else None
+        self._xray_panel = XRayPanel(graph_store=graph_store)
         self._side_panel_tabs = QTabWidget()
         self._side_panel_tabs.setObjectName("readerSidePanelTabs")
         self._side_panel_tabs.setMinimumWidth(200)
         self._side_panel_tabs.setMaximumWidth(300)
         self._side_panel_tabs.addTab(self._toc_widget, "Sumário")
         self._side_panel_tabs.addTab(self._bookmarks_panel, "Marcadores")
+        self._side_panel_tabs.addTab(self._xray_panel, "X-Ray")
         splitter.addWidget(self._side_panel_tabs)
         # Tarefa 1.3 — aplica a visibilidade persistida (reader.side_panel_visible,
         # default True) já na construção; open_book() reaplica ao abrir um livro.
@@ -662,6 +680,11 @@ class ReaderView(QWidget):
         # Popover de ações sobre a seleção (PDF) — alternativa rápida ao clique direito.
         self._selection_popover = SelectionActionPopover(self)
         self._selection_popover.action_requested.connect(self._on_selection_popover_action)
+
+        # Cartão de definição rápida (Word Wise, tarefa 3.4) — inline, nunca
+        # abre o painel do RAG (diferente das demais ações de seleção).
+        self._word_wise_popover = WordWisePopover(self)
+        self._word_wise_worker = None
 
     def _setup_shortcuts(self):
         s_next = QShortcut(QKeySequence(Qt.Key.Key_Right), self, self._go_next)
@@ -791,6 +814,8 @@ class ReaderView(QWidget):
                 self._last_selection_flow = None
                 if hasattr(self, "_selection_popover"):
                     self._selection_popover.hide()
+                if hasattr(self, "_word_wise_popover"):
+                    self._word_wise_popover.hide()
                 return True
             elif event.type() == QEvent.Type.MouseMove and self._is_selecting:
                 pos = event.position().toPoint()
@@ -929,6 +954,7 @@ class ReaderView(QWidget):
             return
 
         self._book_id = book_data.get("id", 0)
+        self._invalidate_presynth()  # troca de livro descarta pré-síntese (3.6)
         self._annotation_panel.set_book_id(self._book_id)
         self._title_label.setText(book_data.get("title", ""))
         self._load_persisted_observations()
@@ -951,6 +977,46 @@ class ReaderView(QWidget):
 
         # Vai para a página inicial
         self._go_to_page(start_page)
+
+        # Tarefa 3.7: banner discreto de retomada quando há progresso (>0),
+        # com mini-resumo da última sessão (dados já existentes, sem LLM).
+        self._maybe_show_resume_banner()
+
+    def _maybe_show_resume_banner(self) -> None:
+        """Mostra o banner "Retomar leitura" (tarefa 3.7), se houver progresso.
+
+        Reusa ``build_resume_info`` (core puro): posição/tempo + anotações
+        recentes + conceitos do grafo + síntese do dossiê JÁ em cache — NUNCA
+        dispara LLM no caminho de abrir o livro (ADR-005). Sem progresso →
+        ``build_resume_info`` devolve None → nenhum banner.
+        """
+        if self._db is None or not self._book_id:
+            return
+        try:
+            from src.core.graph.graph_store import GraphStore
+            from src.core.resume_summary import build_resume_info
+            graph_store = GraphStore(self._db)
+            info = build_resume_info(self._db, self._book_id, graph_store=graph_store)
+        except Exception:
+            info = None
+        if not info:
+            return
+        try:
+            from src.gui.widgets.resume_banner import ResumeBanner
+            old = getattr(self, "_resume_banner", None)
+            if old is not None:
+                try:
+                    old.dismiss()
+                except Exception:
+                    pass
+            self._resume_banner = ResumeBanner(info, parent=self)
+            self._resume_banner.closed.connect(self._on_resume_banner_closed)
+            self._resume_banner.show_at_top()
+        except Exception:
+            self._resume_banner = None
+
+    def _on_resume_banner_closed(self) -> None:
+        self._resume_banner = None
 
     def _reader_css(self) -> str:
         """CSS do conteúdo HTML do leitor com a tipografia ATUAL da config.
@@ -1027,16 +1093,24 @@ class ReaderView(QWidget):
                 page_text[:1500]
             )
 
+        # Tarefa 3.2 — atualiza o X-Ray com o TEXTO COMPLETO da página (a
+        # interseção com os conceitos do livro é barata; ver src/core/xray.py).
+        if hasattr(self, "_xray_panel"):
+            self._xray_panel.update_context(self._book_id, page, page_text)
+
     def _go_to_page(self, page: int):
         self._stop_audio_if_running()
         if hasattr(self, "_selection_popover"):
             self._selection_popover.hide()
+        if hasattr(self, "_word_wise_popover"):
+            self._word_wise_popover.hide()
         if self._reader:
             content = self._reader.go_to_page(page)
             if content:
                 self._render_page(content)
 
     def _go_next(self) -> None:
+        self._invalidate_presynth()  # nav. manual descarta pré-síntese (3.6)
         if self._reader:
             if self._content_stack.currentIndex() == 1:
                 is_double = hasattr(self._reader, 'is_double_page') and self._reader.is_double_page
@@ -1071,6 +1145,7 @@ class ReaderView(QWidget):
                 self._render_page(content)
 
     def _go_prev(self) -> None:
+        self._invalidate_presynth()  # nav. manual descarta pré-síntese (3.6)
         if self._reader:
             if self._content_stack.currentIndex() == 1:
                 is_double = hasattr(self._reader, 'is_double_page') and self._reader.is_double_page
@@ -1182,6 +1257,8 @@ class ReaderView(QWidget):
         self._toc_widget.set_theme(theme)
         if hasattr(self, "_bookmarks_panel"):
             self._bookmarks_panel.set_theme(theme)
+        if hasattr(self, "_xray_panel"):
+            self._xray_panel.set_theme(theme)
         self._annotation_panel.set_theme(theme)
         if hasattr(self, '_dock'):
             self._dock.set_theme(theme)
@@ -1412,6 +1489,8 @@ class ReaderView(QWidget):
             """)
         if hasattr(self, "_selection_popover"):
             self._selection_popover.set_theme(theme)
+        if hasattr(self, "_word_wise_popover"):
+            self._word_wise_popover.set_theme(theme)
 
         if self._reader and self._reader.is_open:
             self._go_to_page(self._reader.current_page)
@@ -1511,6 +1590,9 @@ class ReaderView(QWidget):
             return
         if hasattr(self, "_selection_popover") and self._selection_popover.isVisible():
             self._selection_popover.hide()
+            return
+        if hasattr(self, "_word_wise_popover") and self._word_wise_popover.isVisible():
+            self._word_wise_popover.hide()
             return
         if self._search_bar.isVisible():
             self._search_bar.close_bar()
@@ -2020,12 +2102,18 @@ class ReaderView(QWidget):
         """Exibe o popover de ações logo abaixo da seleção (PDF)."""
         if not hasattr(self, "_selection_popover"):
             return
-        self._selection_popover.set_actions(
-            ["highlight", "explain", "translate", "search", "save_note", "flashcard"]
-        )
+        actions = ["highlight", "explain", "translate", "search", "save_note", "flashcard"]
+        # Word Wise (3.4): só para seleção curta (palavra/termo) — seleções
+        # maiores continuam pelo fluxo normal (Explicar/RAG).
+        coords = self._last_selection_coords
+        text = self._selection_text(coords) if coords else ""
+        if text and len(text.split()) <= self._WORD_WISE_MAX_WORDS:
+            actions.append("word_wise")
+        self._selection_popover.set_actions(actions)
         # rect está em coordenadas do _image_label (pai da rubber band); mapeia p/ ReaderView.
         anchor_local = QPoint(rect.left(), rect.bottom() + 6)
         anchor = self._image_label.mapTo(self, anchor_local)
+        self._last_selection_anchor = anchor
         self._selection_popover.show_at(anchor)
 
     def _on_selection_popover_action(self, action: str) -> None:
@@ -2036,10 +2124,58 @@ class ReaderView(QWidget):
         text = self._selection_text(coords)
         if action == "highlight":
             self._highlight_selection(coords, text)
+        elif action == "word_wise":
+            if text:
+                self._start_word_wise(text)
         elif text:
             self.ai_action_requested.emit(action, text)
         self._last_selection_coords = None
         self._hide_selection_marquee()
+
+    def _start_word_wise(self, term: str) -> None:
+        """Dispara a definição rápida (Word Wise, 3.4) para o termo selecionado.
+
+        Mostra o popover em estado de carregamento imediatamente, perto da
+        seleção, e o LLM (``think=False``, worker em background) substitui
+        pelo texto da definição ao terminar. NUNCA abre o painel do RAG —
+        essa é a diferença chave em relação às outras ações de seleção.
+        """
+        worker = getattr(self, "_word_wise_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+
+        anchor = getattr(self, "_last_selection_anchor", None)
+        if anchor is None:
+            return
+        self._word_wise_popover.show_loading(term, anchor)
+
+        # Contexto: texto da página atual, para desambiguar o termo.
+        context = ""
+        if self._reader:
+            page = self._reader.current_page
+            if hasattr(self._reader, "get_page_text"):
+                context = self._reader.get_page_text(page) or ""
+            elif hasattr(self._reader, "get_chapter_text"):
+                context = self._reader.get_chapter_text(page) or ""
+
+        config = getattr(self.window(), "_config", None)
+        ollama_url = (config.get("rag.ollama_url", "http://localhost:11434")
+                     if config else "http://localhost:11434")
+
+        from src.gui.workers.word_wise_worker import WordWiseWorker
+        self._word_wise_worker = WordWiseWorker(
+            term, context=context, ollama_url=ollama_url, parent=self)
+        self._word_wise_worker.definition_ready.connect(self._on_word_wise_ready)
+        self._word_wise_worker.failed.connect(self._on_word_wise_failed)
+        self._word_wise_worker.start()
+
+    def _on_word_wise_ready(self, term: str, definition: str) -> None:
+        if self._word_wise_popover.isVisible():
+            self._word_wise_popover.show_definition(term, definition)
+
+    def _on_word_wise_failed(self, _reason: str) -> None:
+        if self._word_wise_popover.isVisible():
+            self._word_wise_popover.show_error()
 
     def _toggle_audio(self):
         """Alterna a leitura de áudio (TTS) da página atual.
@@ -2154,6 +2290,8 @@ class ReaderView(QWidget):
         self._audio_paused = False
         self._set_audio_button_state("Pausar", "⏸️", "Pausar Leitura (TTS)")
         self._act_audio_stop.setEnabled(True)
+        # Tarefa 3.6: enquanto esta página toca, sintetiza a próxima em background.
+        self._maybe_presynthesize_next()
 
     def _on_read_translated_page(self):
         """Narra a página atual traduzida para PT (item 7 do backlog UX).
@@ -2193,6 +2331,8 @@ class ReaderView(QWidget):
     def _toggle_continuous_reading(self, checked: bool):
         """Liga/desliga a leitura contínua (persiste na config)."""
         self._continuous_reading = bool(checked)
+        if not self._continuous_reading:
+            self._invalidate_presynth()  # desligou → descarta pré-síntese (3.6)
         config = getattr(self.window(), "_config", None)
         if config is not None:
             try:
@@ -2239,8 +2379,12 @@ class ReaderView(QWidget):
         QTimer.singleShot(400, self._continue_narration)
 
     def _continue_narration(self):
-        """Avança para a próxima página com texto e narra (modo contínuo)."""
-        from src.core.audio.continuous_navigation import find_next_readable_page
+        """Avança para a próxima página com texto e narra (modo contínuo).
+
+        Tarefa 3.6: se a próxima página já foi pré-sintetizada, TOCA o áudio
+        pronto (sem gap de síntese); senão, cai no caminho normal (síntese).
+        """
+        from src.core.audio.continuous_navigation import next_readable_page_with_text
 
         if not self._continuous_reading or not self._reader:
             return
@@ -2253,13 +2397,123 @@ class ReaderView(QWidget):
                     or getattr(self._reader, "get_chapter_text", None))
         if get_text is None:
             return
-        nxt = find_next_readable_page(
+        nxt = next_readable_page_with_text(
             get_text, self._reader.current_page, self._reader.total_pages)
         if nxt is None:
             self._show_status("🔁 Fim do livro — leitura contínua encerrada.", 5000)
             return
-        self._go_to_page(nxt)
-        self._toggle_audio()
+        next_page, _next_text = nxt
+        # Pega o áudio pré-sintetizado ANTES de _go_to_page (que invalida o
+        # cache ao parar o áudio atual). Chave = livro + página + voz.
+        prepared = self._presynth_cache.take(self._presynth_key(next_page))
+        self._go_to_page(next_page)
+        if prepared:
+            self._play_prepared(prepared)
+        else:
+            self._toggle_audio()
+
+    # ── Pré-síntese TTS da próxima página (tarefa 3.6) ────────────────
+
+    def _voice_signature(self) -> str:
+        """Assinatura da voz/velocidade atual — parte da chave do cache.
+
+        Muda de voz/velocidade → chave diferente → o áudio antigo não é
+        reaproveitado (invalidação implícita).
+        """
+        config = getattr(self.window(), "_config", None)
+        if config is None:
+            return "default"
+        try:
+            prof = config.tts_config.get("book_narrator", {}) or {}
+            return (f"{prof.get('preferred_provider', '')}:"
+                    f"{prof.get('voice_id', '')}:{prof.get('rate', '')}")
+        except Exception:
+            return "default"
+
+    def _presynth_key(self, page: int):
+        return (self._book_id, page, self._voice_signature())
+
+    def _maybe_presynthesize_next(self) -> None:
+        """Dispara a síntese em background da PRÓXIMA página (no máx. 1 à frente).
+
+        Só na leitura contínua normal (o modo traduzido passa cada página pelo
+        NLLB antes de narrar — o texto cru não bate com a narração). ADR-006: o
+        threading fica aqui, na GUI; a decisão de "qual é o próximo texto" e o
+        cache são núcleo puro.
+        """
+        if not self._continuous_reading or self._continuous_translate_mode:
+            return
+        if self._tts_router is None or not self._reader:
+            return
+        if self._audio_stopped_by_user:
+            return
+        if self._presynth_cache.pending_key is not None:
+            return  # já há uma página pronta à frente
+        worker = getattr(self, "_presynth_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        get_text = (getattr(self._reader, "get_page_text", None)
+                    or getattr(self._reader, "get_chapter_text", None))
+        if get_text is None:
+            return
+        from src.core.audio.continuous_navigation import next_readable_page_with_text
+        nxt = next_readable_page_with_text(
+            get_text, self._reader.current_page, self._reader.total_pages)
+        if nxt is None:
+            return
+        next_page, next_text = nxt
+        try:
+            from src.gui.workers.audio_worker import PreSynthesisWorker
+            from src.core.tts.voice_profile import NarrationRole
+            self._presynth_worker = PreSynthesisWorker(
+                text=next_text,
+                key=self._presynth_key(next_page),
+                cache=self._presynth_cache,
+                router=self._tts_router,
+                role=NarrationRole.BOOK_NARRATOR,
+                parent=self,
+            )
+            self._presynth_worker.ready.connect(self._on_presynth_ready)
+            self._presynth_worker.start()
+        except Exception:
+            self._presynth_worker = None
+
+    def _on_presynth_ready(self, key):
+        """Pré-síntese concluída: os segmentos já estão no cache (nada a fazer)."""
+        pass
+
+    def _invalidate_presynth(self) -> None:
+        """Descarta a pré-síntese obsoleta (nav. manual / stop / troca de livro)."""
+        worker = getattr(self, "_presynth_worker", None)
+        if worker is not None:
+            try:
+                worker.cancel()
+            except Exception:
+                pass
+        cache = getattr(self, "_presynth_cache", None)
+        if cache is not None:
+            cache.invalidate()
+
+    def _play_prepared(self, segments) -> None:
+        """Toca áudio JÁ sintetizado da próxima página (AudioWorker em prepared)."""
+        from src.gui.workers.audio_worker import AudioWorker
+        from src.core.tts.voice_profile import NarrationRole
+
+        self._audio_stopped_by_user = False
+        self._chain_continuous = True
+        self._audio_worker = AudioWorker(
+            "",
+            role=NarrationRole.BOOK_NARRATOR,
+            router=self._tts_router,
+            prepared=segments,
+            parent=self,
+        )
+        self._audio_worker.playback_started.connect(self._on_audio_started)
+        self._audio_worker.playback_finished.connect(self._on_audio_finished)
+        self._audio_worker.error_occurred.connect(self._on_audio_error)
+        self._audio_worker.finished.connect(self._on_audio_worker_finished)
+        self._audio_worker.provider_changed.connect(self._on_audio_provider_changed)
+        self._audio_worker.start()
 
     def _on_audio_error(self, err_msg):
         self._show_status(f"Erro de Áudio: {err_msg}", 5000)
@@ -2283,6 +2537,7 @@ class ReaderView(QWidget):
     def _stop_audio_if_running(self):
         """Para a narração por completo (libera o worker) e restaura a UI."""
         self._audio_stopped_by_user = True
+        self._invalidate_presynth()  # stop/troca de página descarta pré-síntese (3.6)
         if hasattr(self, '_audio_worker') and self._audio_worker and self._audio_worker.isRunning():
             self._audio_worker.stop()
             self._audio_worker.wait(2000)

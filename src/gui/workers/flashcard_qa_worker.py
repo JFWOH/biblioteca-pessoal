@@ -71,3 +71,84 @@ class FlashcardQAWorker(QThread):
             logger.warning("FlashcardQAWorker falhou: %s", exc)
             if not self._cancelled:
                 self.failed.emit(str(exc))
+
+
+class HighlightCardsWorker(QThread):
+    """Gera flashcards P/R a partir dos DESTAQUES de um livro, em lote (3.3).
+
+    Um card por destaque: destila pergunta/resposta via LLM com ``think=False``
+    — tarefa rápida/estruturada, igual ao ``FlashcardQAWorker`` (mantém o
+    padrão existente). ADR-005: destaque que falhar entra com a pergunta em
+    branco e o próprio destaque no verso, para o usuário editar no preview
+    (nada se perde). Cancelável; emite progresso a cada card.
+    """
+
+    progress = pyqtSignal(int, int)   # feitos, total
+    cards_ready = pyqtSignal(list)    # [{"front","back","source"}, ...]
+    failed = pyqtSignal(str)
+
+    MAX_HIGHLIGHTS = 40  # teto de segurança p/ não disparar dezenas de chamadas
+
+    def __init__(self, highlights: list[str], ollama_url: str = "http://localhost:11434",
+                 model: str | None = None, timeout_s: int = 30, parent=None):
+        super().__init__(parent)
+        self._highlights = [h for h in (highlights or []) if (h or "").strip()][: self.MAX_HIGHLIGHTS]
+        self._ollama_url = ollama_url.rstrip("/")
+        self._model = model
+        self._timeout_s = timeout_s
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        try:
+            model = self._model
+            if not model:
+                from src.core.graph.concept_extractor import resolve_llm_model
+                from src.core.hardware_capability_service import HardwareCapabilityService
+                model = resolve_llm_model(
+                    self._ollama_url,
+                    preferred=HardwareCapabilityService().get_model_for_task("fast"))
+            total = len(self._highlights)
+            cards: list[dict] = []
+            for i, text in enumerate(self._highlights):
+                if self._cancelled:
+                    return
+                card = self._one_card(text, model)
+                if card:
+                    cards.append(card)
+                self.progress.emit(i + 1, total)
+            if self._cancelled:
+                return
+            self.cards_ready.emit(cards)
+        except Exception as exc:  # ADR-005: falha do lote nunca derruba a UI
+            logger.warning("HighlightCardsWorker falhou: %s", exc)
+            if not self._cancelled:
+                self.failed.emit(str(exc))
+
+    def _one_card(self, text: str, model: str | None) -> dict | None:
+        clean = (text or "").strip()
+        if not clean:
+            return None
+        prompt = build_flashcard_qa_prompt(clean)
+        if not prompt:
+            return None
+        qa = None
+        if model:
+            try:
+                from src.core import ollama_client
+                # think=False: destilar P/R de um destaque é tarefa rápida.
+                content = ollama_client.chat_once(
+                    self._ollama_url, model, [{"role": "user", "content": prompt}],
+                    response_format="json", temperature=0.2, num_predict=512,
+                    timeout_s=self._timeout_s, think=False,
+                )
+                qa = parse_flashcard_qa(content)
+            except Exception as exc:
+                logger.warning("HighlightCardsWorker: card falhou (%s)", exc)
+                qa = None
+        if qa is None:
+            # Fallback (ADR-005): destaque no verso, pergunta em branco.
+            return {"front": "", "back": clean[:500], "source": clean[:120]}
+        return {"front": qa[0], "back": qa[1], "source": clean[:120]}

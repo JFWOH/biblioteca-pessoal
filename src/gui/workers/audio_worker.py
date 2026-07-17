@@ -26,6 +26,7 @@ class AudioWorker(QThread):
                  role: NarrationRole = NarrationRole.BOOK_NARRATOR,
                  router: TTSRouter | None = None,
                  language: str | None = None,
+                 prepared: list | None = None,
                  parent=None):
         super().__init__(parent)
         self._text = text
@@ -33,6 +34,11 @@ class AudioWorker(QThread):
         self._volume = volume
         self._role = role
         self._router = router
+        # Áudio JÁ sintetizado pela pré-síntese (tarefa 3.6). Quando presente,
+        # o worker TOCA direto no player contínuo, sem re-sintetizar (corta o
+        # gap entre páginas). Cada item: {audio_data, sample_rate, channels, dtype}.
+        self._prepared = prepared
+        self._prepared_player = None
         # Idioma da narração: explícito (ex.: tradução) ou autodetectado do texto,
         # para que páginas em inglês sejam lidas com voz em inglês.
         self._language = language or detect_language(text)
@@ -52,6 +58,11 @@ class AudioWorker(QThread):
     def run(self) -> None:
         """Execução paralela na thread de background."""
         try:
+            # Modo pré-sintetizado (3.6): toca o áudio já pronto, sem síntese.
+            if self._prepared:
+                self._run_prepared()
+                return
+
             # Initialize router if not provided
             if self._router is None:
                 logger.info("AUDIO_WORKER: ROUTER_REUSED=false (creating new router)")
@@ -108,19 +119,173 @@ class AudioWorker(QThread):
             logger.error("AUDIO_WORKER: Erro inesperado: %s", e)
             self.error_occurred.emit(f"Erro ao reproduzir audio: {e}")
 
+    def _run_prepared(self) -> None:
+        """Toca áudio JÁ sintetizado (pré-síntese 3.6) direto no player contínuo.
+
+        Espelha exatamente o ``enqueue`` que o TTSRouter faz internamente
+        (audio_data + sample_rate + channels + dtype), mas sem re-sintetizar —
+        é isso que corta o gap ao virar de página. ADR-005: lista vazia ou
+        falha vira "0 chunks", nunca crash (o chamador cai no caminho normal).
+        """
+        from src.core.audio.continuous_player import ContinuousAudioPlayer
+
+        segments = self._prepared or []
+        if not segments:
+            self.playback_finished.emit(0)
+            return
+
+        sample_rate = int(segments[0].get("sample_rate") or 24000)
+        player = ContinuousAudioPlayer(sample_rate=sample_rate)
+        player.start()
+        self._prepared_player = player
+        self.playback_started.emit()
+
+        spoken = 0
+        try:
+            for seg in segments:
+                if self._is_cancelled:
+                    break
+                audio = seg.get("audio_data")
+                if audio is None:
+                    continue
+                player.enqueue(
+                    audio,
+                    int(seg.get("sample_rate") or sample_rate),
+                    channels=int(seg.get("channels") or 1),
+                    dtype=seg.get("dtype") or "float32",
+                )
+                spoken += 1
+
+            if self._is_cancelled:
+                player.stop()
+            else:
+                player.wait_until_done()
+                player.stop()
+        finally:
+            self._prepared_player = None
+
+        self.playback_finished.emit(spoken)
+
     def stop(self) -> None:
         """Interrompe a leitura de forma best-effort e graciosa."""
         self._is_cancelled = True
-        if self._router:
+        if self._prepared_player is not None:
+            try:
+                self._prepared_player.stop()
+            except Exception:
+                pass
+        elif self._router:
             self._router.stop()
         self.requestInterruption()
 
     def pause(self) -> None:
         """Pausa a reprodução (retomável no mesmo ponto via resume())."""
-        if self._router:
+        if self._prepared_player is not None:
+            self._prepared_player.pause()
+        elif self._router:
             self._router.pause()
 
     def resume(self) -> None:
         """Retoma a reprodução pausada a partir do ponto exato."""
-        if self._router:
+        if self._prepared_player is not None:
+            self._prepared_player.resume()
+        elif self._router:
             self._router.resume()
+
+
+class PreSynthesisWorker(QThread):
+    """Sintetiza (SEM tocar) o áudio da PRÓXIMA página em background (3.6).
+
+    Enquanto a página atual é narrada, este worker sintetiza a próxima e guarda
+    os segmentos no ``PreSynthesisCache`` (core puro). A reprodução acontece
+    depois, pelo ``AudioWorker`` em modo ``prepared`` — sem gap de síntese.
+
+    Reaproveita a seleção de provedor/voz do ``TTSRouter`` (uso somente-leitura
+    dos seus helpers), sem tocar no router. ADR-006: o threading vive aqui, na
+    GUI. ADR-005: qualquer falha apenas NÃO preenche o cache (a leitura
+    contínua cai no caminho normal de síntese+reprodução).
+    """
+
+    ready = pyqtSignal(object)   # key (o cache já foi preenchido)
+    failed = pyqtSignal(str)
+
+    def __init__(self, text: str, key, cache, router: TTSRouter | None,
+                 role: NarrationRole = NarrationRole.BOOK_NARRATOR,
+                 language: str | None = None, parent=None):
+        super().__init__(parent)
+        self._text = text or ""
+        self._key = key
+        self._cache = cache
+        self._router = router
+        self._role = role
+        self._language = language
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self) -> None:
+        try:
+            segments = self._synthesize()
+            if self._cancelled or not segments:
+                return
+            self._cache.store(self._key, segments)
+            self.ready.emit(self._key)
+        except Exception as exc:  # ADR-005: nunca derruba a narração em curso
+            logger.warning("PreSynthesisWorker falhou: %s", exc)
+            if not self._cancelled:
+                self.failed.emit(str(exc))
+
+    def _synthesize(self) -> list:
+        router = self._router
+        if router is None or not self._text.strip():
+            return []
+
+        profile = (router.get_book_profile()
+                   if self._role == NarrationRole.BOOK_NARRATOR
+                   else router.get_assistant_profile())
+        language = self._language or detect_language(self._text)
+        effective_language = language or profile.language
+
+        try:
+            processed = TTSTextPreprocessor().prepare_for_speech(
+                self._text, style=profile.style)
+        except Exception:
+            processed = self._text
+        if not processed or not processed.strip():
+            return []
+
+        provider = router._get_provider_for_profile(profile)
+        # pyttsx3 não expõe audio_data — não dá para pré-sintetizar; deixa o
+        # caminho normal cuidar (fala bloqueante).
+        if provider is None or provider.name.lower() == "pyttsx3":
+            return []
+
+        voice_id = profile.voice_id
+        if not voice_id:
+            try:
+                voice_id = router._resolve_voice(provider, effective_language, profile.style)
+            except Exception:
+                voice_id = None
+
+        is_high_latency = provider.latency_profile() == "high"
+        max_chars = 200 if is_high_latency else 800
+        chunks = TTSRouter._split_preprocessed_text(processed, max_chars=max_chars)
+
+        segments: list[dict] = []
+        for chunk in chunks:
+            if self._cancelled:
+                return []
+            if not chunk.strip():
+                continue
+            result = provider.synthesize(
+                chunk, voice_id=voice_id, rate=profile.rate, volume=profile.volume)
+            if not getattr(result, "success", False) or result.audio_data is None:
+                continue
+            segments.append({
+                "audio_data": result.audio_data,
+                "sample_rate": result.sample_rate,
+                "channels": provider.channels,
+                "dtype": provider.dtype,
+            })
+        return segments

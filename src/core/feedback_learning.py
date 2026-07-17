@@ -18,7 +18,7 @@ _HEADER = (
     "Ajustes com base no feedback:"
 )
 
-# Quando há ≥4 negativos mas nenhuma categoria qualifica, o bloco traz este
+# Quando há ≥2 negativos mas nenhuma categoria qualifica, o bloco traz este
 # único bullet genérico (ainda é um sinal, mas sem motivo dominante).
 _GENERIC_BULLET = "Capriche na fundamentação e cite as fontes do livro."
 
@@ -45,8 +45,10 @@ _CATEGORY_INSTRUCTIONS: dict[str, str] = {
 }
 
 # Limiares (espelham a filosofia da Fase 6: só age com sinal suficiente).
-_MIN_NEGATIVES = 4       # a janela precisa de ≥4 negativos para haver bloco
-_MIN_CATEGORY_HITS = 3   # uma categoria qualifica com ≥3 ocorrências
+# Ajuste 3.8 (jul/2026): baixados de 4/3 para 2/2 — o sinal negativo passa a
+# virar ajuste de prompt mais cedo (feedback acionável), contrato intencional.
+_MIN_NEGATIVES = 2       # a janela precisa de ≥2 negativos para haver bloco
+_MIN_CATEGORY_HITS = 2   # uma categoria qualifica com ≥2 ocorrências
 _MAX_CATEGORIES = 2      # no máximo 2 categorias entram no bloco
 
 
@@ -69,15 +71,15 @@ def build_feedback_block(rows: list[dict]) -> str | None:
 
     ``rows`` é a janela recente de ``agent_feedback`` (o chamador limita a
     200, mais recentes primeiro). Negativos = ``rating`` < 0. Com menos de
-    ``_MIN_NEGATIVES`` (4) negativos não há sinal suficiente e o resultado é
+    ``_MIN_NEGATIVES`` (2) negativos não há sinal suficiente e o resultado é
     ``None`` (sem bloco).
 
     Só os motivos canônicos (:data:`_CATEGORY_INSTRUCTIONS`) contam como
     categoria, e apenas entre os negativos; cada uma qualifica com
-    ``_MIN_CATEGORY_HITS`` (3) ocorrências e entram no máximo
+    ``_MIN_CATEGORY_HITS`` (2) ocorrências e entram no máximo
     ``_MAX_CATEGORIES`` (2) no bloco (contagem desc; empate pela ordem
     canônica). Texto livre ("Outro…") não vira categoria — conta só no total
-    de negativos. Sem nenhuma categoria qualificada (mas com ≥4 negativos), o
+    de negativos. Sem nenhuma categoria qualificada (mas com ≥2 negativos), o
     bloco traz um único bullet genérico. Linhas malformadas são ignoradas.
     """
     negatives = 0
