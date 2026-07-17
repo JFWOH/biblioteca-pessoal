@@ -4,6 +4,7 @@ from src.core.tts.tts_router import TTSRouter
 from src.core.tts.voice_profile import NarrationRole
 from src.core.tts.text_preprocessor import TTSTextPreprocessor
 from src.core.tts.language_detect import detect_language_confident
+from src.core.tts.language_segments import split_language_runs
 from src.core.audio.tts_backend import TTSBackendUnavailable
 
 logger = logging.getLogger(__name__)
@@ -276,16 +277,39 @@ class PreSynthesisWorker(QThread):
 
         is_high_latency = provider.latency_profile() == "high"
         max_chars = 200 if is_high_latency else 800
-        chunks = TTSRouter._split_preprocessed_text(processed, max_chars=max_chars)
+
+        # Espelha a voz por SENTENÇA do TTSRouter (item 6): quando o idioma NÃO
+        # foi fixado (self._language None → mesma condição que dispara o multi-run
+        # no router) e o texto é misto PT/EN, sintetiza cada run de idioma com a
+        # sua voz. Sem isto o áudio do cache divergiria da reprodução ao vivo. Um
+        # único run mantém o caminho anterior (mesma voz, mesmos chunks).
+        work: list[tuple] = []  # (voice_id, chunk)
+        lang_runs = split_language_runs(processed, profile.language) if language is None else []
+        if len(lang_runs) > 1:
+            prev_voice = voice_id
+            for run_lang, run_text in lang_runs:
+                try:
+                    run_voice = router._resolve_voice(provider, run_lang, profile.style)
+                except Exception:
+                    run_voice = None
+                if run_voice is None:
+                    run_voice = prev_voice  # degradação graciosa: herda a voz
+                else:
+                    prev_voice = run_voice
+                for chunk in TTSRouter._split_preprocessed_text(run_text, max_chars=max_chars):
+                    work.append((run_voice, chunk))
+        else:
+            for chunk in TTSRouter._split_preprocessed_text(processed, max_chars=max_chars):
+                work.append((voice_id, chunk))
 
         segments: list[dict] = []
-        for chunk in chunks:
+        for chunk_voice, chunk in work:
             if self._cancelled:
                 return []
             if not chunk.strip():
                 continue
             result = provider.synthesize(
-                chunk, voice_id=voice_id, rate=profile.rate, volume=profile.volume)
+                chunk, voice_id=chunk_voice, rate=profile.rate, volume=profile.volume)
             if not getattr(result, "success", False) or result.audio_data is None:
                 continue
             segments.append({

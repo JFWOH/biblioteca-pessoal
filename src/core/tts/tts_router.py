@@ -21,11 +21,24 @@ from src.core.tts.base_tts_provider import (
 )
 from src.core.tts.voice_profile import VoiceProfile, NarrationRole
 from src.core.tts.text_preprocessor import TTSTextPreprocessor
+from src.core.tts.language_segments import split_language_runs
 
 logger = logging.getLogger(__name__)
 
 # Tier ordering: highest quality first
 TIER_ORDER = ["A", "B", "C", "D", "legacy"]
+
+
+class _SLOFallbackSwap(Exception):
+    """Sinal interno: o SLO de TTFB estourou e ``_mid_stream_fallback`` JÁ
+    aplicou a troca de provider/voz no ``state``.
+
+    NÃO é uma falha de síntese. Quem sintetiza deve RE-sintetizar o chunk
+    corrente com o provider já trocado — sem recomputar ``_get_fallback_provider``
+    nem parar a reprodução. (Débito da rodada 3: o handler genérico recomputava
+    o fallback sobre o provider já trocado, não achava nada abaixo do Piper e
+    dava ``break``, parando o áudio justamente quando o reserva TINHA a voz.)
+    """
 
 
 class TTSRouter:
@@ -38,6 +51,11 @@ class TTSRouter:
     4. Applies text preprocessing before synthesis.
     5. Reports which provider was actually used.
     """
+
+    # SLO de TTFB (segundos): se o 1º chunk demora mais que isto, tenta trocar
+    # de motor (ver _mid_stream_fallback). Atributo de classe p/ os testes
+    # ajustarem sem sleeps reais.
+    _TTFB_SLO_SECONDS = 3.0
 
     def __init__(self, preprocessor: Optional[TTSTextPreprocessor] = None):
         self._providers: dict[str, BaseTTSProvider] = {}
@@ -361,114 +379,88 @@ class TTSRouter:
         # bufferizada (ver _active_player em __init__).
         self._active_player = player
 
+        # ── Voz por SENTENÇA em texto misto PT/EN (item 6) ────────────────
+        # Só quando o chamador NÃO fixou o idioma (o fluxo traduzido é
+        # single-language e continua intocado). Segmentamos o texto já
+        # pré-processado em runs de idioma e resolvemos a voz por run; um único
+        # run mantém o caminho atual byte-a-byte (mesma voz, mesmos chunks).
+        runs_plan: list[dict] = [{
+            "language": effective_language,
+            "voice_id": voice_id,
+            "chunks": chunks,
+        }]
+        if language is None:
+            lang_runs = split_language_runs(processed_text, profile.language)
+            if len(lang_runs) > 1:
+                planned: list[dict] = []
+                prev_voice = voice_id  # voz do perfil/base: reserva graciosa
+                for run_lang, run_text in lang_runs:
+                    resolved = self._resolve_voice(provider, run_lang, profile.style)
+                    if resolved is None:
+                        # Sem voz para o idioma do run → herda a voz anterior/perfil
+                        # (degradação graciosa; nunca aborta a narração).
+                        resolved = prev_voice
+                    else:
+                        prev_voice = resolved
+                    run_chunks = self._split_preprocessed_text(run_text, max_chars=max_chars)
+                    if run_chunks:
+                        planned.append({
+                            "language": run_lang,
+                            "voice_id": resolved,
+                            "chunks": run_chunks,
+                        })
+                if planned:
+                    runs_plan = planned
+
+        original_provider = provider
         state = {
             "provider": provider,
             "voice_id": voice_id,
             "spoken_count": 0,
-            "first_chunk": True
+            "first_chunk": True,
+            "language": effective_language,
         }
 
-        def synthesis_worker():
-            for idx, chunk in enumerate(chunks):
-                if self._is_cancelled:
-                    logger.info("TTS_ROUTER: Synthesis cancelled mid-stream.")
-                    break
+        def _synthesize_one(chunk, idx):
+            """Sintetiza e enfileira UM chunk com o provider/voz atuais do state.
 
-                if not chunk.strip():
-                    continue
+            Levanta ``_SLOFallbackSwap`` quando o SLO de TTFB estoura e a troca
+            já foi aplicada ao state (o chamador RE-sintetiza este chunk com o
+            provider trocado). Levanta ``TTSProviderError`` em falha de síntese.
+            """
+            prov = state["provider"]
 
-                try:
-                    if state["provider"].name.lower() == "pyttsx3":
-                        # If we already fell back to pyttsx3, just use speak_blocking directly
-                        player.wait_until_done()
-                        state["provider"].speak_blocking(chunk, voice_id=state["voice_id"], rate=profile.rate, volume=profile.volume)
-                        state["spoken_count"] += 1
-                        continue
+            if prov.name.lower() == "pyttsx3":
+                player.wait_until_done()
+                prov.speak_blocking(chunk, voice_id=state["voice_id"],
+                                    rate=profile.rate, volume=profile.volume)
+                state["spoken_count"] += 1
+                return
 
-                    # If provider supports streaming, consume iteratively
-                    if state["provider"].supports_streaming():
-                        logger.info("CHUNK_%d_GENERATING_STREAM: length=%d", idx, len(chunk))
-                        start_time = time.time()
-                        
-                        stream = state["provider"].synthesize_stream(
-                            chunk,
-                            voice_id=state["voice_id"],
-                            rate=profile.rate,
-                            volume=profile.volume,
-                        )
-                        
-                        for segment_result in stream:
-                            if self._is_cancelled:
-                                break
-                            
-                            if not segment_result.success:
-                                raise TTSProviderError(segment_result.error)
-                                
-                            if state["first_chunk"]:
-                                ttfb = time.time() - start_time
-                                ttfb_ms = ttfb * 1000.0
-                                logger.info("TTS_ROUTER_TTFB_MS: %.2f ms (first segment of stream)", ttfb_ms)
-                                
-                                # Check TTFB SLO. Rodada 3: só troca de motor se
-                                # o reserva puder falar o idioma efetivo — senão
-                                # continua no atual (lento > "anglicado"). Ver
-                                # _mid_stream_fallback.
-                                if ttfb > 3.0:
-                                    logger.warning("TTS_ROUTER: TTFB for '%s' was %.2fs (SLO violated).", state["provider"].name, ttfb)
-                                    fallback, fb_voice = self._mid_stream_fallback(
-                                        state["provider"], effective_language,
-                                        profile.style, language is not None)
-                                    if fallback is not None:
-                                        if state["provider"].name.lower() == "kokoro" and fallback.name.lower() == "piper":
-                                            logger.info("TTS_ROUTER_FALLBACK_TO_PIPER: Falling back from Kokoro to Piper due to TTFB SLO violation (%.2fs)", ttfb)
-                                        state["provider"] = fallback
-                                        self._active_provider = fallback
-                                        state["voice_id"] = fb_voice
-                                        raise TTSProviderError("SLO violated, trigger fallback")
-                                    # Sem reserva utilizável (inexistente ou sem voz no
-                                    # idioma explícito): mantém o provider atual. Não
-                                    # re-dispara o SLO — first_chunk=False encerra a checagem.
-                                    logger.warning(
-                                        "TTS_ROUTER: SLO violado (%.2fs) mas mantendo '%s' — reserva ausente ou sem voz em '%s'.",
-                                        ttfb, state["provider"].name, effective_language)
-                                state["first_chunk"] = False
-                                
-                            if not self._is_cancelled and segment_result.audio_data is not None:
-                                player.enqueue(
-                                    segment_result.audio_data,
-                                    segment_result.sample_rate,
-                                    channels=state["provider"].channels,
-                                    dtype=state["provider"].dtype
-                                )
-                                
-                        if not self._is_cancelled:
-                            state["spoken_count"] += 1
-                    else:
-                        logger.info("CHUNK_%d_GENERATING: length=%d", idx, len(chunk))
-                        start_time = time.time()
-                        result = state["provider"].synthesize(
-                            chunk,
-                            voice_id=state["voice_id"],
-                            rate=profile.rate,
-                            volume=profile.volume,
-                        )
-                        
-                        if not result.success:
-                            raise TTSProviderError(result.error)
- 
+            if prov.supports_streaming():
+                logger.info("CHUNK_%d_GENERATING_STREAM: length=%d", idx, len(chunk))
+                start_time = time.time()
+                stream = prov.synthesize_stream(
+                    chunk,
+                    voice_id=state["voice_id"],
+                    rate=profile.rate,
+                    volume=profile.volume,
+                )
+                for segment_result in stream:
+                    if self._is_cancelled:
+                        break
+                    if not segment_result.success:
+                        raise TTSProviderError(segment_result.error)
+                    if state["first_chunk"]:
                         ttfb = time.time() - start_time
-                        ttfb_ms = ttfb * 1000.0
-                        logger.info("CHUNK_%d_GENERATED: bytes=%d, rate=%d, ttfb=%.2fs (%.2f ms)", 
-                                    idx, len(result.audio_data) if result.audio_data is not None else 0, result.sample_rate, ttfb, ttfb_ms)
-                        logger.info("TTS_ROUTER_TTFB_MS: %.2f ms", ttfb_ms)
- 
-                        # Check TTFB SLO. Rodada 3: só troca de motor se o
-                        # reserva puder falar o idioma efetivo — senão continua
-                        # no atual (lento > "anglicado"). Ver _mid_stream_fallback.
-                        if state["first_chunk"] and ttfb > 3.0:
-                            logger.warning("TTS_ROUTER: TTFB for '%s' was %.2fs (SLO violated).", state["provider"].name, ttfb)
+                        logger.info("TTS_ROUTER_TTFB_MS: %.2f ms (first segment of stream)", ttfb * 1000.0)
+                        # Check TTFB SLO. Rodada 3: só troca de motor se o reserva
+                        # puder falar o idioma do run — senão continua no atual
+                        # (lento > "anglicado"). Ver _mid_stream_fallback.
+                        if ttfb > self._TTFB_SLO_SECONDS:
+                            logger.warning("TTS_ROUTER: TTFB for '%s' was %.2fs (SLO violated).", prov.name, ttfb)
                             fallback, fb_voice = self._mid_stream_fallback(
-                                state["provider"], effective_language,
+                                state["provider"], state["language"],
                                 profile.style, language is not None)
                             if fallback is not None:
                                 if state["provider"].name.lower() == "kokoro" and fallback.name.lower() == "piper":
@@ -476,93 +468,171 @@ class TTSRouter:
                                 state["provider"] = fallback
                                 self._active_provider = fallback
                                 state["voice_id"] = fb_voice
-                                logger.info("TTS_ROUTER: Switched to '%s' for next chunks", fallback.name)
-                                raise TTSProviderError("SLO violated, trigger fallback")
-                            # Sem reserva utilizável (inexistente ou sem voz no idioma
-                            # explícito): mantém o provider atual e não re-dispara o SLO.
+                                state["first_chunk"] = False
+                                raise _SLOFallbackSwap()
+                            # Sem reserva utilizável (inexistente ou sem voz no
+                            # idioma explícito): mantém o provider atual.
                             logger.warning(
                                 "TTS_ROUTER: SLO violado (%.2fs) mas mantendo '%s' — reserva ausente ou sem voz em '%s'.",
-                                ttfb, state["provider"].name, effective_language)
-
+                                ttfb, state["provider"].name, state["language"])
                         state["first_chunk"] = False
- 
-                        if not self._is_cancelled and result.audio_data is not None and state["provider"].name.lower() != "pyttsx3":
-                            player.enqueue(
-                                result.audio_data,
-                                result.sample_rate,
-                                channels=state["provider"].channels,
-                                dtype=state["provider"].dtype
-                            )
-                            state["spoken_count"] += 1
- 
-                except TTSProviderError as e:
-                    logger.error("TTS_ROUTER: Provider '%s' failed on chunk %d: %s",
-                                 state["provider"].name, idx, e)
-                    # Try fallback provider for remaining chunks
-                    fallback = self._get_fallback_provider(state["provider"])
-                    if fallback:
+                    if not self._is_cancelled and segment_result.audio_data is not None:
+                        player.enqueue(
+                            segment_result.audio_data,
+                            segment_result.sample_rate,
+                            channels=prov.channels,
+                            dtype=prov.dtype,
+                        )
+                if not self._is_cancelled:
+                    state["spoken_count"] += 1
+            else:
+                logger.info("CHUNK_%d_GENERATING: length=%d", idx, len(chunk))
+                start_time = time.time()
+                result = prov.synthesize(
+                    chunk,
+                    voice_id=state["voice_id"],
+                    rate=profile.rate,
+                    volume=profile.volume,
+                )
+                if not result.success:
+                    raise TTSProviderError(result.error)
+                ttfb = time.time() - start_time
+                logger.info("CHUNK_%d_GENERATED: bytes=%d, rate=%d, ttfb=%.2fs (%.2f ms)",
+                            idx, len(result.audio_data) if result.audio_data is not None else 0,
+                            result.sample_rate, ttfb, ttfb * 1000.0)
+                logger.info("TTS_ROUTER_TTFB_MS: %.2f ms", ttfb * 1000.0)
+                # Check TTFB SLO (ver comentário no ramo de streaming).
+                if state["first_chunk"] and ttfb > self._TTFB_SLO_SECONDS:
+                    logger.warning("TTS_ROUTER: TTFB for '%s' was %.2fs (SLO violated).", prov.name, ttfb)
+                    fallback, fb_voice = self._mid_stream_fallback(
+                        state["provider"], state["language"],
+                        profile.style, language is not None)
+                    if fallback is not None:
                         if state["provider"].name.lower() == "kokoro" and fallback.name.lower() == "piper":
-                            logger.info("TTS_ROUTER_FALLBACK_TO_PIPER: Falling back from Kokoro to Piper mid-stream. Reason: %s", e)
-                        logger.info("TTS_ROUTER: Switching to fallback '%s' mid-stream", fallback.name)
+                            logger.info("TTS_ROUTER_FALLBACK_TO_PIPER: Falling back from Kokoro to Piper due to TTFB SLO violation (%.2fs)", ttfb)
                         state["provider"] = fallback
                         self._active_provider = fallback
-                        state["voice_id"] = self._resolve_voice(fallback, effective_language, profile.style)
+                        state["voice_id"] = fb_voice
+                        state["first_chunk"] = False
+                        logger.info("TTS_ROUTER: Switched to '%s' for next chunks", fallback.name)
+                        raise _SLOFallbackSwap()
+                    logger.warning(
+                        "TTS_ROUTER: SLO violado (%.2fs) mas mantendo '%s' — reserva ausente ou sem voz em '%s'.",
+                        ttfb, state["provider"].name, state["language"])
+                state["first_chunk"] = False
+                if (not self._is_cancelled and result.audio_data is not None
+                        and prov.name.lower() != "pyttsx3"):
+                    player.enqueue(
+                        result.audio_data,
+                        result.sample_rate,
+                        channels=prov.channels,
+                        dtype=prov.dtype,
+                    )
+                    state["spoken_count"] += 1
 
-                        if fallback.name.lower() == "pyttsx3":
-                            try:
-                                player.wait_until_done()
-                                fallback.speak_blocking(chunk, voice_id=state["voice_id"], rate=profile.rate, volume=profile.volume)
-                                state["spoken_count"] += 1
-                            except Exception as e2:
-                                logger.error("TTS_ROUTER: pyttsx3 fallback failed: %s", e2)
-                                break
-                        else:
-                            try:
-                                if state["provider"].supports_streaming():
-                                    stream = state["provider"].synthesize_stream(
-                                        chunk,
-                                        voice_id=state["voice_id"],
-                                        rate=profile.rate,
-                                        volume=profile.volume,
-                                    )
-                                    for r in stream:
-                                        if r.success and not self._is_cancelled and r.audio_data is not None:
-                                            player.enqueue(
-                                                r.audio_data,
-                                                r.sample_rate,
-                                                channels=state["provider"].channels,
-                                                dtype=state["provider"].dtype
-                                            )
-                                    if not self._is_cancelled:
-                                        state["spoken_count"] += 1
-                                else:
-                                    result = state["provider"].synthesize(
-                                        chunk,
-                                        voice_id=state["voice_id"],
-                                        rate=profile.rate,
-                                        volume=profile.volume,
-                                    )
-                                    if result.success and not self._is_cancelled and result.audio_data is not None:
-                                        player.enqueue(
-                                            result.audio_data,
-                                            result.sample_rate,
-                                            channels=state["provider"].channels,
-                                            dtype=state["provider"].dtype
-                                        )
-                                        state["spoken_count"] += 1
-                            except Exception as e2:
-                                logger.error("TTS_ROUTER: Fallback also failed: %s", e2)
-                                break
-                    else:
-                        break
-                except Exception as e:
-                    logger.error("TTS_ROUTER: Unexpected error on chunk %d: %s", idx, e)
+        def _handle_generic_failure(chunk, idx, exc) -> bool:
+            """Fallback por FALHA REAL de síntese (não-SLO): recomputa o próximo
+            motor abaixo e re-sintetiza o chunk. Retorna ``False`` quando não há
+            reserva utilizável (o chamador para o loop)."""
+            logger.error("TTS_ROUTER: Provider '%s' failed on chunk %d: %s",
+                         state["provider"].name, idx, exc)
+            fallback = self._get_fallback_provider(state["provider"])
+            if not fallback:
+                return False
+            if state["provider"].name.lower() == "kokoro" and fallback.name.lower() == "piper":
+                logger.info("TTS_ROUTER_FALLBACK_TO_PIPER: Falling back from Kokoro to Piper mid-stream. Reason: %s", exc)
+            logger.info("TTS_ROUTER: Switching to fallback '%s' mid-stream", fallback.name)
+            state["provider"] = fallback
+            self._active_provider = fallback
+            state["voice_id"] = self._resolve_voice(fallback, state["language"], profile.style)
+            try:
+                if fallback.name.lower() == "pyttsx3":
+                    player.wait_until_done()
+                    fallback.speak_blocking(chunk, voice_id=state["voice_id"],
+                                            rate=profile.rate, volume=profile.volume)
+                    state["spoken_count"] += 1
+                elif state["provider"].supports_streaming():
+                    stream = state["provider"].synthesize_stream(
+                        chunk,
+                        voice_id=state["voice_id"],
+                        rate=profile.rate,
+                        volume=profile.volume,
+                    )
+                    for r in stream:
+                        if r.success and not self._is_cancelled and r.audio_data is not None:
+                            player.enqueue(
+                                r.audio_data,
+                                r.sample_rate,
+                                channels=state["provider"].channels,
+                                dtype=state["provider"].dtype,
+                            )
+                    if not self._is_cancelled:
+                        state["spoken_count"] += 1
+                else:
+                    result = state["provider"].synthesize(
+                        chunk,
+                        voice_id=state["voice_id"],
+                        rate=profile.rate,
+                        volume=profile.volume,
+                    )
+                    if result.success and not self._is_cancelled and result.audio_data is not None:
+                        player.enqueue(
+                            result.audio_data,
+                            result.sample_rate,
+                            channels=state["provider"].channels,
+                            dtype=state["provider"].dtype,
+                        )
+                        state["spoken_count"] += 1
+            except Exception as exc2:
+                logger.error("TTS_ROUTER: Fallback also failed: %s", exc2)
+                return False
+            return True
+
+        def synthesis_worker():
+            stop = False
+            for run in runs_plan:
+                if stop or self._is_cancelled:
                     break
-                
-                # If we switched to pyttsx3 during the loop, handle remaining chunks sequentially
-                if state["provider"].name.lower() == "pyttsx3" and not self._is_cancelled:
-                    # Break out of this specific iteration and let the next iterations use speak_blocking
-                    pass
+                state["language"] = run["language"]
+                # Resolve a voz do run para o provider ATUAL: se um fallback já
+                # trocou o motor, re-resolve; senão usa a voz pré-calculada.
+                if state["provider"] is original_provider:
+                    state["voice_id"] = run["voice_id"]
+                else:
+                    rv = self._resolve_voice(state["provider"], run["language"], profile.style)
+                    if rv is not None:
+                        state["voice_id"] = rv
+                for idx, chunk in enumerate(run["chunks"]):
+                    if self._is_cancelled:
+                        logger.info("TTS_ROUTER: Synthesis cancelled mid-stream.")
+                        stop = True
+                        break
+                    if not chunk.strip():
+                        continue
+                    try:
+                        _synthesize_one(chunk, idx)
+                    except _SLOFallbackSwap:
+                        # Troca por SLO já aplicada no state: RE-sintetiza ESTE
+                        # chunk com o provider trocado (sem recomputar fallback,
+                        # sem parar). first_chunk=False ⇒ não re-dispara o SLO.
+                        try:
+                            _synthesize_one(chunk, idx)
+                        except TTSProviderError as exc:
+                            if not _handle_generic_failure(chunk, idx, exc):
+                                stop = True
+                                break
+                        except Exception as exc:
+                            logger.error("TTS_ROUTER: Unexpected error on chunk %d: %s", idx, exc)
+                            stop = True
+                            break
+                    except TTSProviderError as exc:
+                        if not _handle_generic_failure(chunk, idx, exc):
+                            stop = True
+                            break
+                    except Exception as exc:
+                        logger.error("TTS_ROUTER: Unexpected error on chunk %d: %s", idx, exc)
+                        stop = True
+                        break
 
         synth_thread = threading.Thread(target=synthesis_worker, daemon=True)
         synth_thread.start()
