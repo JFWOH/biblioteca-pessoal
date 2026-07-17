@@ -56,6 +56,22 @@ class TranslationService(QObject):
             cls._instance = TranslationService()
         return cls._instance
 
+    @classmethod
+    def reset_instance(cls) -> None:
+        """Descarta o singleton COM os workers já finalizados (uso em testes).
+
+        Largar ``_instance = None`` com um ``TranslationWorker`` ainda vivo
+        deixa o QThread ser destruído pelo GC com a thread do SO rodando —
+        abort nativo ("QThread: Destroyed while thread is still running").
+        Era a causa do SIGABRT recorrente do CI em
+        ``test_translation_service.py`` (faulthandler, PR #32: 3/3 tentativas
+        no mesmo teste). Sempre espere os workers antes de soltar a instância.
+        """
+        inst = cls._instance
+        if inst is not None:
+            inst.wait_for_workers()
+        cls._instance = None
+
     def __init__(self):
         super().__init__()
         self.config = ConfigManager().get("translation", {})
@@ -93,4 +109,21 @@ class TranslationService(QObject):
     def _cleanup_worker(self, worker):
         if worker in self._active_workers:
             self._active_workers.remove(worker)
+        # ``finished``/``error`` são emitidos DENTRO de run(): quando este slot
+        # roda (fila do event loop da thread principal), a thread do SO pode
+        # ainda não ter saído de run(). deleteLater() sem wait() abre a janela
+        # do abort nativo "QThread: Destroyed while thread is still running"
+        # (flake do CI capturado por faulthandler). O wait() aqui retorna em
+        # microssegundos — o emit é a última instrução de run().
+        worker.wait()
         worker.deleteLater()
+
+    def wait_for_workers(self, timeout_ms: int = 5000) -> None:
+        """Aguarda todos os workers ativos terminarem (encerramento/testes)."""
+        for worker in list(self._active_workers):
+            try:
+                worker.wait(timeout_ms)
+            except RuntimeError:
+                # Worker já destruído pelo Qt — nada a esperar (ADR-005).
+                pass
+        self._active_workers.clear()

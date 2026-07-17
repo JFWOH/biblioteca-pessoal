@@ -125,14 +125,14 @@ class TestTranslationServiceSingleton:
         from src.gui.translation_service import TranslationService
 
         # Reset para isolar o teste
-        TranslationService._instance = None
+        TranslationService.reset_instance()
 
         s1 = TranslationService.get_instance()
         s2 = TranslationService.get_instance()
         assert s1 is s2
 
         # Cleanup
-        TranslationService._instance = None
+        TranslationService.reset_instance()
 
 
 # ── Service: Worker assíncrono com erro ──────────────────────────────────────
@@ -143,7 +143,7 @@ class TestTranslationServiceErrorHandling:
     def test_error_callback_is_invoked(self, qtbot):
         from src.gui.translation_service import TranslationService
 
-        TranslationService._instance = None
+        TranslationService.reset_instance()
         service = TranslationService.get_instance()
 
         # Faz o backend levantar exceção
@@ -162,4 +162,4 @@ class TestTranslationServiceErrorHandling:
         qtbot.waitUntil(lambda: len(errors) > 0, timeout=3000)
         assert "Inferência explodiu" in errors[0] or "Erro" in errors[0]
 
-        TranslationService._instance = None
+        TranslationService.reset_instance()

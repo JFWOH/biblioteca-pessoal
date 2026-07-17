@@ -13,7 +13,7 @@ class TestTranslationWorkerIntegration:
     def test_successful_translation_emits_result(self, qtbot):
         from src.gui.translation_service import TranslationService
 
-        TranslationService._instance = None
+        TranslationService.reset_instance()
         service = TranslationService.get_instance()
 
         # Mock do backend para não baixar modelo
@@ -33,12 +33,12 @@ class TestTranslationWorkerIntegration:
         qtbot.waitUntil(lambda: len(results) > 0, timeout=3000)
         assert results[0] == "Traduzido: Hello world"
 
-        TranslationService._instance = None
+        TranslationService.reset_instance()
 
     def test_error_in_backend_emits_error_callback(self, qtbot):
         from src.gui.translation_service import TranslationService
 
-        TranslationService._instance = None
+        TranslationService.reset_instance()
         service = TranslationService.get_instance()
 
         # Simula falha controlada
@@ -58,13 +58,13 @@ class TestTranslationWorkerIntegration:
         qtbot.waitUntil(lambda: len(errors) > 0, timeout=3000)
         assert "Modelo indisponível offline" in errors[0]
 
-        TranslationService._instance = None
+        TranslationService.reset_instance()
 
     def test_worker_cleanup_after_completion(self, qtbot):
         """Verifica que o worker é removido da lista de ativos após terminar."""
         from src.gui.translation_service import TranslationService
 
-        TranslationService._instance = None
+        TranslationService.reset_instance()
         service = TranslationService.get_instance()
 
         service.backend._is_loaded = True
@@ -84,4 +84,4 @@ class TestTranslationWorkerIntegration:
         qtbot.wait(200)
         assert len(service._active_workers) == 0
 
-        TranslationService._instance = None
+        TranslationService.reset_instance()
