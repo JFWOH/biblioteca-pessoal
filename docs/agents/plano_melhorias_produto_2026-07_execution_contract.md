@@ -61,16 +61,34 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   test_emoji_buttons, test_theme_propagation, test_styles_migration.
 
 ### Onda 1 — [P1] Leitor
-- [ ] **1.1** Botão **Aa** na toolbar: popover com fonte/tamanho/entrelinha/margem/tema
+- [x] **1.1** Botão **Aa** na toolbar: popover com fonte/tamanho/entrelinha/margem/tema
   aplicando AO VIVO (reusa chaves `reader.*` de `settings_dialog.py:135-201`).
-- [ ] **1.2** Atalhos Space/Shift+Space/PageUp/PageDown + zonas de clique nas laterais
+- [x] **1.2** Atalhos Space/Shift+Space/PageUp/PageDown + zonas de clique nas laterais
   da página para navegação.
-- [ ] **1.3** TOC recolhível (toggle 📑 na toolbar; hoje dock fixo 200-300px).
-- [ ] **1.4** Consolidar 🔊/⏹️/⚙️ num único botão-menu de áudio (prepara o mini-player
+- [x] **1.3** TOC recolhível (toggle 📑 na toolbar; hoje dock fixo 200-300px).
+- [x] **1.4** Consolidar 🔊/⏹️/⚙️ num único botão-menu de áudio (prepara o mini-player
   Android).
-- [ ] **1.5** **Bookmarks de página**: toggle na toolbar + lista (aba no painel TOC);
+- [x] **1.5** **Bookmarks de página**: toggle na toolbar + lista (aba no painel TOC);
   tabela nova ou coluna em `reading_progress` (decisão do executor, documentar).
 - Executores: F1 Opus (1.1+1.5), F2 Sonnet (1.2+1.3+1.4).
+- **Registro (2026-07-16, executada):** decisões: (a) BUG pré-existente corrigido —
+  `get_reader_css` ignorava as chaves `reader.*` (a aba Leitor das Configurações não
+  tinha efeito); agora aceita tipografia e o ReaderView re-renderiza ao vivo;
+  (b) popover Aa = QDialog frameless não-modal (QMenu fecharia no dropdown de fonte e
+  ficaria atrás do QWebEngineView); tema usa a chave global `theme` (sem chave nova);
+  (c) bookmarks = tabela própria `bookmarks(id, book_id FK, page_number, label,
+  created_at, UNIQUE(book_id,page_number))` + add/remove/toggle/get/is em LibraryDB;
+  painel lateral virou QTabWidget Sumário/Marcadores; Ctrl+D marca a página;
+  (d) Space/Shift+Space/PageUp/PageDown com guarda de foco em campo de texto
+  (`_is_text_input_focused`); zonas de clique por terços SÓ no caminho PDF/imagem
+  (decisão no release, não engole seleção; guarda de marca-texto adicionada) —
+  limitação EPUB/QWebEngineView documentada no código; (e) painel lateral recolhível
+  persistido em `reader.side_panel_visible` (default novo no DEFAULT_CONFIG);
+  (f) áudio = QToolButton MenuButtonPopup (corpo = Ouvir/Pausar; menu = Parar com
+  setEnabled + Configurar vozes); `_audio_stop_btn`/`_tts_settings_btn` removidos
+  (grep: sem referências externas). Testes novos: test_bookmarks (10),
+  test_reader_typography (11), test_reader_navigation/side_panel/audio_menu (26).
+  Débito menor: entrada redundante "⚙️ Voz/Narração" no menu de overflow mantida.
 
 ### Onda 2 — [P1] Biblioteca
 - [ ] **2.1** Overlay de % de progresso nos cards (`book_card.py`; dados de
