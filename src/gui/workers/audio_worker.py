@@ -3,7 +3,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from src.core.tts.tts_router import TTSRouter
 from src.core.tts.voice_profile import NarrationRole
 from src.core.tts.text_preprocessor import TTSTextPreprocessor
-from src.core.tts.language_detect import detect_language
+from src.core.tts.language_detect import detect_language_confident
 from src.core.audio.tts_backend import TTSBackendUnavailable
 
 logger = logging.getLogger(__name__)
@@ -40,8 +40,11 @@ class AudioWorker(QThread):
         self._prepared = prepared
         self._prepared_player = None
         # Idioma da narração: explícito (ex.: tradução) ou autodetectado do texto,
-        # para que páginas em inglês sejam lidas com voz em inglês.
-        self._language = language or detect_language(text)
+        # para que páginas em inglês sejam lidas com voz em inglês. Usa a detecção
+        # CONFIANTE: em texto ambíguo/misto ela devolve None e NÃO forçamos
+        # override — a voz do perfil prevalece (evita a regressão "anglicada" em
+        # traduções PT salpicadas de termos técnicos EN).
+        self._language = language or detect_language_confident(text)
         self._is_cancelled = False
         
         # Load configuration profiles from MainWindow IN THE MAIN THREAD
@@ -244,7 +247,10 @@ class PreSynthesisWorker(QThread):
         profile = (router.get_book_profile()
                    if self._role == NarrationRole.BOOK_NARRATOR
                    else router.get_assistant_profile())
-        language = self._language or detect_language(self._text)
+        # Mesma detecção confiante do AudioWorker: mantém a voz da pré-síntese
+        # consistente com a da reprodução ao vivo da mesma página (texto misto →
+        # None → cai na voz do perfil, igual ao caminho normal).
+        language = self._language or detect_language_confident(self._text)
         effective_language = language or profile.language
 
         try:

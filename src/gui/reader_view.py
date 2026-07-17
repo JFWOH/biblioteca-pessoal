@@ -2262,6 +2262,19 @@ class ReaderView(QWidget):
         if self._word_wise_popover.isVisible():
             self._word_wise_popover.show_error()
 
+    def is_narrating(self) -> bool:
+        """Indica se há narração TTS em andamento (worker de áudio rodando).
+
+        Encapsula o atributo privado ``_audio_worker`` para uso por serviços
+        externos (ex.: AutoIndexService, via MainWindow) sem acoplá-los à
+        implementação interna do player de áudio — o worker é recriado a
+        cada nova narração (ver ``_launch_audio_worker``), então este método
+        sempre reflete o estado atual, não uma referência potencialmente
+        obsoleta.
+        """
+        worker = getattr(self, "_audio_worker", None)
+        return bool(worker and worker.isRunning())
+
     def _toggle_audio(self):
         """Alterna a leitura de áudio (TTS) da página atual.
 
@@ -2301,11 +2314,16 @@ class ReaderView(QWidget):
 
         self._launch_audio_worker(page_text, chain_continuous=True)
 
-    def _launch_audio_worker(self, text: str, chain_continuous: bool = False) -> None:
+    def _launch_audio_worker(self, text: str, chain_continuous: bool = False,
+                             language: str | None = None) -> None:
         """Cria, conecta e inicia o AudioWorker para o texto dado (TTS).
 
         ``chain_continuous``: só narração de PÁGINA encadeia a próxima no modo
         contínuo (uma tradução narrada via narrate_text não vira página).
+        ``language``: idioma-alvo EXPLÍCITO (ex.: o alvo real de uma tradução).
+        Quando dado, o worker o repassa ao roteador em vez de autodetectar —
+        evita que uma tradução PT com termos técnicos EN seja lida com voz
+        inglesa. ``None`` mantém a autodetecção confiante do worker.
         """
         from src.gui.workers.audio_worker import AudioWorker
         from src.core.tts.voice_profile import NarrationRole
@@ -2316,6 +2334,7 @@ class ReaderView(QWidget):
             text,
             role=NarrationRole.BOOK_NARRATOR,
             router=self._tts_router,
+            language=language,
             parent=self,
         )
 
@@ -2327,11 +2346,15 @@ class ReaderView(QWidget):
 
         self._audio_worker.start()
 
-    def narrate_text(self, text: str, chain_continuous: bool = False) -> None:
+    def narrate_text(self, text: str, chain_continuous: bool = False,
+                     language: str | None = None) -> None:
         """Narra um texto arbitrário (ex.: uma tradução) via TTS.
 
-        O idioma é autodetectado pelo AudioWorker: uma tradução em português é lida
-        com voz em português; um trecho em inglês, com voz em inglês.
+        ``language``: idioma-alvo EXPLÍCITO do texto (ex.: o idioma para o qual
+        se traduziu). Quando informado, é usado para escolher a voz em vez da
+        autodetecção — essencial para traduções PT salpicadas de termos EN, que
+        a detecção poderia classificar como inglês. ``None`` → o AudioWorker
+        autodetecta de forma confiante (texto ambíguo → voz do perfil).
 
         ``chain_continuous``: True quando esta narração faz parte da leitura
         contínua traduzida — ao terminar, encadeia a próxima página (ver
@@ -2341,7 +2364,8 @@ class ReaderView(QWidget):
         if not text or not text.strip():
             return
         self._stop_audio_if_running()
-        self._launch_audio_worker(text.strip(), chain_continuous=chain_continuous)
+        self._launch_audio_worker(text.strip(), chain_continuous=chain_continuous,
+                                  language=language)
 
     def _set_audio_button_state(self, label: str, icon_emoji: str, tooltip: str,
                                  *, menu_label: str | None = None) -> None:
@@ -2680,9 +2704,61 @@ class ReaderView(QWidget):
             self._act_audio_stop.setEnabled(False)
 
     def _on_audio_provider_changed(self, provider_name: str):
-        """Phase 13: Updates UI to show which TTS engine is active."""
-        if not self._audio_paused:
-            self._audio_btn.setToolTip(f"Pausar Leitura (via {provider_name})")
+        """Item 4 (transparência do motor): mostra qual engine TTS está ativo.
+
+        ``provider_changed`` é emitido pelo AudioWorker ao iniciar a fala (e ao
+        final). Se o engine ativo difere do preferido, sinaliza "reserva" tanto
+        no tooltip do botão quanto no sufixo do item "Pausar" do menu — assim o
+        usuário entende por que uma voz do motor preferido pode não se aplicar.
+        """
+        pretty = provider_name if provider_name and provider_name != "none" else ""
+        if self._audio_paused or not pretty:
+            return
+        preferred = ""
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            try:
+                preferred = config.get("tts.book_narrator.preferred_provider", "kokoro") or ""
+            except Exception:
+                preferred = ""
+        is_fallback = bool(preferred) and pretty.lower() != preferred.lower()
+        if is_fallback:
+            self._audio_btn.setToolTip(f"Narrando via {pretty} (motor reserva)")
+            self._act_audio_toggle.setText(f"⏸️ Pausar página · {pretty} (reserva)")
+        else:
+            self._audio_btn.setToolTip(f"Pausar Leitura · narrando via {pretty}")
+            self._act_audio_toggle.setText(f"⏸️ Pausar página · {pretty}")
+
+    def _on_voice_selected(self, voice_id):
+        """Grava a voz escolhida e, se houver narração ATIVA, aplica-a já (item 4).
+
+        Sem narração em curso, apenas persiste — a voz nova vale na próxima
+        leitura. Com narração ativa, reinicia a página atual com a voz nova
+        (ver _restart_current_page_narration).
+        """
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            config.set("tts.book_narrator.voice_id", voice_id)
+        worker = getattr(self, "_audio_worker", None)
+        if worker is not None and worker.isRunning():
+            self._restart_current_page_narration()
+
+    def _restart_current_page_narration(self):
+        """Reinicia a narração da página atual para aplicar a voz nova NA HORA.
+
+        Para o áudio em curso e re-dispara o MESMO fluxo pelo _toggle_audio, que
+        respeita o modo vigente (normal ou contínuo traduzido, via
+        _continuous_translate_mode). Decisões:
+          * Reinicia TOCANDO mesmo se estava pausado — a troca de voz é uma ação
+            explícita do usuário; retomar pausado seria surpreendente.
+          * Uma leitura traduzida AVULSA (fora do modo contínuo traduzido) é
+            reiniciada como leitura normal do texto original — limitação
+            conhecida (o modo avulso não é rastreado como estado persistente).
+        """
+        self._stop_audio_if_running()   # invalida pré-síntese e libera o worker
+        # worker agora é None → _toggle_audio executa o ramo de INÍCIO e relê a
+        # página atual (recarregando o perfil de voz da config).
+        self._toggle_audio()
 
     def _on_tts_settings_clicked(self):
         """Abre o menu rápido de configurações TTS."""
@@ -2741,10 +2817,27 @@ class ReaderView(QWidget):
         # 3. Voz específica da narração (por idioma, vinda do provider ativo)
         voice_menu = menu.addMenu("🎙️ Voz da Narração")
         current_voice = config.get("tts.book_narrator.voice_id", None)
+
+        # Item 4/3: se o motor de RESERVA está ativo agora (fallback em curso),
+        # as vozes do motor preferido não se aplicam — avisa com item desabilitado.
+        active_engine = "none"
+        if self._tts_router is not None:
+            try:
+                active_engine = self._tts_router.get_active_provider_name()
+            except Exception:
+                active_engine = "none"
+        if active_engine and active_engine.lower() not in ("none", (current_provider or "").lower()):
+            warn = QAction(
+                f"⚠️ Motor reserva ativo ({active_engine}) — vozes "
+                f"{(current_provider or '').title()} indisponíveis", voice_menu)
+            warn.setEnabled(False)
+            voice_menu.addAction(warn)
+            voice_menu.addSeparator()
+
         auto_action = QAction("🌐 Automática (por idioma)", voice_menu, checkable=True)
         auto_action.setChecked(not current_voice)
         auto_action.triggered.connect(
-            lambda checked: config.set("tts.book_narrator.voice_id", None))
+            lambda checked: self._on_voice_selected(None))
         voice_menu.addAction(auto_action)
         voices_by_lang = {}
         if self._tts_router is not None:
@@ -2761,7 +2854,7 @@ class ReaderView(QWidget):
                 v_action = QAction(label, sub, checkable=True)
                 v_action.setChecked(current_voice == voice.voice_id)
                 v_action.triggered.connect(
-                    lambda checked, vid=voice.voice_id: config.set("tts.book_narrator.voice_id", vid))
+                    lambda checked, vid=voice.voice_id: self._on_voice_selected(vid))
                 sub.addAction(v_action)
         if not voices_by_lang:
             none_action = QAction("(motor não lista vozes — usa a automática)", voice_menu)

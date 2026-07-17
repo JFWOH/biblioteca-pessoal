@@ -9,6 +9,8 @@ Aqui garantimos que:
 """
 from typing import Optional
 
+import pytest
+
 from src.core.tts.base_tts_provider import BaseTTSProvider, SynthesisResult, VoiceInfo
 from src.core.tts.tts_router import TTSRouter
 from src.core.tts.voice_profile import VoiceProfile, NarrationRole
@@ -118,5 +120,87 @@ def test_primary_language_helper():
 
 
 def test_detect_language_matches_worker_default():
-    # A detecção usada pelo worker é a mesma função pura.
+    # A detecção CLÁSSICA (usada em outros pontos) segue decidindo sempre.
     assert detect_language("The book was open on the table for everyone") == "en-US"
+
+
+# ── Rodada 2, item 1: detecção confiante evita voz "anglicada" ────────
+
+class _EnglishOnlyProvider(BaseTTSProvider):
+    """Provider de reserva que só possui vozes em INGLÊS (caso do Piper com só
+    o modelo en instalado)."""
+
+    def __init__(self, name="Piper", tier="C"):
+        self._name = name
+        self._tier = tier
+        self.last_voice_id = "unset"
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def tier(self) -> str:
+        return self._tier
+
+    def synthesize(self, text, voice_id: Optional[str] = None,
+                   rate: float = 1.0, volume: float = 1.0) -> SynthesisResult:
+        self.last_voice_id = voice_id
+        return SynthesisResult(audio_data=b"x" + b"\x00" * 44, sample_rate=24000,
+                               provider_name=self._name)
+
+    def speak_blocking(self, text, voice_id=None, rate=1.0, volume=1.0) -> None:
+        self.last_voice_id = voice_id
+
+    def stop(self) -> None:
+        pass
+
+    def available_voices(self):
+        return [VoiceInfo("en_US-lessac-medium", "Lessac", "en-US", "female", "", ["serene"])]
+
+
+def test_translated_pt_with_english_terms_never_forces_english_voice():
+    """Regressão real: tradução PT com termos técnicos EN NÃO deve virar 'en'.
+
+    O AudioWorker usa a detecção CONFIANTE: texto misto → None → sem override
+    (a voz PT do perfil prevalece). Nunca 'en-US'.
+    """
+    from src.gui.workers.audio_worker import AudioWorker
+    worker = AudioWorker(
+        "O Power BI usa query folding para otimizar o refresh do dataset.",
+        router=None, parent=None)
+    assert worker._language != "en-US"
+    assert worker._language in (None, "pt-BR")
+
+
+def test_resolve_voice_returns_none_when_no_voice_in_language():
+    """_resolve_voice nunca devolve voz de idioma diferente (item 3)."""
+    router = TTSRouter()
+    prov = _EnglishOnlyProvider()
+    assert router._resolve_voice(prov, "pt-BR", "serene") is None
+    # Mas resolve normalmente quando há voz no idioma pedido.
+    assert router._resolve_voice(prov, "en-US", "serene") == "en_US-lessac-medium"
+
+
+def test_fallback_without_target_language_voice_signals_clear_error():
+    """Item 3 (fallback honesto): reserva sem voz PT + idioma PT explícito →
+    erro claro (em vez de sintetizar português com voz inglesa)."""
+    from src.core.tts.base_tts_provider import TTSProviderError
+    router = TTSRouter()
+    prov = _EnglishOnlyProvider("Piper", "C")
+    router.register_provider(prov)
+    router.set_book_profile(VoiceProfile(
+        role=NarrationRole.BOOK_NARRATOR, preferred_provider="piper", language="pt-BR"))
+    with pytest.raises(TTSProviderError):
+        router.speak("Uma página traduzida para português.", language="pt-BR")
+
+
+def test_language_support_helper():
+    router = TTSRouter()
+    prov = _EnglishOnlyProvider()
+    assert router._language_support(prov, "en-US") is True
+    assert router._language_support(prov, "pt-BR") is False
+    # Provider sem vozes (lista vazia) → desconhecido (None), não barra.
+    empty = _EnglishOnlyProvider()
+    empty.available_voices = lambda: []
+    assert router._language_support(empty, "pt-BR") is None

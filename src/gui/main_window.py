@@ -81,7 +81,8 @@ class MainWindow(QMainWindow):
         from src.gui.auto_index_service import AutoIndexService
         self._auto_index_service = AutoIndexService(
             db=self._db, rag_engine=self._rag_engine, config=self._config,
-            busy_check=lambda: bool(self._rag_worker and self._rag_worker.isRunning()),
+            busy_check=lambda: bool(self._rag_worker and self._rag_worker.isRunning())
+            or self._is_narration_active(),
             parent=self)
         self._auto_index_service.indexing_started.connect(
             lambda _bid, title: self._statusbar.showMessage(
@@ -102,6 +103,21 @@ class MainWindow(QMainWindow):
 
         # Verifica status do Ollama após UI pronta
         self._check_ollama_status()
+
+    def _is_narration_active(self) -> bool:
+        """True quando o ReaderView está narrando (TTS) a página atual.
+
+        Usado como parte do ``busy_check`` da auto-indexação em ocioso: a
+        narração (Kokoro) é sensível a contenção de CPU (TTFB), então o
+        indexador em background não deve iniciar NOVO trabalho enquanto ela
+        estiver ativa (rodada 2 de ajustes de TTS). ``getattr``/checagem
+        defensiva porque este método pode ser chamado (via a lambda de
+        ``busy_check``) antes de ``_reader_view`` existir, durante o
+        ``__init__`` (a auto-indexação só dispara no primeiro tick do
+        QTimer, bem depois de ``_setup_ui()``, mas a defesa é barata).
+        """
+        reader_view = getattr(self, "_reader_view", None)
+        return bool(reader_view and reader_view.is_narrating())
 
     def _setup_window(self):
         self.setWindowTitle("📚 Biblioteca Pessoal")
@@ -1251,9 +1267,15 @@ class MainWindow(QMainWindow):
             self._statusbar.showMessage("🌐 Traduzindo para narrar...", 5000)
             from src.gui.translation_service import TranslationService
 
+            # Idioma-alvo REAL da tradução (fonte de verdade: config translation.
+            # default_tgt via TranslationService) — repassado à narração para que
+            # a voz siga o idioma traduzido, não uma autodetecção que confundiria
+            # termos técnicos EN remanescentes.
+            tgt_lang = TranslationService.get_instance().default_tgt
+
             def on_audio_success(result):
                 self._statusbar.clearMessage()
-                self._reader_view.narrate_text(result)
+                self._reader_view.narrate_text(result, language=tgt_lang)
 
             def on_audio_error(err):
                 self._statusbar.showMessage(f"⚠️ Erro na tradução: {err}", 5000)
@@ -1369,7 +1391,9 @@ class MainWindow(QMainWindow):
         if detect_language(text).lower().startswith("pt"):
             self._statusbar.showMessage(
                 f"ℹ️ Página {page_label} já está em português — narrando o original.", 4000)
-            self._reader_view.narrate_text(text, chain_continuous=enable_chaining)
+            # A detecção já confirmou PT aqui; passa "pt" explícito para a voz não
+            # depender de nova autodetecção do texto (que traria termos EN juntos).
+            self._reader_view.narrate_text(text, chain_continuous=enable_chaining, language="pt")
             return
 
         self._statusbar.showMessage(f"🌐 Traduzindo página {page_label}…", 60000)
@@ -1381,7 +1405,8 @@ class MainWindow(QMainWindow):
                 self._statusbar.showMessage("⚠️ Tradução vazia — nada a narrar.", 5000)
                 return
             self._statusbar.showMessage(f"🔊 Narrando página {page_label}…", 5000)
-            self._reader_view.narrate_text(result, chain_continuous=enable_chaining)
+            # A tradução acima é en→pt (tgt_lang="pt"): narra em português explícito.
+            self._reader_view.narrate_text(result, chain_continuous=enable_chaining, language="pt")
 
         def _on_error(err: str):
             self._page_translation_pending = False

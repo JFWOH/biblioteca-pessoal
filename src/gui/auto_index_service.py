@@ -70,14 +70,27 @@ class AutoIndexService(QObject):
             return
         if self._db is None or self._rag_engine is None:
             return
-        if self._worker is not None and self._worker.isRunning():
-            return
         if self._busy_check is not None:
             try:
-                if self._busy_check():
-                    return
+                busy = bool(self._busy_check())
             except Exception:
                 return
+            if busy:
+                # RAG manual em andamento OU narração TTS ativa (rodada 2 de
+                # ajustes de TTS — cf. MainWindow._is_narration_active).
+                # Conta como atividade e mantém o relógio de ociosidade
+                # fresco: o ReaderView não expõe hoje um sinal de início/fim
+                # de narração fora de si mesmo (só o worker de áudio privado,
+                # recriado a cada narração), então sem isto uma narração
+                # longa deixaria ``_last_activity`` obsoleto e a
+                # auto-indexação retomaria IMEDIATAMENTE ao fim da narração
+                # em vez de aguardar um novo período de folga
+                # (idle_min_inactivity_s) — voltando a competir por CPU bem
+                # na cauda do áudio.
+                self._last_activity = time.monotonic()
+                return
+        if self._worker is not None and self._worker.isRunning():
+            return
         inactivity = time.monotonic() - self._last_activity
         if inactivity < float(self._cfg("idle_min_inactivity_s", 120)):
             return

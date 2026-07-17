@@ -291,6 +291,21 @@ class TTSRouter:
             logger.info("TTS_ROUTER: Using fallback provider '%s' (preferred was '%s')",
                         provider.name, profile.preferred_provider)
 
+        # Item 3 (fallback honesto): quando o chamador informou o idioma-alvo
+        # (ex.: tradução PT, ou detecção confiante) e o provider ESCOLHIDO tem
+        # vozes mas NENHUMA nesse idioma, é melhor um erro claro do que ler com
+        # a voz do idioma errado. Só barra quando SABEMOS o idioma (override
+        # explícito) e o provider afirma não ter a voz — nunca no idioma-do-perfil.
+        if language is not None and self._language_support(provider, effective_language) is False:
+            prim = self._primary_language(effective_language)
+            lang_name = {"pt": "português", "en": "inglês"}.get(prim, prim or effective_language)
+            logger.error("TTS_ROUTER: Provider '%s' sem voz em %s (idioma pedido='%s').",
+                         provider.name, lang_name, effective_language)
+            raise TTSProviderError(
+                f"Motor reserva '{provider.name}' sem voz em {lang_name}. "
+                f"Instale a voz pt_BR do Piper para a narração de reserva."
+            )
+
         # Resolve voice ID dynamically if not explicitly specified or if fallback occurred.
         # Também resolvemos quando o idioma do TEXTO (override do chamador — ex.:
         # página em inglês detectada pelo AudioWorker) difere do idioma do PERFIL:
@@ -641,25 +656,48 @@ class TTSRouter:
             if voice_lang == target_lang or voice_lang.startswith(target_lang) or target_lang.startswith(voice_lang):
                 lang_matches.append(voice)
 
-        candidates = lang_matches if lang_matches else voices
+        # Item 3 (fallback honesto): se o provider TEM vozes mas NENHUMA no
+        # idioma pedido, NÃO devolvemos uma voz de idioma errado (antes caía em
+        # voices[0] → português lido com voz inglesa). Retorna None; quem chama
+        # (speak) decide sinalizar erro claro à GUI em vez de sintetizar errado.
+        if not lang_matches:
+            logger.info("TTS_ROUTER: Provider '%s' tem vozes, mas nenhuma no idioma '%s' — sem resolução.",
+                        provider.name, language)
+            return None
 
-        # Step 2: Look for candidate with matching style tag
-        for voice in candidates:
+        # Step 2: Look for a language candidate with matching style tag
+        for voice in lang_matches:
             if target_style in [tag.lower() for tag in voice.tags]:
                 logger.info("TTS_ROUTER: Resolved voice '%s' for provider '%s' (lang='%s', style='%s')",
                             voice.voice_id, provider.name, language, style)
                 return voice.voice_id
 
         # Step 3: Fall back to first matching language candidate
-        if lang_matches:
-            logger.info("TTS_ROUTER: Resolved default voice '%s' for provider '%s' matching language '%s'",
-                        lang_matches[0].voice_id, provider.name, language)
-            return lang_matches[0].voice_id
+        logger.info("TTS_ROUTER: Resolved default voice '%s' for provider '%s' matching language '%s'",
+                    lang_matches[0].voice_id, provider.name, language)
+        return lang_matches[0].voice_id
 
-        # Step 4: Final fallback to first available voice
-        logger.info("TTS_ROUTER: Resolved absolute fallback voice '%s' for provider '%s'",
-                    voices[0].voice_id, provider.name)
-        return voices[0].voice_id
+    def _language_support(self, provider: BaseTTSProvider, language: str) -> Optional[bool]:
+        """Se o provider tem/《não tem》voz no idioma pedido (item 3).
+
+        Retorna ``True`` (tem), ``False`` (tem vozes, mas nenhuma no idioma) ou
+        ``None`` (lista vazia/indisponível ⇒ não sabemos; usa a voz interna
+        padrão do motor). Só ``False`` justifica um erro honesto na GUI.
+        """
+        try:
+            voices = provider.available_voices()
+        except Exception:
+            return None
+        if not voices:
+            return None
+        target = self._primary_language(language)
+        if not target:
+            return None
+        for voice in voices:
+            vlang = self._primary_language(voice.language)
+            if vlang and (vlang == target or vlang.startswith(target) or target.startswith(vlang)):
+                return True
+        return False
 
     def _get_fallback_provider(self, exclude: BaseTTSProvider) -> Optional[BaseTTSProvider]:
         """Find the next healthy provider after the excluded one, excluding legacy pyttsx3."""
