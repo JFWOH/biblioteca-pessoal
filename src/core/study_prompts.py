@@ -78,12 +78,35 @@ def parse_flashcard_qa(content: Optional[str]) -> Optional[tuple[str, str]]:
     return front, back
 
 
-def build_study_prompt(action_type: str, text: Optional[str]) -> Optional[str]:
+def _format_concepts(concepts: Optional[list[str]]) -> str:
+    """Bloco de contexto com os conceitos-chave do livro (ou vazio).
+
+    Degradação graciosa (ADR-005): grafo vazio / sem conceitos → string vazia,
+    e o prompt fica idêntico ao anterior.
+    """
+    if not concepts:
+        return ""
+    names = [str(c).strip() for c in concepts if str(c).strip()]
+    if not names:
+        return ""
+    # Limita para não inflar o prompt; os conceitos vêm ordenados por peso.
+    joined = ", ".join(names[:12])
+    return (
+        "\n\nConceitos-chave deste livro (segundo o grafo de conceitos da "
+        f"biblioteca), para orientar o foco: {joined}."
+    )
+
+
+def build_study_prompt(action_type: str, text: Optional[str],
+                       concepts: Optional[list[str]] = None) -> Optional[str]:
     """Monta a instrução para uma ação de estudo.
 
     Args:
         action_type: uma das chaves em ``STUDY_ACTIONS``.
         text: texto da página/trecho atual.
+        concepts: conceitos-chave do livro (grafo) para enriquecer o foco —
+            especialmente na geração de flashcards (tarefa 3.3). Quando vazio
+            ou ausente, o prompt é idêntico ao anterior (degradação graciosa).
 
     Returns:
         A instrução completa, ou ``None`` se a ação for desconhecida ou o
@@ -95,4 +118,4 @@ def build_study_prompt(action_type: str, text: Optional[str]) -> Optional[str]:
     clean = (text or "").strip()
     if not clean:
         return None
-    return f"{template}\n\nTrecho:\n'''\n{clean}\n'''"
+    return f"{template}{_format_concepts(concepts)}\n\nTrecho:\n'''\n{clean}\n'''"

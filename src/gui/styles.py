@@ -1146,6 +1146,47 @@ QPushButton#librarySortOrderBtn:checked {
 #dropOverlayLabel {
     color: #10b981; font-size: 24px; font-weight: 700; background: transparent;
 }
+
+/* ── Flashcards: gerar dos destaques (3.3) ─────────── */
+QPushButton#flashcardsHighlightBtn {
+    background: #1f2937;
+    color: #e5e7eb;
+    border: 1px solid #2d333f;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+QPushButton#flashcardsHighlightBtn:hover {
+    background: #263041;
+    border-color: #10b981;
+}
+QPushButton#flashcardsHighlightBtn:disabled {
+    background: #161920;
+    color: #4b5563;
+    border-color: #2d333f;
+}
+
+/* ── Banner "Retomar leitura" (3.7) ────────────────── */
+QFrame#resumeBanner {
+    background: #161920;
+    border: 1px solid #10b981;
+    border-radius: 8px;
+}
+#resumeBannerIcon { font-size: 15px; background: transparent; }
+#resumeBannerText {
+    color: #d1d5db;
+    font-size: 12px;
+    background: transparent;
+}
+QPushButton#resumeBannerClose {
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+}
+QPushButton#resumeBannerClose:hover {
+    background: #2d333f;
+}
 """
 
 LIGHT_THEME = """
@@ -2285,6 +2326,47 @@ QPushButton#librarySortOrderBtn:checked {
 #dropOverlayIcon { font-size: 56px; background: transparent; }
 #dropOverlayLabel {
     color: #059669; font-size: 24px; font-weight: 700; background: transparent;
+}
+
+/* ── Flashcards: gerar dos destaques (3.3) ─────────── */
+QPushButton#flashcardsHighlightBtn {
+    background: #f3f4f6;
+    color: #374151;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+QPushButton#flashcardsHighlightBtn:hover {
+    background: #e5e7eb;
+    border-color: #059669;
+}
+QPushButton#flashcardsHighlightBtn:disabled {
+    background: #f9fafb;
+    color: #9ca3af;
+    border-color: #e5e7eb;
+}
+
+/* ── Banner "Retomar leitura" (3.7) ────────────────── */
+QFrame#resumeBanner {
+    background: #ffffff;
+    border: 1px solid #059669;
+    border-radius: 8px;
+}
+#resumeBannerIcon { font-size: 15px; background: transparent; }
+#resumeBannerText {
+    color: #374151;
+    font-size: 12px;
+    background: transparent;
+}
+QPushButton#resumeBannerClose {
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+}
+QPushButton#resumeBannerClose:hover {
+    background: #e5e7eb;
 }
 """
 
@@ -3426,6 +3508,47 @@ QPushButton#librarySortOrderBtn:checked {
 #dropOverlayIcon { font-size: 56px; background: transparent; }
 #dropOverlayLabel {
     color: #8b6c42; font-size: 24px; font-weight: 700; background: transparent;
+}
+
+/* ── Flashcards: gerar dos destaques (3.3) ─────────── */
+QPushButton#flashcardsHighlightBtn {
+    background: #E8DCC0;
+    color: #433422;
+    border: 1px solid #C9B896;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+QPushButton#flashcardsHighlightBtn:hover {
+    background: #DED0B0;
+    border-color: #8b6c42;
+}
+QPushButton#flashcardsHighlightBtn:disabled {
+    background: #EFE7D3;
+    color: #A89878;
+    border-color: #D8C9A8;
+}
+
+/* ── Banner "Retomar leitura" (3.7) ────────────────── */
+QFrame#resumeBanner {
+    background: #EFE7D3;
+    border: 1px solid #8b6c42;
+    border-radius: 8px;
+}
+#resumeBannerIcon { font-size: 15px; background: transparent; }
+#resumeBannerText {
+    color: #433422;
+    font-size: 12px;
+    background: transparent;
+}
+QPushButton#resumeBannerClose {
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+}
+QPushButton#resumeBannerClose:hover {
+    background: #DED0B0;
 }
 """
 

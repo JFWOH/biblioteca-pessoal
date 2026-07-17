@@ -78,6 +78,12 @@ class ReaderView(QWidget):
         self._continuous_translate_mode: bool = False
         self._audio_stopped_by_user: bool = False  # stop manual não encadeia a próxima
         self._chain_continuous: bool = False       # só narração de página encadeia (tradução não)
+        # Pré-síntese TTS da próxima página (tarefa 3.6): cache PURO (core) de
+        # 1 página à frente + worker de síntese na GUI. Corta o gap entre páginas.
+        from src.core.audio.continuous_player import PreSynthesisCache
+        self._presynth_cache = PreSynthesisCache()
+        self._presynth_worker = None
+        self._resume_banner = None  # banner "retomar leitura" (tarefa 3.7)
         self._footer_obs_id = None
         self._proactive_service = ProactiveReaderService(parent=self)
         self._proactive_service.observation_ready.connect(self._on_proactive_observation)
@@ -936,6 +942,7 @@ class ReaderView(QWidget):
             return
 
         self._book_id = book_data.get("id", 0)
+        self._invalidate_presynth()  # troca de livro descarta pré-síntese (3.6)
         self._annotation_panel.set_book_id(self._book_id)
         self._title_label.setText(book_data.get("title", ""))
         self._load_persisted_observations()
@@ -958,6 +965,46 @@ class ReaderView(QWidget):
 
         # Vai para a página inicial
         self._go_to_page(start_page)
+
+        # Tarefa 3.7: banner discreto de retomada quando há progresso (>0),
+        # com mini-resumo da última sessão (dados já existentes, sem LLM).
+        self._maybe_show_resume_banner()
+
+    def _maybe_show_resume_banner(self) -> None:
+        """Mostra o banner "Retomar leitura" (tarefa 3.7), se houver progresso.
+
+        Reusa ``build_resume_info`` (core puro): posição/tempo + anotações
+        recentes + conceitos do grafo + síntese do dossiê JÁ em cache — NUNCA
+        dispara LLM no caminho de abrir o livro (ADR-005). Sem progresso →
+        ``build_resume_info`` devolve None → nenhum banner.
+        """
+        if self._db is None or not self._book_id:
+            return
+        try:
+            from src.core.graph.graph_store import GraphStore
+            from src.core.resume_summary import build_resume_info
+            graph_store = GraphStore(self._db)
+            info = build_resume_info(self._db, self._book_id, graph_store=graph_store)
+        except Exception:
+            info = None
+        if not info:
+            return
+        try:
+            from src.gui.widgets.resume_banner import ResumeBanner
+            old = getattr(self, "_resume_banner", None)
+            if old is not None:
+                try:
+                    old.dismiss()
+                except Exception:
+                    pass
+            self._resume_banner = ResumeBanner(info, parent=self)
+            self._resume_banner.closed.connect(self._on_resume_banner_closed)
+            self._resume_banner.show_at_top()
+        except Exception:
+            self._resume_banner = None
+
+    def _on_resume_banner_closed(self) -> None:
+        self._resume_banner = None
 
     def _reader_css(self) -> str:
         """CSS do conteúdo HTML do leitor com a tipografia ATUAL da config.
@@ -1049,6 +1096,7 @@ class ReaderView(QWidget):
                 self._render_page(content)
 
     def _go_next(self) -> None:
+        self._invalidate_presynth()  # nav. manual descarta pré-síntese (3.6)
         if self._reader:
             if self._content_stack.currentIndex() == 1:
                 is_double = hasattr(self._reader, 'is_double_page') and self._reader.is_double_page
@@ -1083,6 +1131,7 @@ class ReaderView(QWidget):
                 self._render_page(content)
 
     def _go_prev(self) -> None:
+        self._invalidate_presynth()  # nav. manual descarta pré-síntese (3.6)
         if self._reader:
             if self._content_stack.currentIndex() == 1:
                 is_double = hasattr(self._reader, 'is_double_page') and self._reader.is_double_page
@@ -2168,6 +2217,8 @@ class ReaderView(QWidget):
         self._audio_paused = False
         self._set_audio_button_state("Pausar", "⏸️", "Pausar Leitura (TTS)")
         self._act_audio_stop.setEnabled(True)
+        # Tarefa 3.6: enquanto esta página toca, sintetiza a próxima em background.
+        self._maybe_presynthesize_next()
 
     def _on_read_translated_page(self):
         """Narra a página atual traduzida para PT (item 7 do backlog UX).
@@ -2207,6 +2258,8 @@ class ReaderView(QWidget):
     def _toggle_continuous_reading(self, checked: bool):
         """Liga/desliga a leitura contínua (persiste na config)."""
         self._continuous_reading = bool(checked)
+        if not self._continuous_reading:
+            self._invalidate_presynth()  # desligou → descarta pré-síntese (3.6)
         config = getattr(self.window(), "_config", None)
         if config is not None:
             try:
@@ -2253,8 +2306,12 @@ class ReaderView(QWidget):
         QTimer.singleShot(400, self._continue_narration)
 
     def _continue_narration(self):
-        """Avança para a próxima página com texto e narra (modo contínuo)."""
-        from src.core.audio.continuous_navigation import find_next_readable_page
+        """Avança para a próxima página com texto e narra (modo contínuo).
+
+        Tarefa 3.6: se a próxima página já foi pré-sintetizada, TOCA o áudio
+        pronto (sem gap de síntese); senão, cai no caminho normal (síntese).
+        """
+        from src.core.audio.continuous_navigation import next_readable_page_with_text
 
         if not self._continuous_reading or not self._reader:
             return
@@ -2267,13 +2324,123 @@ class ReaderView(QWidget):
                     or getattr(self._reader, "get_chapter_text", None))
         if get_text is None:
             return
-        nxt = find_next_readable_page(
+        nxt = next_readable_page_with_text(
             get_text, self._reader.current_page, self._reader.total_pages)
         if nxt is None:
             self._show_status("🔁 Fim do livro — leitura contínua encerrada.", 5000)
             return
-        self._go_to_page(nxt)
-        self._toggle_audio()
+        next_page, _next_text = nxt
+        # Pega o áudio pré-sintetizado ANTES de _go_to_page (que invalida o
+        # cache ao parar o áudio atual). Chave = livro + página + voz.
+        prepared = self._presynth_cache.take(self._presynth_key(next_page))
+        self._go_to_page(next_page)
+        if prepared:
+            self._play_prepared(prepared)
+        else:
+            self._toggle_audio()
+
+    # ── Pré-síntese TTS da próxima página (tarefa 3.6) ────────────────
+
+    def _voice_signature(self) -> str:
+        """Assinatura da voz/velocidade atual — parte da chave do cache.
+
+        Muda de voz/velocidade → chave diferente → o áudio antigo não é
+        reaproveitado (invalidação implícita).
+        """
+        config = getattr(self.window(), "_config", None)
+        if config is None:
+            return "default"
+        try:
+            prof = config.tts_config.get("book_narrator", {}) or {}
+            return (f"{prof.get('preferred_provider', '')}:"
+                    f"{prof.get('voice_id', '')}:{prof.get('rate', '')}")
+        except Exception:
+            return "default"
+
+    def _presynth_key(self, page: int):
+        return (self._book_id, page, self._voice_signature())
+
+    def _maybe_presynthesize_next(self) -> None:
+        """Dispara a síntese em background da PRÓXIMA página (no máx. 1 à frente).
+
+        Só na leitura contínua normal (o modo traduzido passa cada página pelo
+        NLLB antes de narrar — o texto cru não bate com a narração). ADR-006: o
+        threading fica aqui, na GUI; a decisão de "qual é o próximo texto" e o
+        cache são núcleo puro.
+        """
+        if not self._continuous_reading or self._continuous_translate_mode:
+            return
+        if self._tts_router is None or not self._reader:
+            return
+        if self._audio_stopped_by_user:
+            return
+        if self._presynth_cache.pending_key is not None:
+            return  # já há uma página pronta à frente
+        worker = getattr(self, "_presynth_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        get_text = (getattr(self._reader, "get_page_text", None)
+                    or getattr(self._reader, "get_chapter_text", None))
+        if get_text is None:
+            return
+        from src.core.audio.continuous_navigation import next_readable_page_with_text
+        nxt = next_readable_page_with_text(
+            get_text, self._reader.current_page, self._reader.total_pages)
+        if nxt is None:
+            return
+        next_page, next_text = nxt
+        try:
+            from src.gui.workers.audio_worker import PreSynthesisWorker
+            from src.core.tts.voice_profile import NarrationRole
+            self._presynth_worker = PreSynthesisWorker(
+                text=next_text,
+                key=self._presynth_key(next_page),
+                cache=self._presynth_cache,
+                router=self._tts_router,
+                role=NarrationRole.BOOK_NARRATOR,
+                parent=self,
+            )
+            self._presynth_worker.ready.connect(self._on_presynth_ready)
+            self._presynth_worker.start()
+        except Exception:
+            self._presynth_worker = None
+
+    def _on_presynth_ready(self, key):
+        """Pré-síntese concluída: os segmentos já estão no cache (nada a fazer)."""
+        pass
+
+    def _invalidate_presynth(self) -> None:
+        """Descarta a pré-síntese obsoleta (nav. manual / stop / troca de livro)."""
+        worker = getattr(self, "_presynth_worker", None)
+        if worker is not None:
+            try:
+                worker.cancel()
+            except Exception:
+                pass
+        cache = getattr(self, "_presynth_cache", None)
+        if cache is not None:
+            cache.invalidate()
+
+    def _play_prepared(self, segments) -> None:
+        """Toca áudio JÁ sintetizado da próxima página (AudioWorker em prepared)."""
+        from src.gui.workers.audio_worker import AudioWorker
+        from src.core.tts.voice_profile import NarrationRole
+
+        self._audio_stopped_by_user = False
+        self._chain_continuous = True
+        self._audio_worker = AudioWorker(
+            "",
+            role=NarrationRole.BOOK_NARRATOR,
+            router=self._tts_router,
+            prepared=segments,
+            parent=self,
+        )
+        self._audio_worker.playback_started.connect(self._on_audio_started)
+        self._audio_worker.playback_finished.connect(self._on_audio_finished)
+        self._audio_worker.error_occurred.connect(self._on_audio_error)
+        self._audio_worker.finished.connect(self._on_audio_worker_finished)
+        self._audio_worker.provider_changed.connect(self._on_audio_provider_changed)
+        self._audio_worker.start()
 
     def _on_audio_error(self, err_msg):
         self._show_status(f"Erro de Áudio: {err_msg}", 5000)
@@ -2297,6 +2464,7 @@ class ReaderView(QWidget):
     def _stop_audio_if_running(self):
         """Para a narração por completo (libera o worker) e restaura a UI."""
         self._audio_stopped_by_user = True
+        self._invalidate_presynth()  # stop/troca de página descarta pré-síntese (3.6)
         if hasattr(self, '_audio_worker') and self._audio_worker and self._audio_worker.isRunning():
             self._audio_worker.stop()
             self._audio_worker.wait(2000)

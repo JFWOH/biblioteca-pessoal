@@ -261,11 +261,57 @@ class ContinuousAudioPlayer:
         """Blocks until the queue is empty and buffer is played."""
         if not self._available:
             return
-            
+
         while not self._queue.empty() and self._is_playing:
             time.sleep(0.1)
-            
+
         while self._buffer is not None and len(self._buffer) > 0 and self._is_playing:
             time.sleep(0.1)
-            
+
         time.sleep(0.1)
+
+
+class PreSynthesisCache:
+    """Cache de UMA página de áudio pré-sintetizada (tarefa 3.6).
+
+    Estrutura de dados PURA (ADR-006): sem threads, sem GUI, sem I/O de áudio.
+    Guarda no máximo UMA entrada (a próxima página à frente) para não estourar
+    memória/recursos. Quem sintetiza (worker na GUI) chama ``store``; quem vai
+    tocar chama ``take`` com a mesma chave. A chave carrega ``book_id + página +
+    assinatura de voz/velocidade`` para que uma troca de livro, de página ou de
+    voz descarte automaticamente o áudio obsoleto (invalidação por chave).
+
+    Cada segmento é um dict ``{"audio_data", "sample_rate", "channels",
+    "dtype"}`` — o mesmo formato que ``ContinuousAudioPlayer.enqueue`` consome.
+    """
+
+    def __init__(self):
+        self._key = None
+        self._segments: list[dict] | None = None
+
+    def store(self, key, segments: list[dict]) -> None:
+        """Guarda os segmentos sob ``key`` (substitui qualquer entrada anterior)."""
+        self._key = key
+        self._segments = list(segments) if segments else None
+
+    def has(self, key) -> bool:
+        """True se há áudio pronto exatamente para ``key``."""
+        return self._segments is not None and self._key == key
+
+    @property
+    def pending_key(self):
+        """Chave atualmente em cache (ou None) — usada para não re-sintetizar."""
+        return self._key if self._segments is not None else None
+
+    def take(self, key) -> list[dict] | None:
+        """Devolve e REMOVE os segmentos de ``key``; None se não bater a chave."""
+        if self.has(key):
+            segments = self._segments
+            self.invalidate()
+            return segments
+        return None
+
+    def invalidate(self) -> None:
+        """Descarta qualquer áudio em cache (navegação manual / stop / troca)."""
+        self._key = None
+        self._segments = None

@@ -1210,7 +1210,12 @@ class MainWindow(QMainWindow):
             return
         elif action_type in ("explain_page", "summarize", "glossary", "flashcards"):
             from src.core.study_prompts import build_study_prompt
-            question = build_study_prompt(action_type, text)
+            # Tarefa 3.3: injeta os conceitos-chave do livro (grafo) no prompt de
+            # geração de flashcards. Grafo vazio → concepts=[] → prompt igual ao
+            # anterior (degradação graciosa, ADR-005).
+            concepts = (self._book_graph_concepts()
+                        if action_type == "flashcards" else None)
+            question = build_study_prompt(action_type, text, concepts=concepts)
             if not question:
                 self._statusbar.showMessage("⚠️ Nenhum texto na página para estudar.", 3000)
                 return
@@ -1226,6 +1231,26 @@ class MainWindow(QMainWindow):
         # Preenche o input e envia automaticamente
         self._rag_panel._question_input.setText(question)
         self._rag_panel._on_send()
+
+    def _book_graph_concepts(self, limit: int = 10) -> list[str]:
+        """Conceitos-chave do livro aberto, do grafo (tarefa 3.3).
+
+        Vazio quando não há livro aberto, DB ausente, ou o grafo ainda não
+        ingeriu conceitos — o chamador degrada graciosamente (ADR-005).
+        """
+        book_id = getattr(self._reader_view, "_book_id", 0)
+        if not book_id or self._db is None:
+            return []
+        try:
+            from src.core.graph.graph_store import GraphStore
+            from src.core.rag.tools.graph_tools import graph_book_concepts
+            out = graph_book_concepts(GraphStore(self._db), book_id, limit=limit)
+            data = getattr(out, "data", None)
+            if data is None and isinstance(out, dict):
+                data = out.get("data")
+            return [d.get("concept") for d in (data or []) if d.get("concept")]
+        except Exception:
+            return []
 
     def _show_flashcards(self) -> None:
         """Abre o diálogo de Flashcards (lista + modo estudo)."""

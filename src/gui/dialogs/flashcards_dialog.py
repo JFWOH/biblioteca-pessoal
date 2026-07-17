@@ -9,11 +9,13 @@ from datetime import date
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
-    QScrollArea, QWidget, QFrame, QStackedWidget,
+    QScrollArea, QWidget, QFrame, QStackedWidget, QCheckBox, QLineEdit,
+    QDialogButtonBox, QMessageBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from src.core import srs
+from src.gui.styles import emoji_icon
 
 
 class _FlashcardCard(QFrame):
@@ -95,6 +97,16 @@ class FlashcardsDialog(QDialog):
         self._book_filter.setObjectName("flashcardsBookFilter")
         self._book_filter.currentIndexChanged.connect(self._on_filter_changed)
         top.addWidget(self._book_filter)
+
+        # Ação em lote: gera cards a partir dos DESTAQUES do livro selecionado
+        # (tarefa 3.3). Só habilita quando há um livro específico no filtro.
+        self._highlights_btn = QPushButton(" Dos destaques")
+        self._highlights_btn.setIcon(emoji_icon("🃏"))
+        self._highlights_btn.setObjectName("flashcardsHighlightBtn")
+        self._highlights_btn.setToolTip(
+            "Gerar flashcards (pergunta/resposta) a partir dos destaques deste livro")
+        self._highlights_btn.clicked.connect(self._generate_from_highlights)
+        top.addWidget(self._highlights_btn)
 
         self._study_btn = QPushButton("Estudar")
         self._study_btn.setObjectName("flashcardsStudyBtn")
@@ -262,10 +274,98 @@ class FlashcardsDialog(QDialog):
         self._study_btn.setText(f"Estudar ({n})" if n else "Estudar")
         self._study_btn.setEnabled(n > 0)
 
+        # "Dos destaques" só faz sentido com um livro específico selecionado.
+        worker = getattr(self, "_highlights_worker", None)
+        generating = worker is not None and worker.isRunning()
+        self._highlights_btn.setEnabled(book_id is not None and not generating)
+
     def _on_delete(self, fc_id: int):
         self._db.delete_flashcard(fc_id)
         self._reload_books_filter()
         self._refresh_list()
+
+    # ── Cards a partir dos destaques (tarefa 3.3) ─────────────────────
+
+    def _ollama_url(self) -> str:
+        parent = self.parent()
+        config = getattr(parent, "_config", None) if parent is not None else None
+        if config is not None:
+            try:
+                return config.get("rag.ollama_url", "http://localhost:11434")
+            except Exception:
+                pass
+        return "http://localhost:11434"
+
+    def _generate_from_highlights(self):
+        """Gera, em lote, um card por destaque do livro selecionado."""
+        book_id = self._selected_book_id()
+        if book_id is None:
+            QMessageBox.information(
+                self, "Flashcards dos destaques",
+                "Selecione um livro específico no filtro para gerar cards dos "
+                "destaques dele.")
+            return
+        try:
+            highlights = self._db.get_annotations(book_id, "highlight")
+        except Exception:
+            highlights = []
+        texts = [(h.get("content") or "").strip() for h in highlights]
+        texts = [t for t in texts if t]
+        if not texts:
+            QMessageBox.information(
+                self, "Flashcards dos destaques",
+                "Este livro ainda não tem destaques com texto para virar "
+                "flashcards.")
+            return
+
+        from src.gui.workers.flashcard_qa_worker import HighlightCardsWorker
+        self._highlights_btn.setEnabled(False)
+        self._highlights_btn.setText(f" Gerando… (0/{len(texts)})")
+        self._highlights_worker = HighlightCardsWorker(
+            texts, ollama_url=self._ollama_url(), parent=self)
+        self._highlights_worker.progress.connect(self._on_highlights_progress)
+        self._highlights_worker.cards_ready.connect(
+            lambda cards, bid=book_id: self._on_highlights_ready(cards, bid))
+        self._highlights_worker.failed.connect(self._on_highlights_failed)
+        self._highlights_worker.start()
+
+    def _on_highlights_progress(self, done: int, total: int):
+        self._highlights_btn.setText(f" Gerando… ({done}/{total})")
+
+    def _on_highlights_ready(self, cards: list, book_id):
+        self._reset_highlights_btn()
+        if not cards:
+            QMessageBox.information(
+                self, "Flashcards dos destaques",
+                "Nenhum card foi gerado a partir dos destaques.")
+            return
+        preview = _HighlightCardsPreview(cards, parent=self)
+        if preview.exec() == QDialog.DialogCode.Accepted:
+            selected = preview.selected_cards()
+            saved = 0
+            for c in selected:
+                try:
+                    self._db.add_flashcard(
+                        front=c["front"], back=c["back"], book_id=book_id)
+                    saved += 1
+                except Exception:
+                    pass
+            self._reload_books_filter()
+            self._refresh_list()
+            if saved:
+                QMessageBox.information(
+                    self, "Flashcards dos destaques",
+                    f"{saved} flashcard(s) salvo(s).")
+
+    def _on_highlights_failed(self, reason: str):
+        self._reset_highlights_btn()
+        QMessageBox.warning(
+            self, "Flashcards dos destaques",
+            f"Não foi possível gerar os cards agora:\n{reason}")
+
+    def _reset_highlights_btn(self):
+        self._highlights_btn.setText(" Dos destaques")
+        self._highlights_btn.setEnabled(self._selected_book_id() is not None)
 
     # ── Estudo ────────────────────────────────────────────────────────
 
@@ -328,3 +428,87 @@ class FlashcardsDialog(QDialog):
         self._stack.setCurrentIndex(0)
         self._reload_books_filter()
         self._refresh_list()
+
+
+class _HighlightCardsPreview(QDialog):
+    """Preview editável/selecionável dos cards propostos dos destaques (3.3).
+
+    Cada linha: [x] Incluir · frente (pergunta) · verso (resposta). Salva só os
+    marcados COM frente e verso preenchidos — o usuário revisa e corrige os
+    fallbacks (pergunta em branco) antes de gravar.
+    """
+
+    def __init__(self, cards: list, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("🃏 Cards propostos dos destaques")
+        # Reaproveita o tema já estilizado do diálogo de flashcards (3 temas).
+        self.setObjectName("flashcardsDialog")
+        self.resize(620, 560)
+        self._rows: list = []
+        self._setup_ui(cards)
+
+    def _setup_ui(self, cards: list):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(10)
+
+        title = QLabel("Revise, edite e escolha os cards a salvar")
+        title.setObjectName("flashcardsTitle")
+        root.addWidget(title)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        container = QWidget()
+        col = QVBoxLayout(container)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(8)
+        col.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        for card in cards:
+            front = (card.get("front") or "").strip()
+            back = (card.get("back") or "").strip()
+
+            row = QFrame()
+            row.setObjectName("flashcardItem")
+            rlay = QVBoxLayout(row)
+            rlay.setContentsMargins(10, 8, 10, 8)
+            rlay.setSpacing(4)
+
+            check = QCheckBox("Incluir")
+            check.setChecked(bool(front and back))
+            rlay.addWidget(check)
+
+            front_edit = QLineEdit(front)
+            front_edit.setPlaceholderText("Pergunta (frente)")
+            rlay.addWidget(front_edit)
+
+            back_edit = QLineEdit(back)
+            back_edit.setPlaceholderText("Resposta (verso)")
+            rlay.addWidget(back_edit)
+
+            self._rows.append((check, front_edit, back_edit))
+            col.addWidget(row)
+
+        scroll.setWidget(container)
+        root.addWidget(scroll, 1)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText(
+            "Salvar selecionados")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def selected_cards(self) -> list:
+        out = []
+        for check, front_edit, back_edit in self._rows:
+            if not check.isChecked():
+                continue
+            front = front_edit.text().strip()
+            back = back_edit.text().strip()
+            if front and back:
+                out.append({"front": front, "back": back})
+        return out
