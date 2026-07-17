@@ -29,6 +29,7 @@ from src.gui.workers.rag_worker import RAGWorker
 import os
 from src.gui.widgets.stats_panel import StatsPanel
 from src.gui.widgets.rag_panel import RAGPanel
+from src.gui.widgets.drop_overlay import DropOverlay, supported_files_from_urls
 from src.utils.constants import FILE_FILTER, DATA_DIR
 from src.utils.export import export_annotations_markdown
 from src.gui.watcher import DirectoryWatcher
@@ -107,6 +108,8 @@ class MainWindow(QMainWindow):
         h = self._config.get("window.height", 800)
         self.resize(w, h)
         self.setMinimumSize(QSize(900, 600))
+        # Habilita o arraste-e-solte de arquivos para importação (Tarefa 2.4).
+        self.setAcceptDrops(True)
         if self._config.get("window.maximized", False):
             self.showMaximized()
 
@@ -197,6 +200,11 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
+
+        # Sobreposição do arraste-e-solte (Tarefa 2.4): filha da janela, fica
+        # escondida até um arraste válido entrar (dragEnterEvent).
+        self._drop_overlay = DropOverlay(self)
+
         main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
@@ -370,6 +378,18 @@ class MainWindow(QMainWindow):
 
         self._load_collections()
         self._library_view.load_books(books)
+        # Prateleira "Continuar lendo": só na seção "all" (Tarefa 2.2). Nas
+        # demais seções (favoritos/coleções/status) a faixa é suprimida.
+        if section == "all":
+            try:
+                self._library_view.load_continue_reading(
+                    self._db.get_in_progress_books()
+                )
+            except Exception as exc:
+                logger.warning(f"Falha ao carregar 'Continuar lendo' (ignorado): {exc}")
+                self._library_view.load_continue_reading([])
+        else:
+            self._library_view.load_continue_reading([])
         stats = self._db.get_statistics()
         self._sidebar.update_stats(stats)
         self._update_statusbar()
@@ -403,6 +423,8 @@ class MainWindow(QMainWindow):
         if query or filters:
             results = self._search_engine.search(query, filters)
             self._library_view.load_books(results)
+            # A prateleira "Continuar lendo" não aparece durante a busca.
+            self._library_view.load_continue_reading([])
         else:
             self._load_library()
 
@@ -619,6 +641,48 @@ class MainWindow(QMainWindow):
     def _show_import_dialog(self):
         """Abre o diálogo rico de importação."""
         dialog = ImportDialog(self._library, self)
+        dialog.import_completed.connect(self._load_library)
+        dialog.exec()
+        self._load_library()
+
+    # ── Arraste-e-solte de importação (Tarefa 2.4) ─────────────────────
+
+    def dragEnterEvent(self, event):
+        """Aceita o arraste quando há ao menos um arquivo suportado."""
+        mime = event.mimeData()
+        if mime.hasUrls() and supported_files_from_urls(mime.urls()):
+            event.acceptProposedAction()
+            self._drop_overlay.cover(self.rect())
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        """Mantém o arraste aceito enquanto se move sobre a janela."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self._drop_overlay.hide()
+        event.accept()
+
+    def dropEvent(self, event):
+        """Abre o ImportDialog já carregado com os arquivos soltos."""
+        self._drop_overlay.hide()
+        files = supported_files_from_urls(event.mimeData().urls())
+        if not files:
+            self._statusbar.showMessage(
+                "⚠️ Nenhum arquivo em formato suportado foi solto.", 4000
+            )
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self._open_import_dialog_with_files(files)
+
+    def _open_import_dialog_with_files(self, files: list):
+        """ImportDialog pré-carregado (o diálogo mantém as opções de OCR etc.)."""
+        dialog = ImportDialog(self._library, self, initial_files=files)
         dialog.import_completed.connect(self._load_library)
         dialog.exec()
         self._load_library()

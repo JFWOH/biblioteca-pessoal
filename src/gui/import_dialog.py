@@ -56,7 +56,7 @@ class ImportDialog(QDialog):
 
     import_completed = pyqtSignal()
 
-    def __init__(self, library_manager, parent=None):
+    def __init__(self, library_manager, parent=None, initial_files: list[str] | None = None):
         super().__init__(parent)
         self._library = library_manager
         self._files: list[str] = []
@@ -65,6 +65,9 @@ class ImportDialog(QDialog):
         self.setMinimumSize(QSize(600, 500))
         self.setModal(True)
         self._setup_ui()
+        # Pré-carrega arquivos (ex.: vindos do arraste-e-solte na janela).
+        if initial_files:
+            self.add_files(initial_files)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -174,6 +177,16 @@ class ImportDialog(QDialog):
         btn_layout.addWidget(self._import_btn)
 
         layout.addLayout(btn_layout)
+
+    def add_files(self, files: list[str]):
+        """Define a lista de arquivos a importar e atualiza a UI.
+
+        API pública usada pelo arraste-e-solte do MainWindow (que já filtrou
+        os formatos suportados) e pelo parâmetro ``initial_files``. Substitui
+        a seleção atual — mesmo comportamento de "Selecionar Arquivos".
+        """
+        self._files = list(files)
+        self._update_file_list()
 
     def _select_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Selecionar Arquivos", "", FILE_FILTER)

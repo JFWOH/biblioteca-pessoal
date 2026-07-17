@@ -1057,6 +1057,40 @@ QPushButton#bookmarkRemoveBtn {
     background: transparent; border: none; color: #94a3b8; font-size: 13px;
 }
 QPushButton#bookmarkRemoveBtn:hover { color: #ef4444; }
+
+/* ── Prateleira "Continuar lendo" + card compacto (Onda 2) ───────── */
+#continueShelf { background: transparent; }
+#continueShelfTitle {
+    color: #e5e7eb; font-size: 14px; font-weight: 700; letter-spacing: 0.3px;
+}
+QScrollArea#continueShelfScroll { background: transparent; border: none; }
+#continueCard {
+    background-color: #161920; border: 1px solid #2d333f; border-radius: 10px;
+}
+#continueCard:hover { border-color: #10b981; }
+#continueCardTitle { font-size: 12px; font-weight: 600; color: #e5e7eb; }
+#continueCardMeta { font-size: 11px; color: #94a3b8; }
+#continueCardCoverPlaceholder {
+    border-radius: 6px; font-size: 34px; color: #a7f3d0;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #312e81, stop:1 #1e1b4b);
+}
+QProgressBar#continueProgress {
+    background-color: #2d333f; border: none; border-radius: 3px;
+}
+QProgressBar#continueProgress::chunk {
+    background-color: #10b981; border-radius: 3px;
+}
+
+/* ── Sobreposição de arraste-e-solte (Onda 2) ────────────────────── */
+#dropOverlay {
+    background-color: rgba(15, 17, 21, 0.82);
+    border: 3px dashed #10b981;
+}
+#dropOverlayIcon { font-size: 56px; background: transparent; }
+#dropOverlayLabel {
+    color: #10b981; font-size: 24px; font-weight: 700; background: transparent;
+}
 """
 
 LIGHT_THEME = """
@@ -2108,6 +2142,40 @@ QPushButton#bookmarkRemoveBtn {
     background: transparent; border: none; color: #71717a; font-size: 13px;
 }
 QPushButton#bookmarkRemoveBtn:hover { color: #dc2626; }
+
+/* ── Prateleira "Continuar lendo" + card compacto (Onda 2) ───────── */
+#continueShelf { background: transparent; }
+#continueShelfTitle {
+    color: #1A1A1A; font-size: 14px; font-weight: 700; letter-spacing: 0.3px;
+}
+QScrollArea#continueShelfScroll { background: transparent; border: none; }
+#continueCard {
+    background-color: #ffffff; border: 1px solid #e4e4e7; border-radius: 10px;
+}
+#continueCard:hover { border-color: #059669; }
+#continueCardTitle { font-size: 12px; font-weight: 600; color: #1A1A1A; }
+#continueCardMeta { font-size: 11px; color: #71717a; }
+#continueCardCoverPlaceholder {
+    border-radius: 6px; font-size: 34px; color: #4338ca;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #e0e7ff, stop:1 #c7d2fe);
+}
+QProgressBar#continueProgress {
+    background-color: #e4e4e7; border: none; border-radius: 3px;
+}
+QProgressBar#continueProgress::chunk {
+    background-color: #059669; border-radius: 3px;
+}
+
+/* ── Sobreposição de arraste-e-solte (Onda 2) ────────────────────── */
+#dropOverlay {
+    background-color: rgba(244, 244, 245, 0.86);
+    border: 3px dashed #059669;
+}
+#dropOverlayIcon { font-size: 56px; background: transparent; }
+#dropOverlayLabel {
+    color: #059669; font-size: 24px; font-weight: 700; background: transparent;
+}
 """
 
 SEPIA_THEME = """
@@ -3160,6 +3228,40 @@ QPushButton#bookmarkRemoveBtn {
     background: transparent; border: none; color: #8b7355; font-size: 13px;
 }
 QPushButton#bookmarkRemoveBtn:hover { color: #b91c1c; }
+
+/* ── Prateleira "Continuar lendo" + card compacto (Onda 2) ───────── */
+#continueShelf { background: transparent; }
+#continueShelfTitle {
+    color: #433422; font-size: 14px; font-weight: 700; letter-spacing: 0.3px;
+}
+QScrollArea#continueShelfScroll { background: transparent; border: none; }
+#continueCard {
+    background-color: #EADFCA; border: 1px solid #d4cbb8; border-radius: 10px;
+}
+#continueCard:hover { border-color: #8b6c42; }
+#continueCardTitle { font-size: 12px; font-weight: 600; color: #433422; }
+#continueCardMeta { font-size: 11px; color: #7a6a4f; }
+#continueCardCoverPlaceholder {
+    border-radius: 6px; font-size: 34px; color: #5c4426;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #e6d8bd, stop:1 #d8c4a0);
+}
+QProgressBar#continueProgress {
+    background-color: #d4cbb8; border: none; border-radius: 3px;
+}
+QProgressBar#continueProgress::chunk {
+    background-color: #8b6c42; border-radius: 3px;
+}
+
+/* ── Sobreposição de arraste-e-solte (Onda 2) ────────────────────── */
+#dropOverlay {
+    background-color: rgba(244, 236, 216, 0.86);
+    border: 3px dashed #8b6c42;
+}
+#dropOverlayIcon { font-size: 56px; background: transparent; }
+#dropOverlayLabel {
+    color: #8b6c42; font-size: 24px; font-weight: 700; background: transparent;
+}
 """
 
 THEMES = {

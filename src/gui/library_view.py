@@ -2,12 +2,107 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QLabel, QGridLayout,
-    QHBoxLayout, QPushButton, QFrame,
+    QHBoxLayout, QPushButton, QFrame, QProgressBar,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QPixmap, QCursor
 
 from src.gui.widgets.book_card import BookCard
 from src.utils.constants import CARD_WIDTH, GRID_SPACING
+
+# ── Dimensões do card compacto da prateleira "Continuar lendo" ─────────────
+CONTINUE_CARD_W = 132
+CONTINUE_CARD_H = 238
+CONTINUE_THUMB_W = 112
+CONTINUE_THUMB_H = 150
+
+
+class _ContinueReadingCard(QWidget):
+    """Card compacto da prateleira "Continuar lendo" (capa + título + progresso).
+
+    Variante enxuta do ``BookCard``: além do essencial, exibe a barra de
+    progresso da leitura — o dado central desta prateleira, que o ``BookCard``
+    padrão não mostra. Reutilizar o ``BookCard`` (fixo em 180×300 e sem
+    progresso) deixaria a faixa alta demais e sem a informação-chave; por isso
+    um card próprio, definido aqui em ``library_view`` (whitelist), sem tocar
+    em ``book_card.py``. Emite os mesmos sinais que o ``BookCard``
+    (``clicked``/``double_clicked``) para reaproveitar o roteamento existente.
+    """
+
+    clicked = pyqtSignal(int)          # book_id — clique simples seleciona
+    double_clicked = pyqtSignal(int)   # book_id — duplo clique abre o leitor
+
+    def __init__(self, book: dict, parent=None):
+        super().__init__(parent)
+        self._book_id = book.get("id", 0)
+        self.setObjectName("continueCard")
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.setFixedSize(CONTINUE_CARD_W, CONTINUE_CARD_H)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(4)
+
+        cover = QLabel()
+        cover.setFixedSize(CONTINUE_THUMB_W, CONTINUE_THUMB_H)
+        cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cover_path = book.get("cover_path", "")
+        pixmap = QPixmap(cover_path) if cover_path else QPixmap()
+        if not pixmap.isNull():
+            cover.setPixmap(
+                pixmap.scaled(
+                    CONTINUE_THUMB_W, CONTINUE_THUMB_H,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+            cover.setObjectName("continueCardCover")
+        else:
+            cover.setText("📖")
+            cover.setObjectName("continueCardCoverPlaceholder")
+        layout.addWidget(cover, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        title = QLabel(book.get("title", "Sem título"))
+        title.setObjectName("continueCardTitle")
+        title.setWordWrap(True)
+        title.setMaximumHeight(32)
+        title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(title)
+
+        pct = int(round(book.get("percentage", 0) or 0))
+        pct = max(0, min(100, pct))
+
+        bar = QProgressBar()
+        bar.setObjectName("continueProgress")
+        bar.setRange(0, 100)
+        bar.setValue(pct)
+        bar.setTextVisible(False)
+        bar.setFixedHeight(6)
+        layout.addWidget(bar)
+
+        meta = QLabel(self._meta_text(book, pct))
+        meta.setObjectName("continueCardMeta")
+        layout.addWidget(meta)
+
+        layout.addStretch()
+
+    @staticmethod
+    def _meta_text(book: dict, pct: int) -> str:
+        cur = book.get("current_page") or 0
+        total = book.get("total_pages") or 0
+        if total > 0:
+            return f"{pct}% · pág. {cur}/{total}"
+        return f"{pct}%"
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self._book_id)
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.double_clicked.emit(self._book_id)
+        super().mouseDoubleClickEvent(event)
 
 
 class LibraryView(QWidget):
@@ -84,6 +179,43 @@ class LibraryView(QWidget):
         header_layout.addWidget(self._list_btn)
 
         layout.addWidget(header)
+
+        # ── Prateleira "Continuar lendo" (topo, acima da grade) ──────────────
+        # Só aparece quando há livros em progresso E a seção é "all" — o
+        # MainWindow controla isso via load_continue_reading([]) nas demais.
+        self._continue_widget = QWidget()
+        self._continue_widget.setObjectName("continueShelf")
+        cont_layout = QVBoxLayout(self._continue_widget)
+        cont_layout.setContentsMargins(24, 12, 24, 4)
+        cont_layout.setSpacing(8)
+
+        cont_title = QLabel("Continuar lendo")
+        cont_title.setObjectName("continueShelfTitle")
+        cont_layout.addWidget(cont_title)
+
+        self._continue_scroll = QScrollArea()
+        self._continue_scroll.setObjectName("continueShelfScroll")
+        self._continue_scroll.setWidgetResizable(True)
+        self._continue_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._continue_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._continue_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self._continue_scroll.setFixedHeight(CONTINUE_CARD_H + 18)
+
+        self._continue_container = QWidget()
+        self._continue_layout = QHBoxLayout(self._continue_container)
+        self._continue_layout.setContentsMargins(0, 0, 0, 0)
+        self._continue_layout.setSpacing(GRID_SPACING)
+        self._continue_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self._continue_scroll.setWidget(self._continue_container)
+        cont_layout.addWidget(self._continue_scroll)
+
+        self._continue_cards: list[_ContinueReadingCard] = []
+        self._continue_widget.hide()
+        layout.addWidget(self._continue_widget)
 
         # ── Barra de ação em lote (flutuante, visível ao selecionar) ─────────
         self._bulk_bar = QFrame()
@@ -173,7 +305,10 @@ class LibraryView(QWidget):
         empty_text.setStyleSheet("color: #71717a; font-size: 18px; font-weight: 600;")
         empty_layout.addWidget(empty_text)
 
-        empty_sub = QLabel("Importe livros usando o menu Arquivo → Importar")
+        empty_sub = QLabel(
+            "Importe pelo menu Arquivo → Importar\n"
+            "ou arraste arquivos para esta janela"
+        )
         empty_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_sub.setStyleSheet("color: #52525b; font-size: 13px;")
         empty_layout.addWidget(empty_sub)
@@ -196,6 +331,32 @@ class LibraryView(QWidget):
         self._all_books = books
         self._selected_ids.clear()
         self._refresh_grid(books)
+
+    def load_continue_reading(self, books: list[dict]):
+        """Preenche (ou esconde) a prateleira "Continuar lendo".
+
+        ``books`` já vem filtrado/ordenado pelo core
+        (``LibraryDB.get_in_progress_books``). Lista vazia esconde a faixa —
+        é assim que o MainWindow a suprime fora da seção "all" (coleções,
+        favoritos, busca): basta chamar ``load_continue_reading([])``.
+        """
+        self._clear_continue()
+        if not books:
+            self._continue_widget.hide()
+            return
+        for book in books:
+            card = _ContinueReadingCard(book)
+            card.clicked.connect(self.book_selected.emit)
+            card.double_clicked.connect(self.book_open.emit)
+            self._continue_cards.append(card)
+            self._continue_layout.addWidget(card)
+        self._continue_widget.show()
+
+    def _clear_continue(self):
+        for card in self._continue_cards:
+            self._continue_layout.removeWidget(card)
+            card.deleteLater()
+        self._continue_cards.clear()
 
     def _refresh_grid(self, books: list[dict]):
         """Renderiza a grade com a lista fornecida."""

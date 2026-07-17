@@ -341,6 +341,27 @@ class LibraryDB:
             "SELECT * FROM reading_progress WHERE book_id = ?", (book_id,)).fetchone()
         return dict(r) if r else None
 
+    def get_in_progress_books(self, limit: int = 10) -> list[dict]:
+        """Livros em andamento para a prateleira 'Continuar lendo'.
+
+        Retorna os livros cujo progresso está iniciado mas não concluído
+        (``0 < percentage < 99.5``), do mais recente para o mais antigo
+        (``last_read DESC``). Cada dict traz os campos do livro (``books.*``)
+        acrescidos de ``percentage``, ``current_page``, ``total_pages`` e
+        ``last_read`` do progresso — o suficiente para o card compacto exibir
+        a barra de progresso sem uma segunda consulta.
+        """
+        rows = self.conn.execute(
+            """SELECT b.*, rp.percentage, rp.current_page,
+                      rp.total_pages, rp.last_read
+               FROM books b
+               JOIN reading_progress rp ON rp.book_id = b.id
+               WHERE rp.percentage > 0 AND rp.percentage < 99.5
+               ORDER BY rp.last_read DESC
+               LIMIT ?""",
+            (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
     # ── OCR ────────────────────────────────────────────────────────────
 
     def save_ocr_page(self, book_id: int, page_number: int, content: str) -> None:
