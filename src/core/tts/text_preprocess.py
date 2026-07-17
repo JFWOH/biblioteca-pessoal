@@ -23,6 +23,76 @@ _PREV_SENTENCE_END = re.compile(r"""[.!?…]["'\)\]»”’]*$""")
 # Ao menos uma letra (unicode; exclui dígitos/símbolos puros).
 _HAS_LETTER = re.compile(r"[^\W\d_]", re.UNICODE)
 
+# Marcador de item de lista no INÍCIO da linha. Bullets/asteriscos podem vir
+# colados ao texto ("*Nota"); traço exige espaço depois para não confundir com
+# hífen de quebra de palavra do OCR ("com-\nputador", tratado noutro passo).
+_LIST_BULLET = re.compile(r"^\s*(?:[•●◦▪▸►∙‣]+|\*+)\s*")
+_LIST_DASH = re.compile(r"^\s*[-–]\s+")
+
+
+def strip_list_markers(text: str) -> str:
+    """Remove marcadores de lista e dá a cada item a pausa de fim de frase.
+
+    Sintoma real (teste do usuário, 2026-07-17): a extração de PDF entrega
+    itens de lista como ``* Texto do item`` e o motor de voz VERBALIZA o
+    símbolo — "asterisco Texto do item". O passo antigo (``normalize_lists``)
+    não cobria ``*``/``-`` e rodava DEPOIS do colapso de quebras de linha,
+    quando as âncoras ``^`` de início de linha já não existiam.
+
+    Esta função roda ANTES do colapso (estrutura de linhas intacta) e:
+
+    * remove o marcador (``• ● ◦ ▪ ▸ ► ∙ ‣ *`` e ``-``/``–`` com espaço);
+    * anexa ``.`` ao item que não termina em pontuação — cada item vira uma
+      sentença própria (pausa natural) — EXCETO quando a linha seguinte é a
+      continuação do próprio item (linha não-vazia sem marcador, caso de
+      quebra de linha no meio do item);
+    * anexa ``.`` também à linha-introdução da lista (a linha imediatamente
+      anterior ao primeiro item, sem pontuação final) — senão ela é colada ao
+      primeiro item na narração;
+    * por fim, remove asteriscos residuais em QUALQUER posição (ênfase
+      markdown ``*palavra*``, marcador de nota ``palavra*``): o símbolo não
+      tem leitura útil em prosa.
+
+    Pura, determinística e idempotente (na 2ª passada não há mais marcadores
+    nem linhas sem pontuação criadas por ela).
+    """
+    if not text:
+        return text
+
+    lines = text.split("\n")
+    n = len(lines)
+    is_marker = [bool(_LIST_BULLET.match(ln) and ln.strip()) or bool(_LIST_DASH.match(ln))
+                 for ln in lines]
+
+    out: list[str] = []
+    for i, ln in enumerate(lines):
+        if is_marker[i]:
+            s = _LIST_BULLET.sub("", ln, count=1)
+            s = _LIST_DASH.sub("", s, count=1)
+            s = s.rstrip()
+            # Continuação = quebra no MEIO do item: linha seguinte não-vazia,
+            # sem marcador e começando em minúscula (meio de frase). Prosa
+            # nova após a lista começa com maiúscula e NÃO é continuação —
+            # sem isso o último item ficava sem pausa, colado ao parágrafo.
+            nxt = lines[i + 1].strip() if i + 1 < n else ""
+            has_continuation = bool(
+                nxt and not is_marker[i + 1] and nxt[:1].islower()
+            )
+            if (s and not has_continuation and _HAS_LETTER.search(s)
+                    and not _ALREADY_PUNCTUATED.search(s)):
+                s += "."
+            out.append(s)
+        else:
+            s = ln
+            starts_list = i + 1 < n and is_marker[i + 1]
+            stripped = s.strip()
+            if (starts_list and stripped and _HAS_LETTER.search(stripped)
+                    and not _ALREADY_PUNCTUATED.search(stripped)):
+                s = s.rstrip() + "."
+            out.append(s)
+
+    return re.sub(r"\*+", "", "\n".join(out))
+
 
 def mark_heading_pauses(text: str, max_len: int = 64) -> str:
     """Anexa ``.`` a linhas curtas que se comportam como título/subtítulo.

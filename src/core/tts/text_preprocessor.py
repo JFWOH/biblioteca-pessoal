@@ -19,7 +19,7 @@ ADR-006 compliance: No PyQt6 imports.
 import re
 import logging
 
-from src.core.tts.text_preprocess import mark_heading_pauses
+from src.core.tts.text_preprocess import mark_heading_pauses, strip_list_markers
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +115,13 @@ class TTSTextPreprocessor:
 
         # 2. Remove reference markers (reuse existing logic)
         result = self.clean_reference_markers(result)
+
+        # 2.4 Remove marcadores de lista (•/*/-) e pontua cada item como
+        # sentença própria (sintoma real: "asterisco Texto do item" — o motor
+        # verbalizava o símbolo). PRECISA rodar ANTES de normalize_whitespace
+        # (as âncoras ^ dependem da estrutura de linhas) e antes de
+        # mark_heading_pauses (itens já pontuados não disparam a heurística).
+        result = strip_list_markers(result)
 
         # 2.5 Marca pausa em títulos/subtítulos (linhas curtas isoladas por
         # quebras) para que a síntese não os cole na frase seguinte (sintoma
