@@ -10,6 +10,7 @@ from src.utils.file_utils import format_file_size
 from src.utils.constants import READ_STATUS_LABELS
 from src.gui.widgets.star_rating import StarRating
 from src.gui.widgets.tag_manager import TagManager
+from src.gui.styles import emoji_icon
 from src.core.database import LibraryDB
 
 
@@ -127,44 +128,54 @@ class BookDetails(QWidget):
         btn_layout = QVBoxLayout()
         btn_layout.setSpacing(8)
 
-        self._open_btn = QPushButton("📖  Abrir")
+        # Emoji vai como ÍCONE (setIcon), nunca embutido no texto: no Windows o
+        # emoji-no-texto renderiza sobreposto ao rótulo (bug visual). Ver
+        # src/gui/styles.py::emoji_icon.
+        self._open_btn = QPushButton("Abrir")
+        self._open_btn.setIcon(emoji_icon("📖"))
         self._open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._open_btn.setObjectName("primaryBtn")
         self._open_btn.clicked.connect(lambda: self._emit_action("open"))
         btn_layout.addWidget(self._open_btn)
 
-        self._dossier_btn = QPushButton("📋  Dossiê do Livro")
+        self._dossier_btn = QPushButton("Dossiê do Livro")
+        self._dossier_btn.setIcon(emoji_icon("📋"))
         self._dossier_btn.setObjectName("secondaryBtn")
         self._dossier_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._dossier_btn.clicked.connect(lambda: self._emit_action("dossier"))
         btn_layout.addWidget(self._dossier_btn)
 
-        self._fav_btn = QPushButton("⭐  Favoritar")
+        self._fav_btn = QPushButton("Favoritar")
+        self._fav_btn.setIcon(emoji_icon("⭐"))
         self._fav_btn.setObjectName("secondaryBtn")
         self._fav_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._fav_btn.clicked.connect(lambda: self._emit_action("favorite"))
         btn_layout.addWidget(self._fav_btn)
 
-        self._col_btn = QPushButton("📂  Coleção")
+        self._col_btn = QPushButton("Coleção")
+        self._col_btn.setIcon(emoji_icon("📂"))
         self._col_btn.setObjectName("secondaryBtn")
         self._col_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._col_btn.clicked.connect(lambda: self._emit_action("collection"))
         btn_layout.addWidget(self._col_btn)
 
-        self._meta_btn = QPushButton("🌐  Metadados")
+        self._meta_btn = QPushButton("Metadados")
+        self._meta_btn.setIcon(emoji_icon("🌐"))
         self._meta_btn.setObjectName("secondaryBtn")
         self._meta_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._meta_btn.clicked.connect(lambda: self._emit_action("fetch_metadata"))
         btn_layout.addWidget(self._meta_btn)
 
-        self._remove_col_btn = QPushButton("❌  Tirar desta Coleção")
+        self._remove_col_btn = QPushButton("Tirar desta Coleção")
+        self._remove_col_btn.setIcon(emoji_icon("❌"))
         self._remove_col_btn.setObjectName("secondaryBtn")
         self._remove_col_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._remove_col_btn.clicked.connect(lambda: self._emit_action("remove_from_collection"))
         self._remove_col_btn.hide()
         btn_layout.addWidget(self._remove_col_btn)
 
-        self._del_btn = QPushButton("🗑  Remover")
+        self._del_btn = QPushButton("Remover")
+        self._del_btn.setIcon(emoji_icon("🗑"))
         self._del_btn.setStyleSheet("""
             QPushButton { background: transparent; border: 1px solid #3f3f46;
                           border-radius: 8px; padding: 10px; color: #ef4444; }
@@ -219,9 +230,10 @@ class BookDetails(QWidget):
         self._desc.setText(desc if desc else "Sem descrição disponível")
         self._desc.setVisible(bool(desc))
 
-        # Favorito
+        # Favorito (emoji como ícone; texto sem emoji — ver _setup_ui)
         is_fav = book.get("is_favorite", 0)
-        self._fav_btn.setText("💛  Desfavoritar" if is_fav else "⭐  Favoritar")
+        self._fav_btn.setText("Desfavoritar" if is_fav else "Favoritar")
+        self._fav_btn.setIcon(emoji_icon("💛" if is_fav else "⭐"))
 
         # Avaliação
         self._star_rating.rating = book.get("rating", 0)

@@ -1,5 +1,8 @@
 """Temas e estilos QSS para a aplicação."""
 
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont, QIcon, QPainter, QPixmap
+
 DARK_THEME = """
 /* ── Reset e Base ─────────────────────────────────── */
 QWidget {
@@ -963,3 +966,36 @@ READER_THEMES = {"dark": READER_CSS_DARK, "light": READER_CSS_LIGHT, "sepia": RE
 
 def get_reader_css(theme: str) -> str:
     return READER_THEMES.get(theme, READER_CSS_DARK)
+
+
+# ── Helper de ícone-emoji ──────────────────────────────────────────────
+#
+# Embutir o emoji no texto do botão — ``QPushButton("📖 Ler")`` — renderiza
+# com o glifo sobreposto ao texto no Windows (bug visual). A solução é pintar
+# o emoji num QPixmap e usá-lo como ÍCONE (``setIcon``), mantendo o texto do
+# botão SEM emoji: ``btn.setIcon(emoji_icon("📖")); btn.setText("Ler")``.
+
+_EMOJI_FONT_FAMILIES = ["Segoe UI Emoji", "Noto Color Emoji"]
+
+
+def emoji_icon(emoji: str, size: int = 18) -> QIcon:
+    """Renderiza *emoji* num QPixmap e devolve um QIcon pronto p/ ``setIcon``.
+
+    ``size`` é o lado do ícone em px (lógicos). Pinta em 2x (devicePixelRatio)
+    para nitidez em telas HiDPI. Requer uma QApplication ativa — como todo
+    QPixmap/QPainter do Qt. Fonte de emoji resolvida por família, com fallback.
+    """
+    scale = 2
+    pixmap = QPixmap(size * scale, size * scale)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    try:
+        font = QFont()
+        font.setFamilies(_EMOJI_FONT_FAMILIES)
+        font.setPixelSize(int(size * scale * 0.86))
+        painter.setFont(font)
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, emoji)
+    finally:
+        painter.end()
+    pixmap.setDevicePixelRatio(scale)
+    return QIcon(pixmap)

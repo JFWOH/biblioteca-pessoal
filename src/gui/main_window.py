@@ -6,7 +6,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QStackedWidget, QSplitter, QFileDialog, QMessageBox,
-    QStatusBar,
+    QStatusBar, QApplication,
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QAction, QKeySequence
@@ -331,7 +331,16 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self):
         theme = self._config.theme
-        self.setStyleSheet(get_theme(theme))
+        qss = get_theme(theme)
+        # Aplica o tema na QApplication para que TODO widget top-level herde
+        # automaticamente — inclusive os diálogos (settings/import/coleção/
+        # flashcards/dossiê/wizard/anki/tags) criados DEPOIS da troca de tema.
+        # Antes, só MainWindow + reader/sidebar/rag recebiam o tema e os
+        # diálogos ficavam com a aparência do tema anterior (propagação parcial).
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(qss)
+        self.setStyleSheet(qss)
         self._reader_view.set_theme(theme)
         self._sidebar.set_theme(theme)
         self._rag_panel.set_theme(theme)
