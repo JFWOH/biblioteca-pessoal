@@ -12,9 +12,46 @@ Providers falsos (TTS mockado, offline): registram cada chamada de síntese como
 """
 from typing import Optional
 
+import pytest
+
 from src.core.tts.base_tts_provider import BaseTTSProvider, SynthesisResult, VoiceInfo
 from src.core.tts.voice_profile import VoiceProfile, NarrationRole
 from src.core.tts.tts_router import TTSRouter
+
+
+class _FakePlayer:
+    """Player nulo: no CI Linux não há dispositivo de áudio e o enqueue do
+    player real falha, abortando a narração após o 1º chunk — o que mascarava
+    os runs seguintes (falha real do PR #34, 2/2 tentativas). O router importa
+    ContinuousAudioPlayer DENTRO de speak(), então o patch no módulo de origem
+    vale para todos os testes deste arquivo."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def start(self):
+        pass
+
+    def enqueue(self, *args, **kwargs):
+        pass
+
+    def wait_until_done(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def pause(self):
+        pass
+
+    def resume(self):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _fake_audio_player(monkeypatch):
+    import src.core.audio.continuous_player as cp
+    monkeypatch.setattr(cp, "ContinuousAudioPlayer", _FakePlayer)
 
 
 PT_EN_MIXED = (
@@ -49,7 +86,8 @@ class _RecordingBilingual(BaseTTSProvider):
                                provider_name=self._name)
 
     def speak_blocking(self, text, voice_id=None, rate=1.0, volume=1.0) -> None:
-        pass
+        # Registra também o caminho degradado (sem player) — hermetismo extra.
+        self.calls.append((voice_id, text))
 
     def stop(self) -> None:
         pass
