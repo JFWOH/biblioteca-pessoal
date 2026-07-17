@@ -193,6 +193,16 @@ class LibraryDB:
                     synthesis TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS bookmarks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    book_id INTEGER NOT NULL,
+                    page_number INTEGER NOT NULL,
+                    label TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(book_id, page_number),
+                    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_bookmarks_book ON bookmarks(book_id);
                 CREATE INDEX IF NOT EXISTS idx_mentions_book ON concept_mentions(book_id);
                 CREATE INDEX IF NOT EXISTS idx_mentions_concept ON concept_mentions(concept_id);
                 CREATE INDEX IF NOT EXISTS idx_chat_turns_book ON chat_turns(book_id, id);
@@ -288,6 +298,7 @@ class LibraryDB:
                 "DELETE FROM book_edges WHERE book_a = ? OR book_b = ?", (book_id, book_id))
             self.conn.execute("DELETE FROM graph_ingest_log WHERE book_id = ?", (book_id,))
             self.conn.execute("DELETE FROM dossier_synthesis_cache WHERE book_id = ?", (book_id,))
+            self.conn.execute("DELETE FROM bookmarks WHERE book_id = ?", (book_id,))
 
             self.conn.execute("DELETE FROM books WHERE id = ?", (book_id,))
             self.conn.commit()
@@ -596,6 +607,60 @@ class LibraryDB:
                     (row["book_id"], ref))
             self.conn.commit()
             return len(dupes)
+
+    # ── Marcadores de página (bookmarks) ───────────────────────────────
+    # Tabela própria: múltiplos marcadores por livro (ao contrário do
+    # reading_progress, que guarda uma única posição). ``label`` é um trecho
+    # curto opcional capturado na criação para o painel de Marcadores exibir
+    # um rótulo estável sem reler a página a cada atualização.
+
+    def add_bookmark(self, book_id: int, page_number: int, label: str = "") -> int:
+        """Cria (ou mantém) um marcador na página. Idempotente por UNIQUE.
+
+        Retorna o id do marcador — o id existente quando a página já estava
+        marcada (o ``INSERT OR IGNORE`` é no-op nesse caso).
+        """
+        with self._write_lock:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO bookmarks (book_id, page_number, label) "
+                "VALUES (?,?,?)",
+                (book_id, page_number, label))
+            self.conn.commit()
+            row = self.conn.execute(
+                "SELECT id FROM bookmarks WHERE book_id=? AND page_number=?",
+                (book_id, page_number)).fetchone()
+            return row["id"] if row else 0
+
+    def remove_bookmark(self, book_id: int, page_number: int) -> None:
+        with self._write_lock:
+            self.conn.execute(
+                "DELETE FROM bookmarks WHERE book_id=? AND page_number=?",
+                (book_id, page_number))
+            self.conn.commit()
+
+    def get_bookmarks(self, book_id: int) -> list[dict]:
+        """Marcadores do livro em ordem de página (crescente)."""
+        rows = self.conn.execute(
+            "SELECT id, book_id, page_number, label, created_at FROM bookmarks "
+            "WHERE book_id=? ORDER BY page_number", (book_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def is_bookmarked(self, book_id: int, page_number: int) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM bookmarks WHERE book_id=? AND page_number=?",
+            (book_id, page_number)).fetchone()
+        return row is not None
+
+    def toggle_bookmark(self, book_id: int, page_number: int, label: str = "") -> bool:
+        """Alterna o marcador da página e retorna o estado FINAL.
+
+        True = a página passou a ter marcador; False = marcador removido.
+        """
+        if self.is_bookmarked(book_id, page_number):
+            self.remove_bookmark(book_id, page_number)
+            return False
+        self.add_bookmark(book_id, page_number, label)
+        return True
 
     # ── Flashcards ─────────────────────────────────────────────────────
 

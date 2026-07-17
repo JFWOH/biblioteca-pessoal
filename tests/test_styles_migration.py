@@ -63,51 +63,47 @@ def config(tmp_path):
     return ConfigManager(tmp_path / "config.json")
 
 
-@pytest.mark.parametrize("theme_css", [DARK_THEME, LIGHT_THEME, SEPIA_THEME])
-def test_widgets_build_under_every_theme(qtbot, db, config, theme_css):
-    """Constrói os 10 widgets/diálogos da whitelist sob cada tema, sem erro."""
-    app = QApplication.instance()
-    app.setStyleSheet(theme_css)
-
-    card = BookCard({"id": 1, "title": "Livro", "file_path": __file__})
-    qtbot.addWidget(card)
+def _exercise_card(card):
     card.set_selected(True)
     card.set_selected(False)
 
-    details = BookDetails(db)
-    qtbot.addWidget(details)
 
-    col_dialog = CollectionDialog(db)
-    qtbot.addWidget(col_dialog)
+@pytest.mark.parametrize("theme_css", [DARK_THEME, LIGHT_THEME, SEPIA_THEME])
+def test_widgets_build_under_every_theme(qtbot, db, config, theme_css):
+    """Constrói os 10 widgets/diálogos da whitelist sob cada tema, sem erro.
+
+    Higiene de recursos nativos (CI Linux, SIGABRT flaky — ver conftest.py):
+    cada widget é construído, exercitado e DESTRUÍDO na hora, em vez de manter
+    ~12 widgets vivos até o fim do teste ×3 temas. Widget top-level sem pai é
+    propriedade do Python: soltar a última referência destrói o C++ na hora.
+    """
+    app = QApplication.instance()
+    app.setStyleSheet(theme_css)
 
     bid = db.add_book(title="Livro X", file_path="/x.pdf", file_format="pdf")
-    add_col_dialog = AddToCollectionDialog(db, bid)
-    qtbot.addWidget(add_col_dialog)
 
-    import_dialog = ImportDialog(MagicMock())
-    qtbot.addWidget(import_dialog)
-
-    anki_dialog = AnkiExportDialog(_FakeAnkiService())
-    qtbot.addWidget(anki_dialog)
-
-    dossier_dialog = BookDossierDialog(db, bid)
-    qtbot.addWidget(dossier_dialog)
-
-    tag_mgr = TagManager(db)
-    qtbot.addWidget(tag_mgr)
-    tag_mgr.set_book(bid)
-
-    add_tag_dialog = AddTagDialog(db, bid)
-    qtbot.addWidget(add_tag_dialog)
-
-    settings_dialog = SettingsDialog(config)
-    qtbot.addWidget(settings_dialog)
-
-    flashcards_dialog = FlashcardsDialog(db, current_book_id=bid)
-    qtbot.addWidget(flashcards_dialog)
-
-    wizard = OllamaWizardDialog()
-    qtbot.addWidget(wizard)
+    cases = [
+        (lambda: BookCard({"id": 1, "title": "Livro", "file_path": __file__}),
+         _exercise_card),
+        (lambda: BookDetails(db), None),
+        (lambda: CollectionDialog(db), None),
+        (lambda: AddToCollectionDialog(db, bid), None),
+        (lambda: ImportDialog(MagicMock()), None),
+        (lambda: AnkiExportDialog(_FakeAnkiService()), None),
+        (lambda: BookDossierDialog(db, bid), None),
+        (lambda: TagManager(db), lambda w: w.set_book(bid)),
+        (lambda: AddTagDialog(db, bid), None),
+        (lambda: SettingsDialog(config), None),
+        (lambda: FlashcardsDialog(db, current_book_id=bid), None),
+        (lambda: OllamaWizardDialog(), None),
+    ]
+    for factory, exercise in cases:
+        widget = factory()
+        if exercise is not None:
+            exercise(widget)
+        widget.close()
+        del widget
+        QApplication.processEvents()
 
 
 def test_migrated_widgets_have_no_inline_stylesheet(qtbot, db):

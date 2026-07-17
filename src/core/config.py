@@ -21,6 +21,7 @@ DEFAULT_CONFIG = {
         "line_height": DEFAULT_LINE_HEIGHT,
         "margin_horizontal": 60,
         "margin_vertical": 40,
+        "side_panel_visible": True,  # painel Sumário/Marcadores recolhível (Tarefa 1.3)
     },
     "library": {
         "view_mode": "grid",  # grid | list

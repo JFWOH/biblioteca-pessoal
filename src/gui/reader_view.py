@@ -6,7 +6,7 @@ import logging
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QSplitter, QStackedWidget, QMenu, QRubberBand,
-    QToolButton, QSizePolicy,
+    QToolButton, QSizePolicy, QTabWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize, QEvent
 from PyQt6.QtGui import QPixmap, QKeySequence, QShortcut, QAction
@@ -18,7 +18,12 @@ from src.gui.widgets.toc_widget import TOCWidget
 from src.gui.widgets.reading_progress import ReadingProgressBar
 from src.gui.widgets.annotation_panel import AnnotationPanel
 from src.gui.widgets.search_overlay import DocumentSearchBar
+from src.gui.widgets.bookmarks_panel import BookmarksPanel
+from src.gui.widgets.reader_typography_popover import ReaderTypographyPopover
 from src.gui.styles import get_reader_css, emoji_icon
+from src.utils.constants import (
+    DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT,
+)
 from src.gui.widgets.proactive_footer import ProactiveFooterWidget
 from src.gui.widgets.selection_popover import SelectionActionPopover
 from src.gui.widgets.reader_dock import ReaderDock
@@ -41,6 +46,10 @@ class ReaderView(QWidget):
     fullscreen_toggled = pyqtSignal(bool)           # is_fullscreen
     reading_context_updated = pyqtSignal(int, str, int, str) # book_id, title, page_number, page_text
     ai_action_requested = pyqtSignal(str, str)      # action_type, text
+
+    # Tarefa 1.2 — zona de clique nas margens (só caminho PDF/imagem, ver
+    # eventFilter): terço esquerdo = página anterior, terço direito = próxima.
+    _PAGE_TURN_ZONE_RATIO = 1 / 3
 
     def __init__(self, parent=None, tts_router=None, rag_engine=None, db=None):
         super().__init__(parent)
@@ -206,6 +215,24 @@ class ReaderView(QWidget):
         zoom_in.clicked.connect(self._zoom_in)
         tb_layout.addWidget(zoom_in)
 
+        # Botão "Aa" — popover de tipografia do leitor (fonte/tamanho/entrelinha/
+        # margem/tema, aplicado ao vivo). "Aa" é texto (não emoji).
+        self._typography_btn = QPushButton("Aa")
+        self._typography_btn.setFixedSize(36, 32)
+        self._typography_btn.setCheckable(True)
+        self._typography_btn.setToolTip("Tipografia do leitor (fonte, tamanho, tema)")
+        self._typography_btn.setStyleSheet("""
+            QPushButton { background: transparent; border: 1px solid #2d333f;
+                          border-radius: 6px; color: #cbd5e1; font-size: 13px;
+                          font-weight: 600; }
+            QPushButton:hover { background: #2d333f; }
+            QPushButton:checked { background: rgba(16, 185, 129, 0.2);
+                                  border-color: #10b981; }
+        """)
+        self._typography_btn.clicked.connect(self._open_typography_popover)
+        tb_layout.addWidget(self._typography_btn)
+        self._typography_popover = None
+
         # Separador
         sep = QLabel("│")
         sep.setStyleSheet("color: #2d333f; font-size: 16px;")
@@ -227,6 +254,43 @@ class ReaderView(QWidget):
         """)
         self._annotations_btn.clicked.connect(self._toggle_annotations)
         tb_layout.addWidget(self._annotations_btn)
+
+        # Botão Marcador (🔖) — toggle do bookmark da página atual. Emoji como
+        # ÍCONE (nunca no texto); o estado marcado indica que a página tem
+        # marcador (atualizado ao navegar).
+        self._bookmark_btn = QPushButton("")
+        self._bookmark_btn.setIcon(emoji_icon("🔖"))
+        self._bookmark_btn.setFixedSize(32, 32)
+        self._bookmark_btn.setCheckable(True)
+        self._bookmark_btn.setToolTip("Marcar página")
+        self._bookmark_btn.setStyleSheet("""
+            QPushButton { background: transparent; border: 1px solid #2d333f;
+                          border-radius: 6px; font-size: 16px; }
+            QPushButton:hover { background: #2d333f; }
+            QPushButton:checked { background: rgba(16, 185, 129, 0.2);
+                                  border-color: #10b981; }
+        """)
+        self._bookmark_btn.clicked.connect(self._toggle_current_bookmark)
+        tb_layout.addWidget(self._bookmark_btn)
+
+        # Botão Painel Lateral (📑) — Tarefa 1.3: mostra/oculta
+        # self._side_panel_tabs (abas Sumário/Marcadores) por inteiro. Estado
+        # persistido em reader.side_panel_visible (default True) e restaurado
+        # ao abrir o leitor (ver _apply_side_panel_visibility).
+        self._side_panel_toggle_btn = QPushButton("")
+        self._side_panel_toggle_btn.setIcon(emoji_icon("📑"))
+        self._side_panel_toggle_btn.setFixedSize(32, 32)
+        self._side_panel_toggle_btn.setCheckable(True)
+        self._side_panel_toggle_btn.setToolTip("Sumário/Marcadores")
+        self._side_panel_toggle_btn.setStyleSheet("""
+            QPushButton { background: transparent; border: 1px solid #2d333f;
+                          border-radius: 6px; font-size: 16px; }
+            QPushButton:hover { background: #2d333f; }
+            QPushButton:checked { background: rgba(16, 185, 129, 0.2);
+                                  border-color: #10b981; }
+        """)
+        self._side_panel_toggle_btn.clicked.connect(self._toggle_side_panel)
+        tb_layout.addWidget(self._side_panel_toggle_btn)
 
         # Botão busca no documento
         search_btn = QPushButton("")
@@ -321,46 +385,56 @@ class ReaderView(QWidget):
         self._ai_panel_btn.clicked.connect(self._toggle_ai_panel)
         tb_layout.addWidget(self._ai_panel_btn)
 
-        # Botão Áudio/TTS (Leitura de página) — Ouvir / Pausar / Retomar.
-        # Emoji como ícone; o ícone acompanha o estado (ver _toggle_audio etc.).
-        self._audio_btn = QPushButton("Ouvir")
+        # Botão único de Áudio (🔊) — Tarefa 1.4: consolida os 3 controles
+        # antigos (Ouvir / Parar / TTS) num único QToolButton com
+        # MenuButtonPopup. Clicar no CORPO do botão dispara _toggle_audio
+        # diretamente (ação primária de 1 clique só — preserva o
+        # comportamento anterior de _audio_btn); clicar na SETA lateral abre
+        # o menu com "Ouvir página" (mesmo toggle, por descoberta/teclado),
+        # "Parar" (antes era um botão com setVisible; agora é um QAction com
+        # setEnabled — só habilitado durante reprodução/pausa) e "Configurar
+        # vozes…" (o que antes era o state-holder _tts_settings_btn, nunca
+        # exibido na toolbar). Emoji do botão via emoji_icon (padrão de
+        # botão); emoji dos itens do QMenu embutido no texto (padrão já usado
+        # pelos demais QAction deste arquivo, ex.: _act_double_page).
+        self._audio_btn = QToolButton()
+        self._audio_btn.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self._audio_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self._audio_btn.setText("Ouvir")
         self._audio_btn.setIcon(emoji_icon("🔊"))
-        self._audio_btn.setFixedSize(95, 32)
+        self._audio_btn.setFixedHeight(32)
+        self._audio_btn.setMinimumWidth(100)
         self._audio_btn.setToolTip("Ouvir Página (TTS)")
         self._audio_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; font-size: 14px; }
-            QPushButton:hover { background: #2d333f; }
+            QToolButton { background: transparent; border: 1px solid #2d333f;
+                          border-radius: 6px; font-size: 14px; padding: 0 4px; }
+            QToolButton:hover { background: #2d333f; }
+            QToolButton::menu-button { border: none; width: 18px; }
         """)
         self._audio_btn.clicked.connect(self._toggle_audio)
+
+        self._act_audio_toggle = QAction("🔊 Ouvir página", self)
+        self._act_audio_toggle.triggered.connect(self._toggle_audio)
+
+        self._act_audio_stop = QAction("⏹️ Parar", self)
+        self._act_audio_stop.setEnabled(False)  # só habilitado durante reprodução/pausa
+        self._act_audio_stop.triggered.connect(self._stop_audio_if_running)
+
+        self._act_audio_settings = QAction("⚙️ Configurar vozes…", self)
+        self._act_audio_settings.triggered.connect(self._on_tts_settings_clicked)
+
+        self._audio_menu = QMenu(self._audio_btn)
+        self._audio_menu.setStyleSheet("""
+            QMenu { background: #1e2227; border: 1px solid #3f3f46; color: #e4e4e7; border-radius: 4px; padding: 4px; }
+            QMenu::item { padding: 6px 24px; border-radius: 4px; }
+            QMenu::item:selected { background: #3f3f46; }
+        """)
+        self._audio_menu.addAction(self._act_audio_toggle)
+        self._audio_menu.addAction(self._act_audio_stop)
+        self._audio_menu.addSeparator()
+        self._audio_menu.addAction(self._act_audio_settings)
+        self._audio_btn.setMenu(self._audio_menu)
         tb_layout.addWidget(self._audio_btn)
-
-        # Botão Parar (full stop) — só visível durante a reprodução/pausa.
-        self._audio_stop_btn = QPushButton("")
-        self._audio_stop_btn.setIcon(emoji_icon("⏹️"))
-        self._audio_stop_btn.setFixedSize(36, 32)
-        self._audio_stop_btn.setToolTip("Parar Leitura (TTS)")
-        self._audio_stop_btn.setVisible(False)
-        self._audio_stop_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; font-size: 14px; }
-            QPushButton:hover { background: #2d333f; }
-        """)
-        self._audio_stop_btn.clicked.connect(self._stop_audio_if_running)
-        tb_layout.addWidget(self._audio_stop_btn)
-
-        # Botão de Configuração de TTS (atalho Phase 13; state-holder no overflow)
-        self._tts_settings_btn = QPushButton("TTS")
-        self._tts_settings_btn.setIcon(emoji_icon("⚙️"))
-        self._tts_settings_btn.setFixedSize(65, 32)
-        self._tts_settings_btn.setToolTip("Configurar Vozes e Engines de Narração")
-        self._tts_settings_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; font-size: 13px; color: #94a3b8; }
-            QPushButton:hover { background: #2d333f; }
-        """)
-        self._tts_settings_btn.clicked.connect(self._on_tts_settings_clicked)
-        # Movido para o menu de overflow ("⋯"): mantido como state-holder.
 
         # Proactive Agent Toggle
         self._proactive_combo = QComboBox()
@@ -462,12 +536,22 @@ class ReaderView(QWidget):
         splitter.setHandleWidth(1)
         splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
 
-        # Painel TOC
+        # Painel lateral: abas "Sumário" (TOC) e "Marcadores" (bookmarks).
         self._toc_widget = TOCWidget()
-        self._toc_widget.setMinimumWidth(200)
-        self._toc_widget.setMaximumWidth(300)
         self._toc_widget.page_selected.connect(self._go_to_page)
-        splitter.addWidget(self._toc_widget)
+        self._bookmarks_panel = BookmarksPanel()
+        self._bookmarks_panel.bookmark_selected.connect(self._go_to_page)
+        self._bookmarks_panel.bookmark_removed.connect(self._on_bookmark_removed)
+        self._side_panel_tabs = QTabWidget()
+        self._side_panel_tabs.setObjectName("readerSidePanelTabs")
+        self._side_panel_tabs.setMinimumWidth(200)
+        self._side_panel_tabs.setMaximumWidth(300)
+        self._side_panel_tabs.addTab(self._toc_widget, "Sumário")
+        self._side_panel_tabs.addTab(self._bookmarks_panel, "Marcadores")
+        splitter.addWidget(self._side_panel_tabs)
+        # Tarefa 1.3 — aplica a visibilidade persistida (reader.side_panel_visible,
+        # default True) já na construção; open_book() reaplica ao abrir um livro.
+        self._apply_side_panel_visibility()
 
         # Stack para diferentes tipos de conteúdo
         self._content_stack = QStackedWidget()
@@ -582,15 +666,66 @@ class ReaderView(QWidget):
     def _setup_shortcuts(self):
         s_next = QShortcut(QKeySequence(Qt.Key.Key_Right), self, self._go_next)
         s_next.setContext(Qt.ShortcutContext.ApplicationShortcut)
-        
+
         s_prev = QShortcut(QKeySequence(Qt.Key.Key_Left), self, self._go_prev)
         s_prev.setContext(Qt.ShortcutContext.ApplicationShortcut)
-        
+
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._on_escape)
         QShortcut(QKeySequence("Ctrl+="), self, self._zoom_in)
         QShortcut(QKeySequence("Ctrl+-"), self, self._zoom_out)
         QShortcut(QKeySequence("Ctrl+F"), self, self._toggle_search)
+        QShortcut(QKeySequence("Ctrl+D"), self, self._toggle_current_bookmark)
         QShortcut(QKeySequence(Qt.Key.Key_F11), self, self._toggle_fullscreen)
+
+        # Tarefa 1.2 — Space/Shift+Space/PageUp/PageDown viram página. Contexto
+        # WindowShortcut (igual Escape/Ctrl+F/Ctrl+D/F11 acima — NÃO o
+        # ApplicationShortcut mais amplo usado nas setas). Investigação
+        # empírica (probe manual com QTest.keyClick, fora da suíte): um
+        # QShortcut de tecla simples (sem modificador reconhecível como texto)
+        # NÃO dispara quando um QLineEdit/QTextEdit focado aceita o evento
+        # QEvent.ShortcutOverride para digitar o caractere normalmente — é
+        # assim que a barra de busca do documento, o painel de Anotações e o
+        # campo do RAG (todos QLineEdit/QTextEdit padrão) já ficam protegidos
+        # sem código extra. Como reforço explícito (e documentado) desse
+        # comportamento — e para cobrir qualquer widget de composição
+        # customizado que não siga o mesmo contrato — os slots abaixo também
+        # conferem o focusWidget() antes de virar a página.
+        # LIMITAÇÃO CONHECIDA: no QWebEngineView (conteúdo EPUB), o foco de um
+        # <input> DENTRO do HTML da página não é visível ao Qt de forma
+        # síncrona (a confirmação vem do processo do Chromium via IPC
+        # assíncrono), então o atalho SEMPRE vira página quando o web_view
+        # tem o foco do Qt — mesmo que um campo editável interno do HTML
+        # esteja focado. Risco aceito: o HTML do livro é somente leitura
+        # (sanitizado em html_sanitizer.sanitize_book_html, sem formulários).
+        s_space_next = QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._shortcut_go_next)
+        s_space_next.setContext(Qt.ShortcutContext.WindowShortcut)
+        s_space_prev = QShortcut(QKeySequence("Shift+Space"), self, self._shortcut_go_prev)
+        s_space_prev.setContext(Qt.ShortcutContext.WindowShortcut)
+        s_pgdn = QShortcut(QKeySequence(Qt.Key.Key_PageDown), self, self._shortcut_go_next)
+        s_pgdn.setContext(Qt.ShortcutContext.WindowShortcut)
+        s_pgup = QShortcut(QKeySequence(Qt.Key.Key_PageUp), self, self._shortcut_go_prev)
+        s_pgup.setContext(Qt.ShortcutContext.WindowShortcut)
+
+    def _is_text_input_focused(self) -> bool:
+        """True quando o foco atual está num campo de texto que deve continuar
+        recebendo a tecla (busca no documento, anotações, campo do RAG) — ver
+        o comentário em _setup_shortcuts para a investigação completa.
+        """
+        from PyQt6.QtWidgets import QApplication, QLineEdit, QTextEdit, QPlainTextEdit
+        w = QApplication.focusWidget()
+        return isinstance(w, (QLineEdit, QTextEdit, QPlainTextEdit))
+
+    def _shortcut_go_next(self) -> None:
+        """Slot de Space/PageDown — não vira página com um campo de texto focado."""
+        if self._is_text_input_focused():
+            return
+        self._go_next()
+
+    def _shortcut_go_prev(self) -> None:
+        """Slot de Shift+Space/PageUp — não vira página com um campo de texto focado."""
+        if self._is_text_input_focused():
+            return
+        self._go_prev()
 
     def wheelEvent(self, event) -> None:
         """Manipulador de evento da roda do mouse para Zoom Interativo."""
@@ -619,6 +754,15 @@ class ReaderView(QWidget):
             # No _image_label a SELEÇÃO tem prioridade: a virada por clique na
             # margem é decidida no RELEASE (clique sem arrasto). Antes, pressionar
             # perto da margem direita para selecionar uma palavra virava a página.
+            # NOTA (Tarefa 1.2): este ramo (image_scroll.viewport() e web_view/
+            # EPUB) já existia antes desta tarefa e fica como está — dispara no
+            # PRESS, sem checar seleção/link/modo marca-texto. A versão nova
+            # (thirds + guarda de marca-texto, decidida no RELEASE) foi
+            # implementada só para o caminho PDF/imagem (_image_label), que já
+            # tinha a infraestrutura de "clique sem arrasto" pronta; no
+            # web_view o risco de engolir um clique num link ou o início de uma
+            # seleção de texto é maior e não foi resolvido aqui — limitação
+            # documentada e aceita (ver contrato da Tarefa 1.2).
             if event.button() == Qt.MouseButton.LeftButton and obj is not self._image_label:
                 width = obj.width()
                 if hasattr(event, "scenePosition"):
@@ -665,17 +809,26 @@ class ReaderView(QWidget):
                 self._is_selecting = False
                 # Calcula e armazena as coords normalizadas da seleção atual
                 rect = self._rubber_band.geometry()
-                # CLIQUE (sem arrasto) nas margens laterais vira a página —
-                # decidido aqui, e não no press, para não engolir seleções
-                # que começam perto da margem.
+                # Tarefa 1.2 — CLIQUE (sem arrasto) no terço esquerdo/direito
+                # da página vira a página — decidido aqui, no RELEASE, e não
+                # no PRESS, para não engolir seleções que começam perto da
+                # margem (rect.width()/height() < 6 ⇒ não houve arrasto real).
+                # Só quando NÃO está no modo Marca-Texto: nesse modo o
+                # clique/arrasto marca uma área para destacar, não deve virar
+                # página. Implementado só para este caminho (QLabel/pixmap de
+                # PDF/imagem) — no web_view (EPUB) o risco de engolir cliques
+                # em links/seleção de texto é maior (ver o bloco de
+                # MouseButtonPress logo acima, que já existia antes desta
+                # tarefa e permanece com sua própria zona/limitação).
                 origin = getattr(self, "_origin", None)
-                if origin is not None and rect.width() < 6 and rect.height() < 6:
+                if (origin is not None and rect.width() < 6 and rect.height() < 6
+                        and not self._highlight_mode_btn.isChecked()):
                     width = obj.width()
-                    if origin.x() < width * 0.15:
+                    if origin.x() < width * self._PAGE_TURN_ZONE_RATIO:
                         self._hide_selection_marquee()
                         self._go_prev()
                         return True
-                    elif origin.x() > width * 0.85:
+                    elif origin.x() > width * (1 - self._PAGE_TURN_ZONE_RATIO):
                         self._hide_selection_marquee()
                         self._go_next()
                         return True
@@ -779,6 +932,8 @@ class ReaderView(QWidget):
         self._annotation_panel.set_book_id(self._book_id)
         self._title_label.setText(book_data.get("title", ""))
         self._load_persisted_observations()
+        self._refresh_bookmarks()
+        self._apply_side_panel_visibility()
 
         # Fecha leitor anterior
         if self._reader and self._reader.is_open:
@@ -796,6 +951,25 @@ class ReaderView(QWidget):
 
         # Vai para a página inicial
         self._go_to_page(start_page)
+
+    def _reader_css(self) -> str:
+        """CSS do conteúdo HTML do leitor com a tipografia ATUAL da config.
+
+        Fonte única de verdade: lê as MESMAS chaves ``reader.*`` que o diálogo de
+        configurações grava (fonte/tamanho/entrelinha/margens). Sem config
+        acessível, cai nos defaults de ``get_reader_css`` (ADR-005).
+        """
+        config = getattr(self.window(), "_config", None)
+        if config is None:
+            return get_reader_css(self._theme)
+        return get_reader_css(
+            self._theme,
+            font_family=config.get("reader.font_family", DEFAULT_FONT_FAMILY),
+            font_size=config.get("reader.font_size", DEFAULT_FONT_SIZE),
+            line_height=config.get("reader.line_height", DEFAULT_LINE_HEIGHT),
+            margin_h=config.get("reader.margin_horizontal", 60),
+            margin_v=config.get("reader.margin_vertical", 40),
+        )
 
     def _render_page(self, content: PageContent):
         """Renderiza o conteúdo da página."""
@@ -816,7 +990,7 @@ class ReaderView(QWidget):
             # (features próprias do leitor), então <script>/on*/javascript:
             # de um EPUB baixado da internet executariam aqui (§2.1).
             from src.readers.html_sanitizer import sanitize_book_html
-            css = get_reader_css(self._theme)
+            css = self._reader_css()
             html = f"""<!DOCTYPE html>
             <html><head><style>{css}</style></head>
             <body>{sanitize_book_html(content.content)}</body></html>"""
@@ -831,7 +1005,8 @@ class ReaderView(QWidget):
         self._page_label.setText(f"{page + 1}/{total}")
         self._progress_bar.set_page_info(page + 1, total)
         self.progress_changed.emit(self._book_id, page, total)
-        
+        self._update_bookmark_button(page)
+
         # Emite contexto para a IA
         # Pega as primeiras 1000 letras do texto da página para contexto
         page_text = ""
@@ -994,6 +1169,8 @@ class ReaderView(QWidget):
     def close_reader(self):
         """Fecha o leitor atual."""
         self._stop_audio_if_running()
+        if getattr(self, "_typography_popover", None) is not None:
+            self._typography_popover.hide()
         if self._reader and self._reader.is_open:
             self._reader.close()
             self._reader = None
@@ -1003,6 +1180,8 @@ class ReaderView(QWidget):
 
         # Apply theme to TOC and AnnotationPanel
         self._toc_widget.set_theme(theme)
+        if hasattr(self, "_bookmarks_panel"):
+            self._bookmarks_panel.set_theme(theme)
         self._annotation_panel.set_theme(theme)
         if hasattr(self, '_dock'):
             self._dock.set_theme(theme)
@@ -1015,7 +1194,7 @@ class ReaderView(QWidget):
 
         # Apply CSS to current reader if open
         if self._reader and hasattr(self._reader, "set_theme_css"):
-            self._reader.set_theme_css(get_reader_css(theme))
+            self._reader.set_theme_css(self._reader_css())
 
         if theme == "light":
             bg_toolbar = "#f4f4f5"
@@ -1148,24 +1327,16 @@ class ReaderView(QWidget):
             QPushButton:checked {{ {checked_style} }}
         """)
         self._audio_btn.setStyleSheet(f"""
-            QPushButton {{
+            QToolButton {{
                 background: transparent;
                 border: 1px solid {btn_bg};
                 border-radius: 6px;
                 font-size: 14px;
+                padding: 0 4px;
             }}
-            QPushButton:hover {{ background: {btn_hover_bg}; }}
+            QToolButton:hover {{ background: {btn_hover_bg}; }}
+            QToolButton::menu-button {{ border: none; width: 18px; }}
         """)
-        if hasattr(self, "_audio_stop_btn"):
-            self._audio_stop_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent;
-                    border: 1px solid {btn_bg};
-                    border-radius: 6px;
-                    font-size: 14px;
-                }}
-                QPushButton:hover {{ background: {btn_hover_bg}; }}
-            """)
         if hasattr(self, "_study_btn"):
             self._study_btn.setStyleSheet(f"""
                 QPushButton {{
@@ -1186,6 +1357,41 @@ class ReaderView(QWidget):
             QPushButton:hover {{ background: {btn_hover_bg}; }}
             QPushButton:checked {{ {hl_checked_style} }}
         """)
+        if hasattr(self, "_typography_btn"):
+            self._typography_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: 1px solid {btn_bg};
+                    border-radius: 6px;
+                    color: {btn_color};
+                    font-size: 13px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{ background: {btn_hover_bg}; }}
+                QPushButton:checked {{ {checked_style} }}
+            """)
+        if hasattr(self, "_bookmark_btn"):
+            self._bookmark_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: 1px solid {btn_bg};
+                    border-radius: 6px;
+                    font-size: 16px;
+                }}
+                QPushButton:hover {{ background: {btn_hover_bg}; }}
+                QPushButton:checked {{ {checked_style} }}
+            """)
+        if hasattr(self, "_side_panel_toggle_btn"):
+            self._side_panel_toggle_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: 1px solid {btn_bg};
+                    border-radius: 6px;
+                    font-size: 16px;
+                }}
+                QPushButton:hover {{ background: {btn_hover_bg}; }}
+                QPushButton:checked {{ {checked_style} }}
+            """)
 
         # 2. Scroll area
         self._image_scroll.setStyleSheet(f"background-color: {bg_scroll};")
@@ -1216,6 +1422,32 @@ class ReaderView(QWidget):
             self.hide_dock()
         else:
             self._show_dock_tab("annotations")
+
+    # ── Painel Lateral recolhível (Sumário/Marcadores) — Tarefa 1.3 ─────────
+
+    def _toggle_side_panel(self) -> None:
+        """Mostra/oculta o painel lateral inteiro (self._side_panel_tabs) e
+        persiste o novo estado em reader.side_panel_visible."""
+        visible = self._side_panel_toggle_btn.isChecked()
+        self._side_panel_tabs.setVisible(visible)
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            try:
+                config.set("reader.side_panel_visible", visible)
+            except Exception as exc:
+                logger.warning(f"Falha ao salvar visibilidade do painel lateral (ignorado): {exc}")
+
+    def _apply_side_panel_visibility(self) -> None:
+        """Aplica reader.side_panel_visible (default True) ao painel e ao
+        botão de toggle — chamado na construção e ao abrir um livro (ADR-005:
+        sem config acessível, assume visível)."""
+        config = getattr(self.window(), "_config", None)
+        visible = True
+        if config is not None:
+            visible = bool(config.get("reader.side_panel_visible", True))
+        self._side_panel_tabs.setVisible(visible)
+        if hasattr(self, "_side_panel_toggle_btn"):
+            self._side_panel_toggle_btn.setChecked(visible)
 
     def _on_annotation_added(self, data: dict):
         """Emite sinal quando uma anotação é adicionada."""
@@ -1274,6 +1506,9 @@ class ReaderView(QWidget):
 
     def _on_escape(self):
         """Escape: fecha popover → busca → limpa rubber band → sai do fullscreen → fecha leitor."""
+        if getattr(self, "_typography_popover", None) is not None and self._typography_popover.isVisible():
+            self._typography_popover.hide()
+            return
         if hasattr(self, "_selection_popover") and self._selection_popover.isVisible():
             self._selection_popover.hide()
             return
@@ -1315,6 +1550,149 @@ class ReaderView(QWidget):
             self._image_label.unsetCursor()
             self._hide_selection_marquee()
             self._last_selection_coords = None
+
+    # ── Tipografia do Leitor (botão "Aa") ────────────────────────────────────
+
+    def _open_typography_popover(self) -> None:
+        """Abre/fecha o popover de tipografia ancorado no botão 'Aa'."""
+        if self._typography_popover is None:
+            self._typography_popover = ReaderTypographyPopover(self)
+            self._typography_popover.typography_changed.connect(self._on_typography_changed)
+            self._typography_popover.theme_changed.connect(self._on_reader_theme_changed)
+            self._typography_popover.closed.connect(
+                lambda: self._typography_btn.setChecked(False))
+
+        pop = self._typography_popover
+        if pop.isVisible():
+            pop.hide()
+            return
+
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            pop.set_values(
+                config.get("reader.font_family", DEFAULT_FONT_FAMILY),
+                config.get("reader.font_size", DEFAULT_FONT_SIZE),
+                config.get("reader.line_height", DEFAULT_LINE_HEIGHT),
+                config.get("reader.margin_horizontal", 60),
+                self._theme,
+            )
+        else:
+            pop.set_values(DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE,
+                           DEFAULT_LINE_HEIGHT, 60, self._theme)
+
+        self._typography_btn.setChecked(True)
+        btn = self._typography_btn
+        anchor = btn.mapToGlobal(QPoint(btn.width(), btn.height() + 4))
+        pop.show_at(anchor)
+
+    def _on_typography_changed(self, values: dict) -> None:
+        """Persiste a tipografia nas chaves reader.* e re-renderiza (ao vivo)."""
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            try:
+                config.set("reader.font_family", values["font_family"])
+                config.set("reader.font_size", values["font_size"])
+                config.set("reader.line_height", values["line_height"])
+                config.set("reader.margin_horizontal", values["margin_horizontal"])
+            except Exception as exc:
+                logger.warning(f"Falha ao salvar tipografia (ignorado): {exc}")
+        self._apply_reader_typography()
+
+    def _apply_reader_typography(self) -> None:
+        """Re-renderiza a página atual com a tipografia atual (aplicação ao vivo).
+
+        Reusa o pipeline de renderização: ``_render_page`` regenera o CSS via
+        ``_reader_css`` a partir da config. Em PDF (imagem) a tipografia não
+        afeta o render; o re-render é inócuo.
+        """
+        if self._reader and self._reader.is_open:
+            self._go_to_page(self._reader.current_page)
+
+    def _on_reader_theme_changed(self, theme: str) -> None:
+        """Troca o tema do leitor a partir do popover.
+
+        Fonte única de verdade = a chave global ``theme`` (a MESMA do diálogo de
+        configurações). Propaga app-wide via ``MainWindow._apply_theme`` quando
+        disponível (reader + sidebar + assistente + diálogos); senão aplica só
+        ao leitor. Sem chave ``reader.theme`` duplicada.
+        """
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            try:
+                config.set("theme", theme)
+            except Exception as exc:
+                logger.warning(f"Falha ao salvar tema (ignorado): {exc}")
+        win = self.window()
+        if win is not None and hasattr(win, "_apply_theme"):
+            win._apply_theme()
+        else:
+            self.set_theme(theme)
+
+    # ── Marcadores de página (bookmarks) ─────────────────────────────────────
+
+    def _short_excerpt(self, text: str, limit: int = 60) -> str:
+        """Trecho curto de uma linha (rótulo do marcador), sem quebras."""
+        if not text:
+            return ""
+        snippet = " ".join(text.split())
+        return snippet[:limit].rstrip()
+
+    def _toggle_current_bookmark(self) -> None:
+        """Alterna o marcador da página atual e atualiza botão + painel."""
+        if not self._reader or self._db is None or not self._book_id:
+            # Não deixa o botão preso: reflete que não há marcador aplicável.
+            if hasattr(self, "_bookmark_btn"):
+                self._bookmark_btn.setChecked(False)
+            return
+        page = self._reader.current_page
+        label = self._short_excerpt(self._current_page_text())
+        try:
+            state = self._db.toggle_bookmark(self._book_id, page, label)
+        except Exception as exc:
+            logger.warning(f"Falha ao alternar marcador (ignorado): {exc}")
+            return
+        self._update_bookmark_button(page)
+        self._refresh_bookmarks()
+        self._show_status("Página marcada." if state else "Marcador removido.", 2500)
+
+    def _update_bookmark_button(self, page: int) -> None:
+        """Sincroniza o botão 🔖 com o estado real da página (marcada ou não)."""
+        if not hasattr(self, "_bookmark_btn"):
+            return
+        marked = False
+        if self._db is not None and self._book_id:
+            try:
+                marked = self._db.is_bookmarked(self._book_id, page)
+            except Exception:
+                marked = False
+        # setChecked NÃO dispara clicked → sem reentrância com o toggle.
+        self._bookmark_btn.setChecked(marked)
+        self._bookmark_btn.setToolTip(
+            "Remover marcador da página" if marked else "Marcar página")
+
+    def _refresh_bookmarks(self) -> None:
+        """Recarrega o painel de Marcadores a partir do banco (ADR-005)."""
+        if not hasattr(self, "_bookmarks_panel"):
+            return
+        rows = []
+        if self._db is not None and self._book_id:
+            try:
+                rows = self._db.get_bookmarks(self._book_id)
+            except Exception as exc:
+                logger.warning(f"Falha ao carregar marcadores (ignorado): {exc}")
+                rows = []
+        self._bookmarks_panel.set_bookmarks(rows)
+
+    def _on_bookmark_removed(self, page: int) -> None:
+        """Remove o marcador da página (via botão do item no painel)."""
+        if self._db is not None and self._book_id:
+            try:
+                self._db.remove_bookmark(self._book_id, page)
+            except Exception as exc:
+                logger.warning(f"Falha ao remover marcador (ignorado): {exc}")
+        self._refresh_bookmarks()
+        if self._reader and self._reader.current_page == page:
+            self._update_bookmark_button(page)
 
     # ── Integração RAG Lado a Lado ───────────────────────────────────────────
 
@@ -1743,15 +2121,26 @@ class ReaderView(QWidget):
         self._stop_audio_if_running()
         self._launch_audio_worker(text.strip(), chain_continuous=chain_continuous)
 
+    def _set_audio_button_state(self, label: str, icon_emoji: str, tooltip: str,
+                                 *, menu_label: str | None = None) -> None:
+        """Atualiza em conjunto o botão único de áudio E o item "Ouvir página"
+        do seu menu (Tarefa 1.4 — um só QToolButton+QMenu substitui os 3
+        controles antigos, então toda transição de estado precisa refletir
+        nos dois lugares). O botão usa emoji_icon (padrão de botão); o item de
+        menu embute o emoji no texto (padrão dos demais QAction do arquivo).
+        """
+        self._audio_btn.setText(label)
+        self._audio_btn.setIcon(emoji_icon(icon_emoji))
+        self._audio_btn.setToolTip(tooltip)
+        self._act_audio_toggle.setText(f"{icon_emoji} {menu_label or label}")
+
     def _pause_audio(self):
         """Pausa a narração (retomável no mesmo ponto)."""
         worker = getattr(self, "_audio_worker", None)
         if worker and worker.isRunning():
             worker.pause()
             self._audio_paused = True
-            self._audio_btn.setText("Retomar")
-            self._audio_btn.setIcon(emoji_icon("▶️"))
-            self._audio_btn.setToolTip("Continuar Leitura (TTS)")
+            self._set_audio_button_state("Retomar", "▶️", "Continuar Leitura (TTS)")
 
     def _resume_audio(self):
         """Retoma a narração pausada a partir do ponto exato."""
@@ -1759,16 +2148,12 @@ class ReaderView(QWidget):
         if worker and worker.isRunning():
             worker.resume()
             self._audio_paused = False
-            self._audio_btn.setText("Pausar")
-            self._audio_btn.setIcon(emoji_icon("⏸️"))
-            self._audio_btn.setToolTip("Pausar Leitura (TTS)")
+            self._set_audio_button_state("Pausar", "⏸️", "Pausar Leitura (TTS)")
 
     def _on_audio_started(self):
         self._audio_paused = False
-        self._audio_btn.setText("Pausar")
-        self._audio_btn.setIcon(emoji_icon("⏸️"))
-        self._audio_btn.setToolTip("Pausar Leitura (TTS)")
-        self._audio_stop_btn.setVisible(True)
+        self._set_audio_button_state("Pausar", "⏸️", "Pausar Leitura (TTS)")
+        self._act_audio_stop.setEnabled(True)
 
     def _on_read_translated_page(self):
         """Narra a página atual traduzida para PT (item 7 do backlog UX).
@@ -1888,11 +2273,9 @@ class ReaderView(QWidget):
             finished_worker.deleteLater()
             return
         self._audio_paused = False
-        self._audio_btn.setText("Ouvir")
-        self._audio_btn.setIcon(emoji_icon("🔊"))
-        self._audio_btn.setToolTip("Ouvir Página (TTS)")
-        if hasattr(self, "_audio_stop_btn"):
-            self._audio_stop_btn.setVisible(False)
+        self._set_audio_button_state("Ouvir", "🔊", "Ouvir Página (TTS)", menu_label="Ouvir página")
+        if hasattr(self, "_act_audio_stop"):
+            self._act_audio_stop.setEnabled(False)
         if hasattr(self, "_audio_worker") and self._audio_worker:
             self._audio_worker.deleteLater()
             self._audio_worker = None
@@ -1905,11 +2288,9 @@ class ReaderView(QWidget):
             self._audio_worker.wait(2000)
             self._audio_worker = None
         self._audio_paused = False
-        self._audio_btn.setText("Ouvir")
-        self._audio_btn.setIcon(emoji_icon("🔊"))
-        self._audio_btn.setToolTip("Ouvir Página (TTS)")
-        if hasattr(self, "_audio_stop_btn"):
-            self._audio_stop_btn.setVisible(False)
+        self._set_audio_button_state("Ouvir", "🔊", "Ouvir Página (TTS)", menu_label="Ouvir página")
+        if hasattr(self, "_act_audio_stop"):
+            self._act_audio_stop.setEnabled(False)
 
     def _on_audio_provider_changed(self, provider_name: str):
         """Phase 13: Updates UI to show which TTS engine is active."""
@@ -2025,7 +2406,11 @@ class ReaderView(QWidget):
         )
         menu.addAction(settings_action)
         
-        anchor = getattr(self, "_overflow_btn", None) or self._tts_settings_btn
+        # _tts_settings_btn (state-holder pré-Tarefa 1.4) foi removido: o
+        # botão único de áudio (_audio_btn) é agora um âncora sempre presente
+        # na toolbar (antes ele nunca era exibido, então mapToGlobal cairia
+        # num widget sem posição real).
+        anchor = getattr(self, "_overflow_btn", None) or self._audio_btn
         menu.exec(anchor.mapToGlobal(QPoint(0, anchor.height() + 2)))
 
     def _on_proactive_observation(self, obs: dict):

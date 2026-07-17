@@ -3,6 +3,12 @@
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QIcon, QPainter, QPixmap
 
+from src.utils.constants import (
+    DEFAULT_FONT_FAMILY,
+    DEFAULT_FONT_SIZE,
+    DEFAULT_LINE_HEIGHT,
+)
+
 DARK_THEME = """
 /* ── Reset e Base ─────────────────────────────────── */
 QWidget {
@@ -979,6 +985,78 @@ QPushButton#wizardManualLinkBtn {
     color: #52525b;
     font-size: 11px;
 }
+
+/* ── Popover de Tipografia do Leitor (botão "Aa") ──── */
+QDialog#readerTypographyPopover {
+    background-color: #1e2227;
+    border: 1px solid #3f3f46;
+    border-radius: 10px;
+}
+#readerTypographyPopover QLabel {
+    color: #94a3b8;
+    font-size: 12px;
+    background: transparent;
+}
+#readerTypographyTitle {
+    color: #e4e4e7;
+    font-size: 13px;
+    font-weight: 700;
+}
+#readerTypographyPopover QSpinBox,
+#readerTypographyPopover QFontComboBox {
+    background: #161920;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    padding: 3px 6px;
+    color: #e4e4e7;
+}
+#readerTypographyPopover QSlider::groove:horizontal {
+    height: 4px; background: #3f3f46; border-radius: 2px;
+}
+#readerTypographyPopover QSlider::handle:horizontal {
+    background: #10b981; width: 14px; margin: -6px 0; border-radius: 7px;
+}
+QPushButton#readerThemeButton {
+    background: #161920;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: #e4e4e7;
+    font-size: 12px;
+}
+QPushButton#readerThemeButton:hover { background: #2d333f; }
+QPushButton#readerThemeButton:checked {
+    background: rgba(16,185,129,0.18);
+    border-color: #10b981;
+    color: #10b981;
+}
+QPushButton#readerTypographyClose {
+    background: transparent; border: none; color: #94a3b8; font-size: 15px;
+}
+QPushButton#readerTypographyClose:hover { color: #10b981; }
+
+/* ── Painel de Marcadores (aba do TOC) ─────────────── */
+#readerSidePanelTabs::pane { border: none; background: #161920; }
+#bookmarksPanel { background: #161920; }
+#bookmarksHeader {
+    color: #94a3b8; font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; padding: 8px 8px 4px 8px;
+}
+#bookmarksEmpty { color: #64748b; font-size: 12px; padding: 12px; }
+QListWidget#bookmarksList {
+    background: #161920; border: none; color: #e5e7eb; font-size: 13px;
+}
+QListWidget#bookmarksList::item { padding: 0px; border-radius: 4px; }
+QListWidget#bookmarksList::item:hover { background: #20242d; }
+QPushButton#bookmarkGotoBtn {
+    background: transparent; border: none; color: #e5e7eb;
+    text-align: left; padding: 6px 8px; font-size: 12px;
+}
+QPushButton#bookmarkGotoBtn:hover { color: #10b981; }
+QPushButton#bookmarkRemoveBtn {
+    background: transparent; border: none; color: #94a3b8; font-size: 13px;
+}
+QPushButton#bookmarkRemoveBtn:hover { color: #ef4444; }
 """
 
 LIGHT_THEME = """
@@ -1958,6 +2036,78 @@ QPushButton#wizardManualLinkBtn {
     color: #8a8a8a;
     font-size: 11px;
 }
+
+/* ── Popover de Tipografia do Leitor (botão "Aa") ──── */
+QDialog#readerTypographyPopover {
+    background-color: #ffffff;
+    border: 1px solid #d4d4d8;
+    border-radius: 10px;
+}
+#readerTypographyPopover QLabel {
+    color: #71717a;
+    font-size: 12px;
+    background: transparent;
+}
+#readerTypographyTitle {
+    color: #1a1a1a;
+    font-size: 13px;
+    font-weight: 700;
+}
+#readerTypographyPopover QSpinBox,
+#readerTypographyPopover QFontComboBox {
+    background: #ffffff;
+    border: 1px solid #d4d4d8;
+    border-radius: 6px;
+    padding: 3px 6px;
+    color: #1a1a1a;
+}
+#readerTypographyPopover QSlider::groove:horizontal {
+    height: 4px; background: #d4d4d8; border-radius: 2px;
+}
+#readerTypographyPopover QSlider::handle:horizontal {
+    background: #059669; width: 14px; margin: -6px 0; border-radius: 7px;
+}
+QPushButton#readerThemeButton {
+    background: #ffffff;
+    border: 1px solid #d4d4d8;
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: #1a1a1a;
+    font-size: 12px;
+}
+QPushButton#readerThemeButton:hover { background: #f4f4f5; }
+QPushButton#readerThemeButton:checked {
+    background: rgba(5,150,105,0.12);
+    border-color: #059669;
+    color: #059669;
+}
+QPushButton#readerTypographyClose {
+    background: transparent; border: none; color: #71717a; font-size: 15px;
+}
+QPushButton#readerTypographyClose:hover { color: #059669; }
+
+/* ── Painel de Marcadores (aba do TOC) ─────────────── */
+#readerSidePanelTabs::pane { border: none; background: #f4f4f5; }
+#bookmarksPanel { background: #f4f4f5; }
+#bookmarksHeader {
+    color: #71717a; font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; padding: 8px 8px 4px 8px;
+}
+#bookmarksEmpty { color: #8a8a8a; font-size: 12px; padding: 12px; }
+QListWidget#bookmarksList {
+    background: #f4f4f5; border: none; color: #1A1A1A; font-size: 13px;
+}
+QListWidget#bookmarksList::item { padding: 0px; border-radius: 4px; }
+QListWidget#bookmarksList::item:hover { background: #e4e4e7; }
+QPushButton#bookmarkGotoBtn {
+    background: transparent; border: none; color: #1A1A1A;
+    text-align: left; padding: 6px 8px; font-size: 12px;
+}
+QPushButton#bookmarkGotoBtn:hover { color: #059669; }
+QPushButton#bookmarkRemoveBtn {
+    background: transparent; border: none; color: #71717a; font-size: 13px;
+}
+QPushButton#bookmarkRemoveBtn:hover { color: #dc2626; }
 """
 
 SEPIA_THEME = """
@@ -2938,6 +3088,78 @@ QPushButton#wizardManualLinkBtn {
     color: #9c8a6f;
     font-size: 11px;
 }
+
+/* ── Popover de Tipografia do Leitor (botão "Aa") ──── */
+QDialog#readerTypographyPopover {
+    background-color: #f4ecd8;
+    border: 1px solid #d4cbb8;
+    border-radius: 10px;
+}
+#readerTypographyPopover QLabel {
+    color: #8b7355;
+    font-size: 12px;
+    background: transparent;
+}
+#readerTypographyTitle {
+    color: #433422;
+    font-size: 13px;
+    font-weight: 700;
+}
+#readerTypographyPopover QSpinBox,
+#readerTypographyPopover QFontComboBox {
+    background: #ebe5d9;
+    border: 1px solid #d4cbb8;
+    border-radius: 6px;
+    padding: 3px 6px;
+    color: #433422;
+}
+#readerTypographyPopover QSlider::groove:horizontal {
+    height: 4px; background: #d4cbb8; border-radius: 2px;
+}
+#readerTypographyPopover QSlider::handle:horizontal {
+    background: #8b6c42; width: 14px; margin: -6px 0; border-radius: 7px;
+}
+QPushButton#readerThemeButton {
+    background: #ebe5d9;
+    border: 1px solid #d4cbb8;
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: #433422;
+    font-size: 12px;
+}
+QPushButton#readerThemeButton:hover { background: #dfd8c8; }
+QPushButton#readerThemeButton:checked {
+    background: rgba(139,108,66,0.18);
+    border-color: #8b6c42;
+    color: #8b6c42;
+}
+QPushButton#readerTypographyClose {
+    background: transparent; border: none; color: #8b7355; font-size: 15px;
+}
+QPushButton#readerTypographyClose:hover { color: #8b6c42; }
+
+/* ── Painel de Marcadores (aba do TOC) ─────────────── */
+#readerSidePanelTabs::pane { border: none; background: #ebe5d9; }
+#bookmarksPanel { background: #ebe5d9; }
+#bookmarksHeader {
+    color: #8b7355; font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; padding: 8px 8px 4px 8px;
+}
+#bookmarksEmpty { color: #9c8a6f; font-size: 12px; padding: 12px; }
+QListWidget#bookmarksList {
+    background: #ebe5d9; border: none; color: #5B4636; font-size: 13px;
+}
+QListWidget#bookmarksList::item { padding: 0px; border-radius: 4px; }
+QListWidget#bookmarksList::item:hover { background: #dfd8c8; }
+QPushButton#bookmarkGotoBtn {
+    background: transparent; border: none; color: #5B4636;
+    text-align: left; padding: 6px 8px; font-size: 12px;
+}
+QPushButton#bookmarkGotoBtn:hover { color: #8b6c42; }
+QPushButton#bookmarkRemoveBtn {
+    background: transparent; border: none; color: #8b7355; font-size: 13px;
+}
+QPushButton#bookmarkRemoveBtn:hover { color: #b91c1c; }
 """
 
 THEMES = {
@@ -3007,8 +3229,39 @@ a { color: #8b6c42; }
 READER_THEMES = {"dark": READER_CSS_DARK, "light": READER_CSS_LIGHT, "sepia": READER_CSS_SEPIA}
 
 
-def get_reader_css(theme: str) -> str:
-    return READER_THEMES.get(theme, READER_CSS_DARK)
+def get_reader_css(
+    theme: str,
+    font_family: str | None = None,
+    font_size: int | None = None,
+    line_height: float | None = None,
+    margin_h: int | None = None,
+    margin_v: int | None = None,
+) -> str:
+    """CSS do conteúdo HTML do leitor (EPUB/TXT/DOCX) para o *theme* dado.
+
+    A tipografia (fonte, tamanho, entrelinha, margens) vem das MESMAS chaves
+    ``reader.*`` da config — o chamador (ReaderView) as repassa. Quando omitida,
+    usa os padrões de ``constants`` (fonte única de verdade). O bloco ``body`` de
+    tipografia é ANEXADO ao tema (mesma especificidade → a regra posterior
+    vence), sobrepondo APENAS a tipografia e preservando cores/estrutura de cada
+    tema. Isto corrige uma lacuna anterior: ``get_reader_css`` ignorava a config
+    e renderizava sempre 16px/1.8/40-60px.
+    """
+    base = READER_THEMES.get(theme, READER_CSS_DARK)
+    family = font_family or DEFAULT_FONT_FAMILY
+    size = DEFAULT_FONT_SIZE if font_size is None else font_size
+    line = DEFAULT_LINE_HEIGHT if line_height is None else line_height
+    mh = 60 if margin_h is None else margin_h
+    mv = 40 if margin_v is None else margin_v
+    override = (
+        "body {"
+        f" font-family: '{family}', 'Georgia', 'Palatino', serif;"
+        f" font-size: {size}px;"
+        f" line-height: {line};"
+        f" padding: {mv}px {mh}px;"
+        " }"
+    )
+    return base + "\n" + override
 
 
 # ── Helper de ícone-emoji ──────────────────────────────────────────────
