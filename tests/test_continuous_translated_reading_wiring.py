@@ -58,8 +58,12 @@ def test_toggle_audio_forks_to_translated_chain_on_start_path():
 
 
 def test_narrate_text_accepts_and_propagates_chain_continuous():
+    # Rodada 2 (TTS): a assinatura ganhou o parâmetro opcional ``language``
+    # (idioma-alvo explícito da tradução) — a regex tolera parâmetros extras,
+    # mantendo a garantia original: aceita E propaga chain_continuous.
     match = re.search(
-        r"def narrate_text\(self, text: str, chain_continuous: bool = False\) -> None:(.*?)\n    def ",
+        r"def narrate_text\(self, text: str, chain_continuous: bool = False,?"
+        r"[^)]*\) -> None:(.*?)\n    def ",
         _READER_VIEW, re.DOTALL)
     assert match, "narrate_text não aceita chain_continuous"
     body = match.group(1)

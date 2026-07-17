@@ -1251,9 +1251,15 @@ class MainWindow(QMainWindow):
             self._statusbar.showMessage("🌐 Traduzindo para narrar...", 5000)
             from src.gui.translation_service import TranslationService
 
+            # Idioma-alvo REAL da tradução (fonte de verdade: config translation.
+            # default_tgt via TranslationService) — repassado à narração para que
+            # a voz siga o idioma traduzido, não uma autodetecção que confundiria
+            # termos técnicos EN remanescentes.
+            tgt_lang = TranslationService.get_instance().default_tgt
+
             def on_audio_success(result):
                 self._statusbar.clearMessage()
-                self._reader_view.narrate_text(result)
+                self._reader_view.narrate_text(result, language=tgt_lang)
 
             def on_audio_error(err):
                 self._statusbar.showMessage(f"⚠️ Erro na tradução: {err}", 5000)
@@ -1369,7 +1375,9 @@ class MainWindow(QMainWindow):
         if detect_language(text).lower().startswith("pt"):
             self._statusbar.showMessage(
                 f"ℹ️ Página {page_label} já está em português — narrando o original.", 4000)
-            self._reader_view.narrate_text(text, chain_continuous=enable_chaining)
+            # A detecção já confirmou PT aqui; passa "pt" explícito para a voz não
+            # depender de nova autodetecção do texto (que traria termos EN juntos).
+            self._reader_view.narrate_text(text, chain_continuous=enable_chaining, language="pt")
             return
 
         self._statusbar.showMessage(f"🌐 Traduzindo página {page_label}…", 60000)
@@ -1381,7 +1389,8 @@ class MainWindow(QMainWindow):
                 self._statusbar.showMessage("⚠️ Tradução vazia — nada a narrar.", 5000)
                 return
             self._statusbar.showMessage(f"🔊 Narrando página {page_label}…", 5000)
-            self._reader_view.narrate_text(result, chain_continuous=enable_chaining)
+            # A tradução acima é en→pt (tgt_lang="pt"): narra em português explícito.
+            self._reader_view.narrate_text(result, chain_continuous=enable_chaining, language="pt")
 
         def _on_error(err: str):
             self._page_translation_pending = False

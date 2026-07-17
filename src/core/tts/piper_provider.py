@@ -130,8 +130,16 @@ class PiperProvider(BaseTTSProvider):
         logger.info("PIPER: Stop requested")
 
     def available_voices(self) -> list[VoiceInfo]:
-        """List commonly available Piper voices."""
-        return [
+        """List Piper voices.
+
+        Quando há modelos ``.onnx`` instalados, lista SOMENTE os presentes
+        (item 3): anunciar uma voz que não está instalada faria o roteador
+        "resolver" p.ex. a voz pt_BR e depois sintetizar no idioma errado (o
+        modelo realmente carregado é o único ``.onnx`` encontrado). Sem
+        diretório de modelos (ambiente de teste / Piper não configurado),
+        devolve o catálogo comum como referência (ADR-005, degradação graciosa).
+        """
+        catalog = [
             VoiceInfo("pt_BR-faber-medium", "Faber (PT-BR)", "pt-BR", "male",
                       "Brazilian Portuguese male voice", ["serene"]),
             VoiceInfo("en_US-lessac-medium", "Lessac (EN-US)", "en-US", "female",
@@ -141,6 +149,10 @@ class PiperProvider(BaseTTSProvider):
             VoiceInfo("en_GB-alan-medium", "Alan (EN-GB)", "en-GB", "male",
                       "British English male voice", ["technical"]),
         ]
+        installed = self._installed_model_ids()
+        if installed is None:
+            return catalog
+        return [v for v in catalog if v.voice_id in installed]
 
     def set_default_voice(self, voice_id: str) -> None:
         self._default_voice_id = voice_id
@@ -262,18 +274,39 @@ class PiperProvider(BaseTTSProvider):
         return None
 
     @staticmethod
-    def _find_default_model() -> Optional[str]:
-        """Try to find a default Piper model."""
-        model_dirs = [
+    def _model_dirs() -> list[str]:
+        return [
             os.path.expanduser("~/.local/share/piper-tts/models"),
             os.path.expanduser("~/piper-models"),
         ]
-        for d in model_dirs:
+
+    @staticmethod
+    def _find_default_model() -> Optional[str]:
+        """Try to find a default Piper model."""
+        for d in PiperProvider._model_dirs():
             if os.path.isdir(d):
                 for f in os.listdir(d):
                     if f.endswith(".onnx"):
                         return os.path.join(d, f)
         return None
+
+    @staticmethod
+    def _installed_model_ids() -> Optional[set[str]]:
+        """IDs de voz (basename sem ``.onnx``) dos modelos Piper instalados.
+
+        Retorna ``None`` quando não há nenhum ``.onnx`` para inspecionar (não
+        sabemos o que está instalado ⇒ não filtramos o catálogo). Retorna um
+        conjunto (possivelmente parcial) quando encontramos modelos.
+        """
+        found: Optional[set[str]] = None
+        for d in PiperProvider._model_dirs():
+            if os.path.isdir(d):
+                for f in os.listdir(d):
+                    if f.endswith(".onnx"):
+                        if found is None:
+                            found = set()
+                        found.add(f[: -len(".onnx")])
+        return found
 
     @staticmethod
     def _play_wav_blocking(wav_data: bytes) -> None:
