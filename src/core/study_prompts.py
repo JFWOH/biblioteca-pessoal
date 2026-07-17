@@ -97,6 +97,49 @@ def _format_concepts(concepts: Optional[list[str]]) -> str:
     )
 
 
+_WORD_WISE_PROMPT = (
+    "Explique em português, de forma curta e direta (1 a 2 frases), o que "
+    "significa o termo abaixo NO CONTEXTO em que ele aparece. Vá direto à "
+    "definição — sem repetir o termo como se fosse a resposta, sem "
+    "introduções do tipo 'o termo significa'.\n\n"
+    "TERMO: {term}{context_block}"
+)
+
+
+def _format_word_wise_context(context: Optional[str]) -> str:
+    """Bloco de contexto (trecho da página) para desambiguar o termo.
+
+    Degradação graciosa (ADR-005): sem contexto, o prompt define o termo
+    isoladamente (string vazia, o prompt fica só com o termo).
+    """
+    clean = (context or "").strip()
+    if not clean:
+        return ""
+    return f"\n\nCONTEXTO (trecho da página onde o termo aparece):\n'''\n{clean[:800]}\n'''"
+
+
+def build_word_wise_prompt(term: Optional[str], context: Optional[str] = None) -> Optional[str]:
+    """Monta a instrução da definição rápida (Word Wise, tarefa 3.4).
+
+    Args:
+        term: a seleção curta (palavra/termo, tipicamente até ~4 palavras)
+            que o leitor quer entender rapidamente.
+        context: trecho da página onde o termo aparece, usado para
+            desambiguar o sentido (ex.: "banco" financeiro vs. móvel).
+            Opcional — sem ele, o termo é definido isoladamente.
+
+    Returns:
+        A instrução completa, ou ``None`` se o termo estiver vazio. Tarefa
+        rápida: o chamador deve usar o LLM com ``think=False`` e pedir
+        resposta curta (mesmo padrão de build_flashcard_qa_prompt).
+    """
+    clean_term = (term or "").strip()
+    if not clean_term:
+        return None
+    return _WORD_WISE_PROMPT.format(
+        term=clean_term, context_block=_format_word_wise_context(context))
+
+
 def build_study_prompt(action_type: str, text: Optional[str],
                        concepts: Optional[list[str]] = None) -> Optional[str]:
     """Monta a instrução para uma ação de estudo.

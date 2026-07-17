@@ -312,6 +312,7 @@ class MainWindow(QMainWindow):
         self._rag_panel.save_annotation_requested.connect(self._on_rag_annotation_save)
         self._rag_panel.feedback_submitted.connect(self._on_rag_feedback)
         self._rag_panel.feedback_reason_submitted.connect(self._on_rag_feedback_reason)
+        self._rag_panel.retry_with_reason_requested.connect(self._on_rag_retry_with_reason)
         self._rag_panel.clear_chat_requested.connect(self._on_clear_chat)
         self._rag_panel.back_requested.connect(lambda: self._main_stack.setCurrentIndex(0))
         # Tarefa 3.1 — fontes clicáveis: resolve citações [Título, p. X] → book_id
@@ -1127,6 +1128,22 @@ class MainWindow(QMainWindow):
         self._rag_worker.start()
         self._statusbar.showMessage("🧠 Consultando Assistente IA…")
 
+    def _on_rag_retry_with_reason(self, query: str, reason: str) -> None:
+        """'Responder de novo considerando isto' (Tarefa 3.8).
+
+        Reenvia a ÚLTIMA pergunta com o motivo do 👎 anexado como instrução
+        extra. Reusa _on_rag_query integralmente (mesmo pipeline de contexto
+        de leitura, streaming, fontes e THINKING — é uma consulta RAG normal,
+        só com o prompt prefixado; nenhuma mudança no Orchestrator/RAGWorker).
+        """
+        if not query.strip():
+            return
+        augmented = (
+            f"O usuário reportou sobre a resposta anterior: '{reason}'. "
+            f"Refaça atendendo a isso.\n\n{query}"
+        )
+        self._on_rag_query(augmented)
+
     def _on_clear_chat(self) -> None:
         """Limpa a memória conversacional do contexto atual (livro ou global)."""
         if self._rag_engine is None:
@@ -1323,15 +1340,25 @@ class MainWindow(QMainWindow):
         (evita chamar o NLLB à toa). Graceful (ADR-005): erro vira aviso na
         statusbar. O "aviso do que está sendo processado" é a contagem de
         caracteres na statusbar + no header do cartão.
+
+        Cache por página (Tarefa 3.5): antes de chamar o NLLB, consulta
+        ``page_translation_cache`` (fingerprint = sha256 do texto normalizado
+        — invalida sozinho se o texto da página mudar, ex.: reprocessamento
+        de OCR); depois de traduzir, grava o resultado no cache.
         """
         from src.core.tts.language_detect import detect_language
+        from src.core.database import page_translation_fingerprint
 
         if getattr(self, "_page_translation_pending", False):
             self._statusbar.showMessage("🌐 Já estou traduzindo uma página — aguarde…", 3000)
             return
 
-        page = self._reader_view._reader.current_page + 1 if self._reader_view._reader else 0
+        reader = self._reader_view._reader
+        page_number = reader.current_page if reader else 0
+        page = page_number + 1
         source_desc = f"Página {page} inteira"
+        book_id = getattr(self._reader_view, "_book_id", 0)
+        src_lang, tgt_lang = "en", "pt"
 
         if self._rag_panel.parentWidget() != self._reader_view:
             self._reader_view.set_ai_panel(self._rag_panel)
@@ -1341,6 +1368,19 @@ class MainWindow(QMainWindow):
             self._statusbar.showMessage("ℹ️ A página já está em português.", 4000)
             self._rag_panel.show_translation_card(source_desc, text, text)
             return
+
+        fingerprint = page_translation_fingerprint(text)
+        if self._db is not None and book_id > 0:
+            try:
+                cached = self._db.get_cached_page_translation(
+                    book_id, page_number, src_lang, tgt_lang, fingerprint)
+            except Exception as exc:
+                logger.warning(f"Falha ao consultar cache de tradução (ignorado): {exc}")
+                cached = None
+            if cached:
+                self._statusbar.showMessage("🌐 Tradução em cache.", 3000)
+                self._rag_panel.show_translation_card(source_desc, text, cached)
+                return
 
         self._statusbar.showMessage(
             f"🌐 Traduzindo {source_desc.lower()} ({len(text)} caracteres)…", 60000)
@@ -1353,6 +1393,12 @@ class MainWindow(QMainWindow):
                 return
             self._statusbar.clearMessage()
             self._rag_panel.show_translation_card(source_desc, text, result)
+            if self._db is not None and book_id > 0:
+                try:
+                    self._db.set_page_translation_cache(
+                        book_id, page_number, src_lang, tgt_lang, fingerprint, result)
+                except Exception as exc:
+                    logger.warning(f"Falha ao gravar cache de tradução (ignorado): {exc}")
 
         def _on_error(err: str):
             self._page_translation_pending = False
@@ -1361,7 +1407,7 @@ class MainWindow(QMainWindow):
         try:
             from src.gui.translation_service import TranslationService
             TranslationService.get_instance().translate_async(
-                text, src_lang="en", tgt_lang="pt",
+                text, src_lang=src_lang, tgt_lang=tgt_lang,
                 on_success=_on_success, on_error=_on_error)
         except Exception as exc:
             self._page_translation_pending = False

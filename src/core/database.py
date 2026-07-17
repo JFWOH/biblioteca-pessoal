@@ -1,11 +1,24 @@
 """Banco de dados SQLite com FTS5 para a biblioteca."""
 
+import hashlib
 import sqlite3
 import threading
 from pathlib import Path
 from datetime import datetime
 
 from src.utils.constants import DB_PATH
+
+
+def page_translation_fingerprint(text: str) -> str:
+    """Fingerprint barata (sha256) do texto normalizado de uma página.
+
+    Usada para invalidar o cache de tradução por página (tarefa 3.5,
+    ``page_translation_cache``) quando o texto extraído da página muda (ex.:
+    reprocessamento de OCR) — mesma filosofia do ``ingest_fingerprint`` do
+    grafo (GraphStore), mas por conteúdo em vez de contagem de ingestão.
+    """
+    normalized = " ".join((text or "").split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 class LibraryDB:
@@ -193,6 +206,16 @@ class LibraryDB:
                     synthesis TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS page_translation_cache (
+                    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+                    page_number INTEGER NOT NULL,
+                    src_lang TEXT NOT NULL,
+                    tgt_lang TEXT NOT NULL,
+                    fingerprint TEXT NOT NULL,
+                    translation TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (book_id, page_number, src_lang, tgt_lang)
+                );
                 CREATE TABLE IF NOT EXISTS bookmarks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     book_id INTEGER NOT NULL,
@@ -309,6 +332,7 @@ class LibraryDB:
                 "DELETE FROM book_edges WHERE book_a = ? OR book_b = ?", (book_id, book_id))
             self.conn.execute("DELETE FROM graph_ingest_log WHERE book_id = ?", (book_id,))
             self.conn.execute("DELETE FROM dossier_synthesis_cache WHERE book_id = ?", (book_id,))
+            self.conn.execute("DELETE FROM page_translation_cache WHERE book_id = ?", (book_id,))
             self.conn.execute("DELETE FROM bookmarks WHERE book_id = ?", (book_id,))
 
             self.conn.execute("DELETE FROM books WHERE id = ?", (book_id,))
@@ -899,6 +923,38 @@ class LibraryDB:
                    fingerprint=excluded.fingerprint, synthesis=excluded.synthesis,
                    created_at=CURRENT_TIMESTAMP""",
                 (book_id, fingerprint, synthesis))
+            self.conn.commit()
+
+    # ── Cache de tradução por página (Tarefa 3.5) ───────────────────────
+
+    def get_cached_page_translation(self, book_id: int, page_number: int, src_lang: str,
+                                    tgt_lang: str, fingerprint: str) -> str | None:
+        """Tradução em cache da página, ou ``None`` se ausente ou o texto mudou.
+
+        A validação é pela fingerprint (sha256 do texto normalizado da
+        página — ver ``page_translation_fingerprint``): se o texto extraído
+        mudou desde a última tradução, a comparação falha e o cache é
+        tratado como inexistente (o chamador traduz de novo e regrava).
+        """
+        r = self.conn.execute(
+            """SELECT translation, fingerprint FROM page_translation_cache
+               WHERE book_id=? AND page_number=? AND src_lang=? AND tgt_lang=?""",
+            (book_id, page_number, src_lang, tgt_lang)).fetchone()
+        if not r or r["fingerprint"] != fingerprint:
+            return None
+        return r["translation"]
+
+    def set_page_translation_cache(self, book_id: int, page_number: int, src_lang: str,
+                                   tgt_lang: str, fingerprint: str, translation: str) -> None:
+        with self._write_lock:
+            self.conn.execute(
+                """INSERT INTO page_translation_cache
+                   (book_id, page_number, src_lang, tgt_lang, fingerprint, translation, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(book_id, page_number, src_lang, tgt_lang) DO UPDATE SET
+                   fingerprint=excluded.fingerprint, translation=excluded.translation,
+                   created_at=CURRENT_TIMESTAMP""",
+                (book_id, page_number, src_lang, tgt_lang, fingerprint, translation))
             self.conn.commit()
 
     # ── Busca ──────────────────────────────────────────────────────────

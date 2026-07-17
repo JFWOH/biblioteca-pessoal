@@ -27,6 +27,7 @@ from src.utils.constants import (
 )
 from src.gui.widgets.proactive_footer import ProactiveFooterWidget
 from src.gui.widgets.selection_popover import SelectionActionPopover
+from src.gui.widgets.word_wise_popover import WordWisePopover
 from src.gui.widgets.reader_dock import ReaderDock
 from src.gui.widgets.proactive_insights_panel import ProactiveInsightsPanel
 from src.gui.proactive_reader_service import ProactiveReaderService
@@ -52,6 +53,10 @@ class ReaderView(QWidget):
     # Tarefa 1.2 — zona de clique nas margens (só caminho PDF/imagem, ver
     # eventFilter): terço esquerdo = página anterior, terço direito = próxima.
     _PAGE_TURN_ZONE_RATIO = 1 / 3
+
+    # Tarefa 3.4 — Word Wise só aparece no popover de seleção para termos
+    # curtos (palavra/expressão), não para trechos/frases inteiras.
+    _WORD_WISE_MAX_WORDS = 4
 
     def __init__(self, parent=None, tts_router=None, rag_engine=None, db=None):
         super().__init__(parent)
@@ -676,6 +681,11 @@ class ReaderView(QWidget):
         self._selection_popover = SelectionActionPopover(self)
         self._selection_popover.action_requested.connect(self._on_selection_popover_action)
 
+        # Cartão de definição rápida (Word Wise, tarefa 3.4) — inline, nunca
+        # abre o painel do RAG (diferente das demais ações de seleção).
+        self._word_wise_popover = WordWisePopover(self)
+        self._word_wise_worker = None
+
     def _setup_shortcuts(self):
         s_next = QShortcut(QKeySequence(Qt.Key.Key_Right), self, self._go_next)
         s_next.setContext(Qt.ShortcutContext.ApplicationShortcut)
@@ -804,6 +814,8 @@ class ReaderView(QWidget):
                 self._last_selection_flow = None
                 if hasattr(self, "_selection_popover"):
                     self._selection_popover.hide()
+                if hasattr(self, "_word_wise_popover"):
+                    self._word_wise_popover.hide()
                 return True
             elif event.type() == QEvent.Type.MouseMove and self._is_selecting:
                 pos = event.position().toPoint()
@@ -1090,6 +1102,8 @@ class ReaderView(QWidget):
         self._stop_audio_if_running()
         if hasattr(self, "_selection_popover"):
             self._selection_popover.hide()
+        if hasattr(self, "_word_wise_popover"):
+            self._word_wise_popover.hide()
         if self._reader:
             content = self._reader.go_to_page(page)
             if content:
@@ -1475,6 +1489,8 @@ class ReaderView(QWidget):
             """)
         if hasattr(self, "_selection_popover"):
             self._selection_popover.set_theme(theme)
+        if hasattr(self, "_word_wise_popover"):
+            self._word_wise_popover.set_theme(theme)
 
         if self._reader and self._reader.is_open:
             self._go_to_page(self._reader.current_page)
@@ -1574,6 +1590,9 @@ class ReaderView(QWidget):
             return
         if hasattr(self, "_selection_popover") and self._selection_popover.isVisible():
             self._selection_popover.hide()
+            return
+        if hasattr(self, "_word_wise_popover") and self._word_wise_popover.isVisible():
+            self._word_wise_popover.hide()
             return
         if self._search_bar.isVisible():
             self._search_bar.close_bar()
@@ -2083,12 +2102,18 @@ class ReaderView(QWidget):
         """Exibe o popover de ações logo abaixo da seleção (PDF)."""
         if not hasattr(self, "_selection_popover"):
             return
-        self._selection_popover.set_actions(
-            ["highlight", "explain", "translate", "search", "save_note", "flashcard"]
-        )
+        actions = ["highlight", "explain", "translate", "search", "save_note", "flashcard"]
+        # Word Wise (3.4): só para seleção curta (palavra/termo) — seleções
+        # maiores continuam pelo fluxo normal (Explicar/RAG).
+        coords = self._last_selection_coords
+        text = self._selection_text(coords) if coords else ""
+        if text and len(text.split()) <= self._WORD_WISE_MAX_WORDS:
+            actions.append("word_wise")
+        self._selection_popover.set_actions(actions)
         # rect está em coordenadas do _image_label (pai da rubber band); mapeia p/ ReaderView.
         anchor_local = QPoint(rect.left(), rect.bottom() + 6)
         anchor = self._image_label.mapTo(self, anchor_local)
+        self._last_selection_anchor = anchor
         self._selection_popover.show_at(anchor)
 
     def _on_selection_popover_action(self, action: str) -> None:
@@ -2099,10 +2124,58 @@ class ReaderView(QWidget):
         text = self._selection_text(coords)
         if action == "highlight":
             self._highlight_selection(coords, text)
+        elif action == "word_wise":
+            if text:
+                self._start_word_wise(text)
         elif text:
             self.ai_action_requested.emit(action, text)
         self._last_selection_coords = None
         self._hide_selection_marquee()
+
+    def _start_word_wise(self, term: str) -> None:
+        """Dispara a definição rápida (Word Wise, 3.4) para o termo selecionado.
+
+        Mostra o popover em estado de carregamento imediatamente, perto da
+        seleção, e o LLM (``think=False``, worker em background) substitui
+        pelo texto da definição ao terminar. NUNCA abre o painel do RAG —
+        essa é a diferença chave em relação às outras ações de seleção.
+        """
+        worker = getattr(self, "_word_wise_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+
+        anchor = getattr(self, "_last_selection_anchor", None)
+        if anchor is None:
+            return
+        self._word_wise_popover.show_loading(term, anchor)
+
+        # Contexto: texto da página atual, para desambiguar o termo.
+        context = ""
+        if self._reader:
+            page = self._reader.current_page
+            if hasattr(self._reader, "get_page_text"):
+                context = self._reader.get_page_text(page) or ""
+            elif hasattr(self._reader, "get_chapter_text"):
+                context = self._reader.get_chapter_text(page) or ""
+
+        config = getattr(self.window(), "_config", None)
+        ollama_url = (config.get("rag.ollama_url", "http://localhost:11434")
+                     if config else "http://localhost:11434")
+
+        from src.gui.workers.word_wise_worker import WordWiseWorker
+        self._word_wise_worker = WordWiseWorker(
+            term, context=context, ollama_url=ollama_url, parent=self)
+        self._word_wise_worker.definition_ready.connect(self._on_word_wise_ready)
+        self._word_wise_worker.failed.connect(self._on_word_wise_failed)
+        self._word_wise_worker.start()
+
+    def _on_word_wise_ready(self, term: str, definition: str) -> None:
+        if self._word_wise_popover.isVisible():
+            self._word_wise_popover.show_definition(term, definition)
+
+    def _on_word_wise_failed(self, _reason: str) -> None:
+        if self._word_wise_popover.isVisible():
+            self._word_wise_popover.show_error()
 
     def _toggle_audio(self):
         """Alterna a leitura de áudio (TTS) da página atual.

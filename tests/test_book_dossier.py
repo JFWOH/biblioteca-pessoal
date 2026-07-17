@@ -67,6 +67,21 @@ def test_dossier_data_empty_graph(db, store):
     assert data["annotations_total"] == 0 and data["annotations_recent"] == []
 
 
+def test_dossier_data_annotations_by_type(db, store):
+    bid = _book(db)
+    db.add_annotation(bid, 1, content="a", annotation_type="highlight")
+    db.add_annotation(bid, 2, content="b", annotation_type="highlight")
+    db.add_annotation(bid, 3, content="c", annotation_type="note")
+    data = build_dossier_data(db, store, bid)
+    assert data["annotations_by_type"] == {"highlight": 2, "note": 1}
+
+
+def test_dossier_data_annotations_by_type_empty(db, store):
+    bid = _book(db)
+    data = build_dossier_data(db, store, bid)
+    assert data["annotations_by_type"] == {}
+
+
 def test_dossier_recent_annotations_capped_and_truncated(db, store):
     bid = _book(db)
     for i in range(5):
@@ -125,3 +140,22 @@ def test_synthesis_prompt_no_partial_with_high_coverage(db, store):
     store.add_mentions(bid, "page:2", C[:1], page=2)
     prompt = build_dossier_synthesis_prompt(build_dossier_data(db, store, bid))
     assert "parcial" not in prompt
+
+
+# ── perfil do leitor (tarefa 3.9) ────────────────────────────────────────
+
+def test_synthesis_prompt_includes_reader_profile(db, store):
+    bid, _other = _seed_full(db, store)
+    prompt = build_dossier_synthesis_prompt(build_dossier_data(db, store, bid))
+    assert "Perfil do leitor" in prompt
+    assert "50%" in prompt        # current_page=2, total_pages=4
+    assert "highlight" in prompt  # anotação padrão de _seed_full
+
+
+def test_synthesis_prompt_reader_profile_degrades_without_progress(db, store):
+    bid = _book(db)
+    store.add_mentions(bid, "page:1", C, page=1)
+    prompt = build_dossier_synthesis_prompt(build_dossier_data(db, store, bid))
+    assert "Perfil do leitor" in prompt
+    assert "leitura ainda não iniciada" in prompt
+    assert "nenhuma anotação registrada" in prompt

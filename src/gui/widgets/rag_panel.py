@@ -43,6 +43,7 @@ class RAGPanel(QWidget):
     feedback_submitted = pyqtSignal(int, dict)  # rating (+1/-1), context dict
     feedback_reason_submitted = pyqtSignal(int, str)  # feedback_id, reason (motivo do 👎)
     source_clicked = pyqtSignal(int, int)  # book_id, page (0-based do leitor) — Tarefa 3.1
+    retry_with_reason_requested = pyqtSignal(str, str)  # query, reason — Tarefa 3.8
 
     # Chips de motivo do 👎: rótulo exibido → chave canônica gravada em reason.
     _REASON_CHIPS = (
@@ -67,6 +68,8 @@ class RAGPanel(QWidget):
         # e motivo escolhido antes do id (defensivo — ADR-005, nunca quebra a UI).
         self._last_feedback_id: int | None = None
         self._pending_reason: str | None = None
+        # 3.8: motivo do último 👎 (habilita o botão "Responder de novo").
+        self._last_reason_for_retry: str | None = None
         # Fontes clicáveis (Tarefa 3.1): provedor da lista de livros do banco,
         # usado para resolver citações [Título, p. X] → book_id (fuzzy match).
         self._books_provider = None
@@ -325,6 +328,28 @@ class RAGPanel(QWidget):
         reason_layout.addWidget(self._reason_edit)
 
         action_btns_layout.addWidget(self._reason_container)
+
+        # "Responder de novo considerando isto" (Tarefa 3.8): aparece assim
+        # que o motivo do 👎 é registrado — reenvia a última pergunta com o
+        # motivo anexado ao prompt (consulta RAG normal, com thinking).
+        self._retry_btn = QPushButton("🔁 Responder de novo considerando isto")
+        self._retry_btn.setObjectName("RagRetryWithReasonButton")
+        self._retry_btn.setVisible(False)
+        self._retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._retry_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 1px solid #6366f1;
+                border-radius: 8px;
+                color: #818cf8;
+                padding: 8px 12px;
+                font-size: 12px;
+            }
+            QPushButton:hover { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; }
+            QPushButton:disabled { color: #52525b; border-color: #3f3f46; }
+        """)
+        self._retry_btn.clicked.connect(self._on_retry_with_reason_clicked)
+        action_btns_layout.addWidget(self._retry_btn)
 
         chat_layout.addLayout(action_btns_layout)
 
@@ -926,6 +951,7 @@ class RAGPanel(QWidget):
     def _hide_feedback_buttons(self) -> None:
         self._thumbs_up_btn.setVisible(False)
         self._thumbs_down_btn.setVisible(False)
+        self._retry_btn.setVisible(False)
         self._hide_reason_chips()
 
     def _on_feedback_clicked(self, rating: int) -> None:
@@ -941,6 +967,7 @@ class RAGPanel(QWidget):
         # Voto novo: zera qualquer estado de motivo herdado.
         self._last_feedback_id = None
         self._pending_reason = None
+        self._last_reason_for_retry = None
         ctx = self._reading_context or {}
         book_id = ctx.get("book_id") or None
         if book_id == 0:
@@ -1022,7 +1049,12 @@ class RAGPanel(QWidget):
 
     def _submit_reason(self, reason: str) -> None:
         """Emite o motivo (se o id já chegou) ou o guarda para quando chegar,
-        esconde os chips e confirma visualmente ("✅ Obrigado!")."""
+        esconde os chips e confirma visualmente ("✅ Obrigado!").
+
+        Tarefa 3.8: também libera o botão "Responder de novo considerando
+        isto" — motivo registrado é o gatilho para reenviar a última
+        pergunta com essa instrução extra.
+        """
         self._hide_reason_chips()
         if self._last_feedback_id is not None:
             self.feedback_reason_submitted.emit(self._last_feedback_id, reason)
@@ -1033,6 +1065,9 @@ class RAGPanel(QWidget):
         self._thumbs_down_btn.setText("✅ Obrigado!")
         self._thumbs_down_btn.setEnabled(False)
         self._thumbs_down_btn.setVisible(True)
+        self._last_reason_for_retry = reason
+        self._retry_btn.setEnabled(True)
+        self._retry_btn.setVisible(True)
 
     def eventFilter(self, obj, event):  # noqa: N802 (assinatura do Qt)
         """Esc no campo de texto livre volta aos chips (sem perder o voto)."""
@@ -1199,6 +1234,14 @@ class RAGPanel(QWidget):
         question = self._question_input.text().strip()
         if not question or self._is_generating:
             return
+        self._begin_new_query(question)
+        self.query_requested.emit(question)
+
+    def _begin_new_query(self, question: str) -> None:
+        """Prepara a UI para uma nova pergunta (limpa resposta, reinicia o
+        estado de feedback/sessão). Usado pelo envio normal (_on_send) e
+        pelo reenvio com motivo (3.8, _on_retry_with_reason_clicked) — as
+        duas entradas de uma nova rodada de consulta."""
         self._response_area.clear()
         self._sources_list.clear()
         self._set_generating(True)
@@ -1210,7 +1253,18 @@ class RAGPanel(QWidget):
         self._last_feedback_id = None
         self._pending_reason = None
         self._gen_status.setText(f'🔍 Consultando: "{question[:60]}..."')
-        self.query_requested.emit(question)
+
+    def _on_retry_with_reason_clicked(self) -> None:
+        """'Responder de novo considerando isto' (3.8): reenvia a ÚLTIMA
+        pergunta com o motivo do 👎 anexado. A augmentação do prompt fica a
+        cargo do MainWindow (retry_with_reason_requested); aqui só prepara a
+        UI como uma consulta nova e emite a query original + o motivo."""
+        query = self._last_query
+        reason = self._last_reason_for_retry
+        if not query or not reason or self._is_generating:
+            return
+        self._begin_new_query(query)
+        self.retry_with_reason_requested.emit(query, reason)
 
     def _on_stop(self) -> None:
         self.stop_requested.emit()
