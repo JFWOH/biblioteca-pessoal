@@ -36,7 +36,7 @@ class CollectionDialog(QDialog):
         font.setPointSize(16)
         font.setWeight(QFont.Weight.Bold)
         title.setFont(font)
-        title.setStyleSheet("color: #e4e4e7;")
+        title.setObjectName("collectionDialogTitle")
         layout.addWidget(title)
 
         subtitle = QLabel(
@@ -44,43 +44,23 @@ class CollectionDialog(QDialog):
             "Cada livro pode pertencer a múltiplas coleções."
         )
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet("color: #71717a; font-size: 12px;")
+        subtitle.setObjectName("collectionDialogSubtitle")
         layout.addWidget(subtitle)
 
         # Criar nova coleção
         create_frame = QFrame()
-        create_frame.setStyleSheet("""
-            QFrame {
-                background-color: #18181b;
-                border: 1px solid #27272a;
-                border-radius: 8px;
-            }
-        """)
+        create_frame.setObjectName("collectionCreateFrame")
         create_layout = QHBoxLayout(create_frame)
         create_layout.setContentsMargins(12, 8, 12, 8)
 
         self._new_name = QLineEdit()
         self._new_name.setPlaceholderText("Nome da nova coleção...")
-        self._new_name.setStyleSheet("""
-            QLineEdit {
-                background: #0f0f17; border: 1px solid #27272a;
-                border-radius: 6px; padding: 8px 12px; color: #e4e4e7;
-                font-size: 13px;
-            }
-            QLineEdit:focus { border-color: #6366f1; }
-        """)
+        self._new_name.setObjectName("collectionNewNameInput")
         self._new_name.returnPressed.connect(self._create_collection)
         create_layout.addWidget(self._new_name, stretch=1)
 
         create_btn = QPushButton("+ Criar")
-        create_btn.setStyleSheet("""
-            QPushButton {
-                background: #6366f1; border: none; border-radius: 6px;
-                padding: 8px 16px; color: white; font-size: 13px;
-                font-weight: 600;
-            }
-            QPushButton:hover { background: #818cf8; }
-        """)
+        create_btn.setObjectName("collectionCreateBtn")
         create_btn.clicked.connect(self._create_collection)
         create_layout.addWidget(create_btn)
 
@@ -88,22 +68,7 @@ class CollectionDialog(QDialog):
 
         # Lista de coleções existentes
         self._collection_list = QListWidget()
-        self._collection_list.setStyleSheet("""
-            QListWidget {
-                background: #0f0f17; border: 1px solid #27272a;
-                border-radius: 8px; color: #e4e4e7; font-size: 13px;
-            }
-            QListWidget::item {
-                padding: 10px 14px;
-                border-bottom: 1px solid #1e1e24;
-            }
-            QListWidget::item:selected {
-                background: rgba(99, 102, 241, 0.15);
-            }
-            QListWidget::item:hover {
-                background: #18181b;
-            }
-        """)
+        self._collection_list.setObjectName("collectionList")
         layout.addWidget(self._collection_list, stretch=1)
 
         # Botões de ação
@@ -115,14 +80,7 @@ class CollectionDialog(QDialog):
         actions.addWidget(self._rename_btn)
 
         self._delete_btn = QPushButton("🗑 Excluir")
-        self._delete_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent; border: 1px solid #3f3f46;
-                border-radius: 8px; padding: 8px 16px; color: #ef4444;
-                font-size: 12px;
-            }
-            QPushButton:hover { background: rgba(239, 68, 68, 0.1); border-color: #ef4444; }
-        """)
+        self._delete_btn.setObjectName("dangerBtnSmall")
         self._delete_btn.clicked.connect(self._delete_collection)
         actions.addWidget(self._delete_btn)
 
@@ -222,18 +180,12 @@ class AddToCollectionDialog(QDialog):
         font.setPointSize(13)
         font.setWeight(QFont.Weight.Bold)
         title.setFont(font)
-        title.setStyleSheet("color: #e4e4e7;")
+        title.setObjectName("collectionDialogTitle")
         layout.addWidget(title)
 
         # Lista de coleções com checkboxes
         self._collection_list = QListWidget()
-        self._collection_list.setStyleSheet("""
-            QListWidget {
-                background: #0f0f17; border: 1px solid #27272a;
-                border-radius: 8px; color: #e4e4e7; font-size: 13px;
-            }
-            QListWidget::item { padding: 8px 12px; }
-        """)
+        self._collection_list.setObjectName("addToCollectionList")
 
         collections = self._db.get_all_collections()
         book_collections = {

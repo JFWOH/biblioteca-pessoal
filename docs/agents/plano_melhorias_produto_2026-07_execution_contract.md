@@ -33,20 +33,32 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
 ## II. Ondas (ordem de execução)
 
 ### Onda 0 — [P0] Fundação visual (bugs + tema)
-- [ ] **0.1** Corrigir botões com texto sobreposto: substituir emoji-embutido-no-texto
+- [x] **0.1** Corrigir botões com texto sobreposto: substituir emoji-embutido-no-texto
   por `QIcon` real (ou `QFont.setFamilies` com "Segoe UI Emoji") nos 7 botões de
   `book_details.py:130-174` E nos ~15 botões-emoji da toolbar do leitor
   (`reader_view.py:141-345`). Critério: nenhum QPushButton com emoji no fluxo de texto.
-- [ ] **0.2** Propagação de tema completa: `_apply_theme` (`main_window.py:332-337`)
+- [x] **0.2** Propagação de tema completa: `_apply_theme` (`main_window.py:332-337`)
   deve alcançar `book_details`, `book_card` e TODOS os diálogos
   (settings/import/collection/flashcards/dossier/wizard/anki). Critério: trocar para
   Light/Sepia atualiza todas as superfícies (teste automatizado por inspeção de
   paleta/stylesheet efetivo).
-- [ ] **0.3** Migração de estilo: mover os `setStyleSheet` inline de
+- [x] **0.3** Migração de estilo: mover os `setStyleSheet` inline de
   `book_details.py`, `book_card.py` e diálogos para `styles.py` central (object-names).
   `rag_panel.py` (48) e `reader_view.py` (40) ficam para a Onda 0b SE o orçamento da
   onda permitir; senão registrar como débito.
 - Executores sugeridos: F1 Opus (0.1+0.2), F2 Sonnet (0.3 mecânico), testes por ambos.
+- **Registro (2026-07-16, executada):** F1 Opus + F2 Sonnet, sequenciais (whitelists
+  compartilhavam book_details/styles). Decisões: (a) `emoji_icon()` em `styles.py`
+  pinta emoji em QPixmap 2x → QIcon (fonte "Segoe UI Emoji"/"Noto Color Emoji");
+  (b) tema aplicado na `QApplication` → diálogos herdam; (c) seleção do book_card via
+  `setProperty("selected")+repolish` em vez de setStyleSheet; (d) 113 estilos inline
+  migrados p/ os 3 temas, 5 exceções data-driven mantidas (TagBadge/swatch de cor).
+  **Débito Onda 0b:** `rag_panel.py` (48), `reader_view.py` (40),
+  `annotation_panel.py` (34), `search_overlay.py` (14), `proactive_footer.py` (14),
+  `library_view.py` (12), `sidebar.py` (6) seguem com estilos inline. Débito menor:
+  botão de livro-relacionado (`book_details.refresh_graph_section`) e QActions de
+  menus mantêm emoji no texto (menus não sofrem o bug). Testes novos:
+  test_emoji_buttons, test_theme_propagation, test_styles_migration.
 
 ### Onda 1 — [P1] Leitor
 - [ ] **1.1** Botão **Aa** na toolbar: popover com fonte/tamanho/entrelinha/margem/tema

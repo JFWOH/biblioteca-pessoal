@@ -21,6 +21,10 @@ class TagBadge(QFrame):
 
     def __init__(self, tag: dict, removable=True, parent=None):
         super().__init__(parent)
+        # Exceção documentada (Onda 0.3): a cor é DADO (tag.color, escolhida
+        # pelo usuário e persistida no banco) — não um valor de tema — por
+        # isso os 4 setStyleSheet abaixo permanecem inline, calculados em
+        # runtime a partir de `color`.
         color = tag.get("color", "#6366f1")
         self.setStyleSheet(f"background:{color}22;border:1px solid {color}55;border-radius:12px;")
         lay = QHBoxLayout(self)
@@ -53,11 +57,11 @@ class TagManager(QWidget):
         layout.setSpacing(8)
         header = QHBoxLayout()
         lbl = QLabel("🏷️ Tags")
-        lbl.setStyleSheet("color:#a1a1aa;font-size:12px;font-weight:600;")
+        lbl.setObjectName("tagManagerHeader")
         header.addWidget(lbl)
         header.addStretch()
         add_btn = QPushButton("+ Tag")
-        add_btn.setStyleSheet("background:rgba(99,102,241,0.15);border:none;border-radius:4px;padding:3px 10px;color:#818cf8;font-size:11px;font-weight:600;")
+        add_btn.setObjectName("tagAddBtn")
         add_btn.clicked.connect(self._show_add_dialog)
         header.addWidget(add_btn)
         layout.addLayout(header)
@@ -86,7 +90,7 @@ class TagManager(QWidget):
             self._tags_layout.addWidget(badge)
         if not tags:
             e = QLabel("Nenhuma tag")
-            e.setStyleSheet("color:#52525b;font-size:11px;")
+            e.setObjectName("tagManagerEmptyLabel")
             self._tags_layout.addWidget(e)
 
     def _remove_tag(self, tag_id: int):
@@ -123,12 +127,12 @@ class AddTagDialog(QDialog):
         f.setPointSize(13)
         f.setWeight(QFont.Weight.Bold)
         title.setFont(f)
-        title.setStyleSheet("color:#e4e4e7;")
+        title.setObjectName("addTagDialogTitle")
         layout.addWidget(title)
         layout.addWidget(QLabel("Tags existentes:"))
         self._list = QListWidget()
         self._list.setMaximumHeight(100)
-        self._list.setStyleSheet("background:#0f0f17;border:1px solid #27272a;border-radius:6px;color:#e4e4e7;font-size:12px;")
+        self._list.setObjectName("addTagList")
         all_tags = self._db.get_all_tags()
         book_ids = {t["id"] for t in self._db.get_book_tags(self._book_id)}
         for tag in all_tags:
@@ -141,13 +145,15 @@ class AddTagDialog(QDialog):
         layout.addWidget(QLabel("Criar nova:"))
         self._name = QLineEdit()
         self._name.setPlaceholderText("Nome da tag...")
-        self._name.setStyleSheet("background:#0f0f17;border:1px solid #27272a;border-radius:6px;padding:6px 10px;color:#e4e4e7;font-size:12px;")
+        self._name.setObjectName("addTagNameInput")
         layout.addWidget(self._name)
         colors = QHBoxLayout()
         colors.setSpacing(4)
         for c in TAG_COLORS:
             b = QPushButton()
             b.setFixedSize(22, 22)
+            # Exceção documentada: a cor do swatch É o dado (a própria opção de
+            # cor da tag) — não um valor de tema, por isso fica inline.
             b.setStyleSheet(f"background:{c};border:2px solid transparent;border-radius:11px;")
             b.clicked.connect(lambda _, col=c: setattr(self, '_color', col))
             colors.addWidget(b)

@@ -31,8 +31,8 @@ class OllamaWizardDialog(QDialog):
         self.setFixedSize(520, 420)
         self.setModal(True)
         self._worker: OllamaInstallWorker | None = None
+        self.setObjectName("wizardDialog")
         self._setup_ui()
-        self._apply_style()
 
     def _setup_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -42,11 +42,7 @@ class OllamaWizardDialog(QDialog):
         # ── Header gradient ──────────────────────────────────────────────────
         header = QWidget()
         header.setFixedHeight(80)
-        header.setStyleSheet("""
-            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                stop:0 #1a1a2e, stop:1 #16213e);
-            border-bottom: 1px solid #27272a;
-        """)
+        header.setObjectName("wizardHeader")
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(24, 0, 24, 0)
 
@@ -57,9 +53,9 @@ class OllamaWizardDialog(QDialog):
         title_col = QVBoxLayout()
         title_col.setSpacing(2)
         title = QLabel("Assistente de Biblioteca — Configuração")
-        title.setStyleSheet("color: #e4e4e7; font-size: 14px; font-weight: 700;")
+        title.setObjectName("wizardHeaderTitle")
         sub = QLabel("Ollama não detectado na porta 11434")
-        sub.setStyleSheet("color: #f59e0b; font-size: 11px;")
+        sub.setObjectName("wizardHeaderSub")
         title_col.addWidget(title)
         title_col.addWidget(sub)
         h_layout.addLayout(title_col, stretch=1)
@@ -75,7 +71,7 @@ class OllamaWizardDialog(QDialog):
 
     def _build_welcome_page(self) -> QWidget:
         page = QWidget()
-        page.setStyleSheet("background-color: #0f0f17;")
+        page.setObjectName("wizardPage")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(32, 28, 32, 28)
         layout.setSpacing(16)
@@ -86,15 +82,12 @@ class OllamaWizardDialog(QDialog):
             "O Ollama não foi detectado neste computador. Escolha uma opção:"
         )
         desc.setWordWrap(True)
-        desc.setStyleSheet("color: #a1a1aa; font-size: 13px; line-height: 1.6;")
+        desc.setObjectName("wizardDesc")
         layout.addWidget(desc)
 
         # Info box
         info = QFrame()
-        info.setStyleSheet("""
-            QFrame { background: #1a1a2e; border: 1px solid #2d2d4e;
-                     border-radius: 8px; padding: 4px; }
-        """)
+        info.setObjectName("wizardInfoBox")
         info_layout = QVBoxLayout(info)
         info_layout.setContentsMargins(16, 12, 16, 12)
         for txt in [
@@ -103,7 +96,7 @@ class OllamaWizardDialog(QDialog):
             "🪟  Compatível com Windows, Linux e macOS",
         ]:
             lbl = QLabel(txt)
-            lbl.setStyleSheet("color: #818cf8; font-size: 12px;")
+            lbl.setObjectName("wizardInfoItem")
             info_layout.addWidget(lbl)
         layout.addWidget(info)
 
@@ -112,31 +105,19 @@ class OllamaWizardDialog(QDialog):
         # Botões
         btn_install = QPushButton("⬇️  Instalar Ollama Automaticamente")
         btn_install.setFixedHeight(44)
-        btn_install.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 #6366f1, stop:1 #818cf8);
-                color: white; border: none; border-radius: 8px;
-                font-size: 13px; font-weight: 700;
-            }
-            QPushButton:hover { background: #818cf8; }
-        """)
+        btn_install.setObjectName("wizardInstallBtn")
         btn_install.clicked.connect(self._start_installation)
         layout.addWidget(btn_install)
 
         btn_manual = QPushButton("🔗  Já tenho o Ollama / Instalar manualmente")
         btn_manual.setFixedHeight(36)
-        btn_manual.setStyleSheet("""
-            QPushButton { background: transparent; color: #52525b;
-                border: 1px solid #3f3f46; border-radius: 8px; font-size: 12px; }
-            QPushButton:hover { color: #a1a1aa; border-color: #52525b; }
-        """)
+        btn_manual.setObjectName("wizardManualBtn")
         btn_manual.clicked.connect(self._open_manual_page)
         layout.addWidget(btn_manual)
 
         btn_skip = QPushButton("Continuar sem o Assistente de IA")
         btn_skip.setFlat(True)
-        btn_skip.setStyleSheet("color: #3f3f46; font-size: 11px;")
+        btn_skip.setObjectName("wizardSkipBtn")
         btn_skip.clicked.connect(self.reject)
         layout.addWidget(btn_skip, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -144,7 +125,7 @@ class OllamaWizardDialog(QDialog):
 
     def _build_progress_page(self) -> QWidget:
         page = QWidget()
-        page.setStyleSheet("background-color: #0f0f17;")
+        page.setObjectName("wizardPage")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(32, 32, 32, 32)
         layout.setSpacing(20)
@@ -157,7 +138,7 @@ class OllamaWizardDialog(QDialog):
 
         self._prog_title = QLabel("Baixando Ollama…")
         self._prog_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._prog_title.setStyleSheet("color: #e4e4e7; font-size: 15px; font-weight: 700;")
+        self._prog_title.setObjectName("wizardProgTitle")
         layout.addWidget(self._prog_title)
 
         self._prog_bar = QProgressBar()
@@ -165,30 +146,18 @@ class OllamaWizardDialog(QDialog):
         self._prog_bar.setValue(0)
         self._prog_bar.setFixedHeight(8)
         self._prog_bar.setTextVisible(False)
-        self._prog_bar.setStyleSheet("""
-            QProgressBar { background: #27272a; border-radius: 4px; }
-            QProgressBar::chunk {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 #6366f1, stop:1 #a78bfa);
-                border-radius: 4px;
-            }
-        """)
+        self._prog_bar.setObjectName("wizardProgBar")
         layout.addWidget(self._prog_bar)
 
         self._prog_msg = QLabel("Iniciando…")
         self._prog_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._prog_msg.setStyleSheet("color: #52525b; font-size: 11px;")
+        self._prog_msg.setObjectName("wizardProgMsg")
         layout.addWidget(self._prog_msg)
 
         layout.addStretch()
 
         btn_cancel = QPushButton("Cancelar")
-        btn_cancel.setStyleSheet("""
-            QPushButton { background: transparent; color: #52525b;
-                border: 1px solid #3f3f46; border-radius: 6px;
-                padding: 6px 20px; font-size: 11px; }
-            QPushButton:hover { color: #f87171; border-color: #7f1d1d; }
-        """)
+        btn_cancel.setObjectName("wizardCancelBtn")
         btn_cancel.clicked.connect(self._cancel_install)
         layout.addWidget(btn_cancel, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -196,7 +165,7 @@ class OllamaWizardDialog(QDialog):
 
     def _build_done_page(self) -> QWidget:
         page = QWidget()
-        page.setStyleSheet("background-color: #0f0f17;")
+        page.setObjectName("wizardPage")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(32, 32, 32, 32)
         layout.setSpacing(16)
@@ -209,44 +178,31 @@ class OllamaWizardDialog(QDialog):
 
         self._done_title = QLabel("Ollama instalado com sucesso!")
         self._done_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._done_title.setStyleSheet("color: #4ade80; font-size: 16px; font-weight: 700;")
+        self._done_title.setObjectName("wizardDoneTitleSuccess")
         layout.addWidget(self._done_title)
 
         self._done_msg = QLabel("")
         self._done_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._done_msg.setWordWrap(True)
-        self._done_msg.setStyleSheet("color: #71717a; font-size: 12px;")
+        self._done_msg.setObjectName("wizardDoneMsg")
         layout.addWidget(self._done_msg)
 
         layout.addStretch()
 
         self._done_btn = QPushButton("✨ Abrir Assistente de Biblioteca")
         self._done_btn.setFixedHeight(44)
-        self._done_btn.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 #6366f1, stop:1 #818cf8);
-                color: white; border: none; border-radius: 8px;
-                font-size: 13px; font-weight: 700;
-            }
-            QPushButton:hover { background: #818cf8; }
-        """)
+        self._done_btn.setObjectName("wizardInstallBtn")
         self._done_btn.clicked.connect(self.accept)
         layout.addWidget(self._done_btn)
 
         self._manual_btn = QPushButton("🔗 Instruções de instalação manual")
         self._manual_btn.setFlat(True)
-        self._manual_btn.setStyleSheet("color: #52525b; font-size: 11px;")
+        self._manual_btn.setObjectName("wizardManualLinkBtn")
         self._manual_btn.hide()
         self._manual_btn.clicked.connect(self._open_manual_page)
         layout.addWidget(self._manual_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         return page
-
-    def _apply_style(self) -> None:
-        self.setStyleSheet("""
-            QDialog { background-color: #0f0f17; }
-        """)
 
     # ── Ações ──────────────────────────────────────────────────────────────────
 
@@ -269,21 +225,23 @@ class OllamaWizardDialog(QDialog):
         if success:
             self._done_icon.setText("✅")
             self._done_title.setText("Ollama instalado com sucesso!")
-            self._done_title.setStyleSheet(
-                "color: #4ade80; font-size: 16px; font-weight: 700;"
-            )
+            self._set_done_title_style("wizardDoneTitleSuccess")
             self._done_msg.setText(message)
             self._done_btn.show()
             self._manual_btn.hide()
         else:
             self._done_icon.setText("❌")
             self._done_title.setText("Não foi possível instalar automaticamente")
-            self._done_title.setStyleSheet(
-                "color: #f87171; font-size: 16px; font-weight: 700;"
-            )
+            self._set_done_title_style("wizardDoneTitleError")
             self._done_msg.setText(message)
             self._done_btn.hide()
             self._manual_btn.show()
+
+    def _set_done_title_style(self, object_name: str) -> None:
+        """Troca o objectName do título final (sucesso/erro) e repolisha o QSS."""
+        self._done_title.setObjectName(object_name)
+        self._done_title.style().unpolish(self._done_title)
+        self._done_title.style().polish(self._done_title)
 
     def _cancel_install(self) -> None:
         if self._worker and self._worker.isRunning():

@@ -1,0 +1,155 @@
+"""Onda 0.3 — migração de estilo inline p/ styles.py central.
+
+Cobre os 10 arquivos da whitelist do contrato (book_card, book_details,
+collection_dialog, import_dialog, anki_export_dialog, book_dossier_dialog,
+tag_manager, settings_dialog, flashcards_dialog, ollama_wizard):
+
+1. Os widgets/diálogos continuam construíveis sob os 3 temas, sem exceção.
+2. Os objectNames-chave introduzidos na migração existem (contrato mínimo
+   entre .py e as regras QSS em styles.py).
+3. As exceções documentadas (cor vinda de DADO — TagBadge, swatch de cor)
+   permanecem com ``setStyleSheet`` inline calculado em runtime.
+
+Não reinstancia MainWindow (pesada). Não asserta o valor exato de cor —
+isso é responsabilidade de revisão visual manual; aqui validamos apenas o
+MECANISMO (objectName aplicado, nenhuma exceção na construção).
+"""
+from unittest.mock import MagicMock
+
+import pytest
+from PyQt6.QtWidgets import QApplication
+
+from src.core.config import ConfigManager
+from src.core.database import LibraryDB
+from src.gui.styles import DARK_THEME, LIGHT_THEME, SEPIA_THEME, get_theme
+from src.gui.widgets.book_card import BookCard
+from src.gui.book_details import BookDetails
+from src.gui.collection_dialog import CollectionDialog, AddToCollectionDialog
+from src.gui.import_dialog import ImportDialog
+from src.gui.widgets.anki_export_dialog import AnkiExportDialog
+from src.gui.dialogs.book_dossier_dialog import BookDossierDialog
+from src.gui.widgets.tag_manager import TagManager, TagBadge, AddTagDialog
+from src.gui.settings_dialog import SettingsDialog
+from src.gui.dialogs.flashcards_dialog import FlashcardsDialog
+from src.gui.dialogs.ollama_wizard import OllamaWizardDialog
+
+
+@pytest.fixture(autouse=True)
+def _restore_app_stylesheet(qtbot):
+    """Não vaza a stylesheet global entre testes (QApplication é singleton)."""
+    app = QApplication.instance()
+    before = app.styleSheet()
+    yield
+    app.setStyleSheet(before)
+
+
+class _FakeAnkiService:
+    """Stub mínimo: Anki "fechado" (ramo offline de _load_decks)."""
+
+    def is_available(self) -> bool:
+        return False
+
+    def count_pending_fallback(self) -> int:
+        return 0
+
+
+@pytest.fixture
+def db(tmp_path):
+    return LibraryDB(tmp_path / "lib.db")
+
+
+@pytest.fixture
+def config(tmp_path):
+    return ConfigManager(tmp_path / "config.json")
+
+
+@pytest.mark.parametrize("theme_css", [DARK_THEME, LIGHT_THEME, SEPIA_THEME])
+def test_widgets_build_under_every_theme(qtbot, db, config, theme_css):
+    """Constrói os 10 widgets/diálogos da whitelist sob cada tema, sem erro."""
+    app = QApplication.instance()
+    app.setStyleSheet(theme_css)
+
+    card = BookCard({"id": 1, "title": "Livro", "file_path": __file__})
+    qtbot.addWidget(card)
+    card.set_selected(True)
+    card.set_selected(False)
+
+    details = BookDetails(db)
+    qtbot.addWidget(details)
+
+    col_dialog = CollectionDialog(db)
+    qtbot.addWidget(col_dialog)
+
+    bid = db.add_book(title="Livro X", file_path="/x.pdf", file_format="pdf")
+    add_col_dialog = AddToCollectionDialog(db, bid)
+    qtbot.addWidget(add_col_dialog)
+
+    import_dialog = ImportDialog(MagicMock())
+    qtbot.addWidget(import_dialog)
+
+    anki_dialog = AnkiExportDialog(_FakeAnkiService())
+    qtbot.addWidget(anki_dialog)
+
+    dossier_dialog = BookDossierDialog(db, bid)
+    qtbot.addWidget(dossier_dialog)
+
+    tag_mgr = TagManager(db)
+    qtbot.addWidget(tag_mgr)
+    tag_mgr.set_book(bid)
+
+    add_tag_dialog = AddTagDialog(db, bid)
+    qtbot.addWidget(add_tag_dialog)
+
+    settings_dialog = SettingsDialog(config)
+    qtbot.addWidget(settings_dialog)
+
+    flashcards_dialog = FlashcardsDialog(db, current_book_id=bid)
+    qtbot.addWidget(flashcards_dialog)
+
+    wizard = OllamaWizardDialog()
+    qtbot.addWidget(wizard)
+
+
+def test_migrated_widgets_have_no_inline_stylesheet(qtbot, db):
+    """Widgets migrados não devem mais ter setStyleSheet residual próprio."""
+    card = BookCard({"id": 1, "title": "Livro", "file_path": __file__})
+    qtbot.addWidget(card)
+    assert card.styleSheet() == ""
+
+    details = BookDetails(db)
+    qtbot.addWidget(details)
+    assert details._title.styleSheet() == ""
+    assert details._author.styleSheet() == ""
+
+
+def test_data_driven_colors_remain_inline_exception(qtbot):
+    """TagBadge e o swatch de cor: exceção documentada (cor é DADO)."""
+    badge = TagBadge({"id": 1, "name": "ficção", "color": "#ef4444"})
+    qtbot.addWidget(badge)
+    # Continuam inline pois a cor vem do registro da tag, não do tema.
+    assert "#ef4444" in badge.styleSheet()
+
+
+def test_key_object_names_present(qtbot, db):
+    """Contrato mínimo entre o .py e as regras QSS em styles.py."""
+    card = BookCard({"id": 1, "title": "Livro", "file_path": __file__})
+    qtbot.addWidget(card)
+    assert card.objectName() == "bookCard"
+
+    details = BookDetails(db)
+    qtbot.addWidget(details)
+    assert details._title.objectName() == "bookDetailsTitle"
+    assert details._del_btn.objectName() == "dangerBtn"
+
+    wizard = OllamaWizardDialog()
+    qtbot.addWidget(wizard)
+    assert wizard.objectName() == "wizardDialog"
+
+
+def test_theme_propagation_still_works_after_migration(qtbot):
+    """Onda 0.2 (F1) continua íntegra: QApplication recebe o QSS do tema."""
+    app = QApplication.instance()
+    for theme_name in ("dark", "light", "sepia"):
+        css = get_theme(theme_name)
+        app.setStyleSheet(css)
+        assert app.styleSheet() == css

@@ -18,7 +18,7 @@ from src.gui.widgets.toc_widget import TOCWidget
 from src.gui.widgets.reading_progress import ReadingProgressBar
 from src.gui.widgets.annotation_panel import AnnotationPanel
 from src.gui.widgets.search_overlay import DocumentSearchBar
-from src.gui.styles import get_reader_css
+from src.gui.styles import get_reader_css, emoji_icon
 from src.gui.widgets.proactive_footer import ProactiveFooterWidget
 from src.gui.widgets.selection_popover import SelectionActionPopover
 from src.gui.widgets.reader_dock import ReaderDock
@@ -211,8 +211,10 @@ class ReaderView(QWidget):
         sep.setStyleSheet("color: #2d333f; font-size: 16px;")
         tb_layout.addWidget(sep)
 
-        # Botão de anotações
-        self._annotations_btn = QPushButton("📝")
+        # Botão de anotações — emoji como ÍCONE (evita sobreposição no Windows);
+        # botão só-ícone: texto vazio + tooltip. Ver styles.emoji_icon.
+        self._annotations_btn = QPushButton("")
+        self._annotations_btn.setIcon(emoji_icon("📝"))
         self._annotations_btn.setFixedSize(32, 32)
         self._annotations_btn.setToolTip("Painel de Anotações")
         self._annotations_btn.setCheckable(True)
@@ -227,7 +229,8 @@ class ReaderView(QWidget):
         tb_layout.addWidget(self._annotations_btn)
 
         # Botão busca no documento
-        search_btn = QPushButton("🔍")
+        search_btn = QPushButton("")
+        search_btn.setIcon(emoji_icon("🔍"))
         search_btn.setFixedSize(32, 32)
         search_btn.setToolTip("Buscar no documento (Ctrl+F)")
         search_btn.setStyleSheet("""
@@ -239,7 +242,8 @@ class ReaderView(QWidget):
         tb_layout.addWidget(search_btn)
 
         # Botão tela cheia
-        self._fullscreen_btn = QPushButton("⛶")
+        self._fullscreen_btn = QPushButton("")
+        self._fullscreen_btn.setIcon(emoji_icon("⛶"))
         self._fullscreen_btn.setFixedSize(32, 32)
         self._fullscreen_btn.setToolTip("Tela cheia (F11)")
         self._fullscreen_btn.setStyleSheet("""
@@ -250,8 +254,9 @@ class ReaderView(QWidget):
         self._fullscreen_btn.clicked.connect(self._toggle_fullscreen)
         tb_layout.addWidget(self._fullscreen_btn)
         
-        # Botão Página Dupla
-        self._double_page_btn = QPushButton("📖 Dupla")
+        # Botão Página Dupla (state-holder no menu de overflow)
+        self._double_page_btn = QPushButton("Dupla")
+        self._double_page_btn.setIcon(emoji_icon("📖"))
         self._double_page_btn.setFixedSize(85, 32)
         self._double_page_btn.setCheckable(True)
         self._double_page_btn.setToolTip("Modo Página Dupla")
@@ -266,7 +271,8 @@ class ReaderView(QWidget):
         # Movido para o menu de overflow ("⋯"): mantido como state-holder.
 
         # Botão Marca-Texto (modo de destaque)
-        self._highlight_mode_btn = QPushButton("🖍️")
+        self._highlight_mode_btn = QPushButton("")
+        self._highlight_mode_btn.setIcon(emoji_icon("🖍️"))
         self._highlight_mode_btn.setFixedSize(32, 32)
         self._highlight_mode_btn.setCheckable(True)
         self._highlight_mode_btn.setToolTip(
@@ -287,7 +293,8 @@ class ReaderView(QWidget):
         # Movido para o menu de overflow ("⋯"): mantido como state-holder.
 
         # Botão Estudar (ações do agente sobre a página atual)
-        self._study_btn = QPushButton("🎓")
+        self._study_btn = QPushButton("")
+        self._study_btn.setIcon(emoji_icon("🎓"))
         self._study_btn.setFixedSize(32, 32)
         self._study_btn.setToolTip("Estudar a página: explicar · resumir · flashcards · glossário")
         self._study_btn.setStyleSheet("""
@@ -299,7 +306,8 @@ class ReaderView(QWidget):
         tb_layout.addWidget(self._study_btn)
 
         # Botão Painel IA
-        self._ai_panel_btn = QPushButton("🤖")
+        self._ai_panel_btn = QPushButton("")
+        self._ai_panel_btn.setIcon(emoji_icon("🤖"))
         self._ai_panel_btn.setFixedSize(32, 32)
         self._ai_panel_btn.setCheckable(True)
         self._ai_panel_btn.setToolTip("Assistente IA")
@@ -313,8 +321,10 @@ class ReaderView(QWidget):
         self._ai_panel_btn.clicked.connect(self._toggle_ai_panel)
         tb_layout.addWidget(self._ai_panel_btn)
 
-        # Botão Áudio/TTS (Leitura de página) — Ouvir / Pausar / Retomar
-        self._audio_btn = QPushButton("🔊 Ouvir")
+        # Botão Áudio/TTS (Leitura de página) — Ouvir / Pausar / Retomar.
+        # Emoji como ícone; o ícone acompanha o estado (ver _toggle_audio etc.).
+        self._audio_btn = QPushButton("Ouvir")
+        self._audio_btn.setIcon(emoji_icon("🔊"))
         self._audio_btn.setFixedSize(95, 32)
         self._audio_btn.setToolTip("Ouvir Página (TTS)")
         self._audio_btn.setStyleSheet("""
@@ -326,7 +336,8 @@ class ReaderView(QWidget):
         tb_layout.addWidget(self._audio_btn)
 
         # Botão Parar (full stop) — só visível durante a reprodução/pausa.
-        self._audio_stop_btn = QPushButton("⏹️")
+        self._audio_stop_btn = QPushButton("")
+        self._audio_stop_btn.setIcon(emoji_icon("⏹️"))
         self._audio_stop_btn.setFixedSize(36, 32)
         self._audio_stop_btn.setToolTip("Parar Leitura (TTS)")
         self._audio_stop_btn.setVisible(False)
@@ -338,8 +349,9 @@ class ReaderView(QWidget):
         self._audio_stop_btn.clicked.connect(self._stop_audio_if_running)
         tb_layout.addWidget(self._audio_stop_btn)
 
-        # Botão de Configuração de TTS (atalho Phase 13)
-        self._tts_settings_btn = QPushButton("⚙️ TTS")
+        # Botão de Configuração de TTS (atalho Phase 13; state-holder no overflow)
+        self._tts_settings_btn = QPushButton("TTS")
+        self._tts_settings_btn.setIcon(emoji_icon("⚙️"))
         self._tts_settings_btn.setFixedSize(65, 32)
         self._tts_settings_btn.setToolTip("Configurar Vozes e Engines de Narração")
         self._tts_settings_btn.setStyleSheet("""
@@ -1255,10 +1267,10 @@ class ReaderView(QWidget):
         self.fullscreen_toggled.emit(self._is_fullscreen)
         if self._is_fullscreen:
             self._toolbar.hide()
-            self._fullscreen_btn.setText("⬜")
+            self._fullscreen_btn.setIcon(emoji_icon("⬜"))
         else:
             self._toolbar.show()
-            self._fullscreen_btn.setText("⛶")
+            self._fullscreen_btn.setIcon(emoji_icon("⛶"))
 
     def _on_escape(self):
         """Escape: fecha popover → busca → limpa rubber band → sai do fullscreen → fecha leitor."""
@@ -1737,7 +1749,8 @@ class ReaderView(QWidget):
         if worker and worker.isRunning():
             worker.pause()
             self._audio_paused = True
-            self._audio_btn.setText("▶️ Retomar")
+            self._audio_btn.setText("Retomar")
+            self._audio_btn.setIcon(emoji_icon("▶️"))
             self._audio_btn.setToolTip("Continuar Leitura (TTS)")
 
     def _resume_audio(self):
@@ -1746,12 +1759,14 @@ class ReaderView(QWidget):
         if worker and worker.isRunning():
             worker.resume()
             self._audio_paused = False
-            self._audio_btn.setText("⏸️ Pausar")
+            self._audio_btn.setText("Pausar")
+            self._audio_btn.setIcon(emoji_icon("⏸️"))
             self._audio_btn.setToolTip("Pausar Leitura (TTS)")
 
     def _on_audio_started(self):
         self._audio_paused = False
-        self._audio_btn.setText("⏸️ Pausar")
+        self._audio_btn.setText("Pausar")
+        self._audio_btn.setIcon(emoji_icon("⏸️"))
         self._audio_btn.setToolTip("Pausar Leitura (TTS)")
         self._audio_stop_btn.setVisible(True)
 
@@ -1873,7 +1888,8 @@ class ReaderView(QWidget):
             finished_worker.deleteLater()
             return
         self._audio_paused = False
-        self._audio_btn.setText("🔊 Ouvir")
+        self._audio_btn.setText("Ouvir")
+        self._audio_btn.setIcon(emoji_icon("🔊"))
         self._audio_btn.setToolTip("Ouvir Página (TTS)")
         if hasattr(self, "_audio_stop_btn"):
             self._audio_stop_btn.setVisible(False)
@@ -1889,7 +1905,8 @@ class ReaderView(QWidget):
             self._audio_worker.wait(2000)
             self._audio_worker = None
         self._audio_paused = False
-        self._audio_btn.setText("🔊 Ouvir")
+        self._audio_btn.setText("Ouvir")
+        self._audio_btn.setIcon(emoji_icon("🔊"))
         self._audio_btn.setToolTip("Ouvir Página (TTS)")
         if hasattr(self, "_audio_stop_btn"):
             self._audio_stop_btn.setVisible(False)
