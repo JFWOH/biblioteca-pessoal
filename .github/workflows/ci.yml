@@ -15,6 +15,9 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
       HF_HUB_OFFLINE: "1"
+      # Diagnóstico do crash nativo flaky: em caso de SIGABRT, despeja o stack
+      # de TODAS as threads (o log padrão só mostra a thread corrente).
+      PYTHONFAULTHANDLER: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -41,16 +44,21 @@ jobs:
       - name: Ruff
         run: ruff check src tests
 
-      # Suíte em 2 shards (processos separados) com retry único por shard.
+      # Suíte em 3 shards (processos separados) com retry DUPLO por shard.
       # A suíte tem um crash nativo flaky PRÉ-EXISTENTE sob carga (Qt/Chroma/
       # torch no teardown; documentado desde 2026-06-28, "exit 9 — reexecutar"):
       # no CI Linux vira SIGABRT (exit 134) em posição NÃO-determinística
       # (cada teste passa isolado, com -v e em fatia 3x — diagnóstico no PR #14).
-      # O sharding zera o estado nativo no meio; o `|| ` reexecuta o shard 1x
-      # se o processo abortar. Uma falha REAL de teste é determinística e falha
-      # nas DUAS execuções — o retry não mascara bug de lógica, só o crash flaky.
+      # Endurecimento 2026-07-17: o antigo shard 2 (p–z) abortou inclusive no
+      # retry em 3 PRs (#22/#26/#29 — o rerun do job sempre passou), então ele
+      # foi dividido (p–s / t–z, menos acúmulo nativo por processo) e o retry
+      # virou duplo. Uma falha REAL de teste é determinística e falha em TODAS
+      # as execuções — o retry não mascara bug de lógica, só o crash flaky.
       - name: Pytest (shard 1 — test_a..test_o)
-        run: pytest tests/test_[a-o]*.py -q || pytest tests/test_[a-o]*.py -q
+        run: pytest tests/test_[a-o]*.py -q || pytest tests/test_[a-o]*.py -q || pytest tests/test_[a-o]*.py -q
 
-      - name: Pytest (shard 2 — test_p..test_z)
-        run: pytest tests/test_[p-z]*.py -q || pytest tests/test_[p-z]*.py -q
+      - name: Pytest (shard 2 — test_p..test_s)
+        run: pytest tests/test_[p-s]*.py -q || pytest tests/test_[p-s]*.py -q || pytest tests/test_[p-s]*.py -q
+
+      - name: Pytest (shard 3 — test_t..test_z)
+        run: pytest tests/test_[t-z]*.py -q || pytest tests/test_[t-z]*.py -q || pytest tests/test_[t-z]*.py -q
