@@ -6,7 +6,7 @@ import logging
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QSplitter, QStackedWidget, QMenu, QRubberBand,
-    QToolButton, QSizePolicy,
+    QToolButton, QSizePolicy, QTabWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize, QEvent
 from PyQt6.QtGui import QPixmap, QKeySequence, QShortcut, QAction
@@ -18,7 +18,12 @@ from src.gui.widgets.toc_widget import TOCWidget
 from src.gui.widgets.reading_progress import ReadingProgressBar
 from src.gui.widgets.annotation_panel import AnnotationPanel
 from src.gui.widgets.search_overlay import DocumentSearchBar
+from src.gui.widgets.bookmarks_panel import BookmarksPanel
+from src.gui.widgets.reader_typography_popover import ReaderTypographyPopover
 from src.gui.styles import get_reader_css, emoji_icon
+from src.utils.constants import (
+    DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT,
+)
 from src.gui.widgets.proactive_footer import ProactiveFooterWidget
 from src.gui.widgets.selection_popover import SelectionActionPopover
 from src.gui.widgets.reader_dock import ReaderDock
@@ -206,6 +211,24 @@ class ReaderView(QWidget):
         zoom_in.clicked.connect(self._zoom_in)
         tb_layout.addWidget(zoom_in)
 
+        # Botão "Aa" — popover de tipografia do leitor (fonte/tamanho/entrelinha/
+        # margem/tema, aplicado ao vivo). "Aa" é texto (não emoji).
+        self._typography_btn = QPushButton("Aa")
+        self._typography_btn.setFixedSize(36, 32)
+        self._typography_btn.setCheckable(True)
+        self._typography_btn.setToolTip("Tipografia do leitor (fonte, tamanho, tema)")
+        self._typography_btn.setStyleSheet("""
+            QPushButton { background: transparent; border: 1px solid #2d333f;
+                          border-radius: 6px; color: #cbd5e1; font-size: 13px;
+                          font-weight: 600; }
+            QPushButton:hover { background: #2d333f; }
+            QPushButton:checked { background: rgba(16, 185, 129, 0.2);
+                                  border-color: #10b981; }
+        """)
+        self._typography_btn.clicked.connect(self._open_typography_popover)
+        tb_layout.addWidget(self._typography_btn)
+        self._typography_popover = None
+
         # Separador
         sep = QLabel("│")
         sep.setStyleSheet("color: #2d333f; font-size: 16px;")
@@ -227,6 +250,24 @@ class ReaderView(QWidget):
         """)
         self._annotations_btn.clicked.connect(self._toggle_annotations)
         tb_layout.addWidget(self._annotations_btn)
+
+        # Botão Marcador (🔖) — toggle do bookmark da página atual. Emoji como
+        # ÍCONE (nunca no texto); o estado marcado indica que a página tem
+        # marcador (atualizado ao navegar).
+        self._bookmark_btn = QPushButton("")
+        self._bookmark_btn.setIcon(emoji_icon("🔖"))
+        self._bookmark_btn.setFixedSize(32, 32)
+        self._bookmark_btn.setCheckable(True)
+        self._bookmark_btn.setToolTip("Marcar página")
+        self._bookmark_btn.setStyleSheet("""
+            QPushButton { background: transparent; border: 1px solid #2d333f;
+                          border-radius: 6px; font-size: 16px; }
+            QPushButton:hover { background: #2d333f; }
+            QPushButton:checked { background: rgba(16, 185, 129, 0.2);
+                                  border-color: #10b981; }
+        """)
+        self._bookmark_btn.clicked.connect(self._toggle_current_bookmark)
+        tb_layout.addWidget(self._bookmark_btn)
 
         # Botão busca no documento
         search_btn = QPushButton("")
@@ -462,12 +503,19 @@ class ReaderView(QWidget):
         splitter.setHandleWidth(1)
         splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
 
-        # Painel TOC
+        # Painel lateral: abas "Sumário" (TOC) e "Marcadores" (bookmarks).
         self._toc_widget = TOCWidget()
-        self._toc_widget.setMinimumWidth(200)
-        self._toc_widget.setMaximumWidth(300)
         self._toc_widget.page_selected.connect(self._go_to_page)
-        splitter.addWidget(self._toc_widget)
+        self._bookmarks_panel = BookmarksPanel()
+        self._bookmarks_panel.bookmark_selected.connect(self._go_to_page)
+        self._bookmarks_panel.bookmark_removed.connect(self._on_bookmark_removed)
+        self._side_panel_tabs = QTabWidget()
+        self._side_panel_tabs.setObjectName("readerSidePanelTabs")
+        self._side_panel_tabs.setMinimumWidth(200)
+        self._side_panel_tabs.setMaximumWidth(300)
+        self._side_panel_tabs.addTab(self._toc_widget, "Sumário")
+        self._side_panel_tabs.addTab(self._bookmarks_panel, "Marcadores")
+        splitter.addWidget(self._side_panel_tabs)
 
         # Stack para diferentes tipos de conteúdo
         self._content_stack = QStackedWidget()
@@ -590,6 +638,7 @@ class ReaderView(QWidget):
         QShortcut(QKeySequence("Ctrl+="), self, self._zoom_in)
         QShortcut(QKeySequence("Ctrl+-"), self, self._zoom_out)
         QShortcut(QKeySequence("Ctrl+F"), self, self._toggle_search)
+        QShortcut(QKeySequence("Ctrl+D"), self, self._toggle_current_bookmark)
         QShortcut(QKeySequence(Qt.Key.Key_F11), self, self._toggle_fullscreen)
 
     def wheelEvent(self, event) -> None:
@@ -779,6 +828,7 @@ class ReaderView(QWidget):
         self._annotation_panel.set_book_id(self._book_id)
         self._title_label.setText(book_data.get("title", ""))
         self._load_persisted_observations()
+        self._refresh_bookmarks()
 
         # Fecha leitor anterior
         if self._reader and self._reader.is_open:
@@ -796,6 +846,25 @@ class ReaderView(QWidget):
 
         # Vai para a página inicial
         self._go_to_page(start_page)
+
+    def _reader_css(self) -> str:
+        """CSS do conteúdo HTML do leitor com a tipografia ATUAL da config.
+
+        Fonte única de verdade: lê as MESMAS chaves ``reader.*`` que o diálogo de
+        configurações grava (fonte/tamanho/entrelinha/margens). Sem config
+        acessível, cai nos defaults de ``get_reader_css`` (ADR-005).
+        """
+        config = getattr(self.window(), "_config", None)
+        if config is None:
+            return get_reader_css(self._theme)
+        return get_reader_css(
+            self._theme,
+            font_family=config.get("reader.font_family", DEFAULT_FONT_FAMILY),
+            font_size=config.get("reader.font_size", DEFAULT_FONT_SIZE),
+            line_height=config.get("reader.line_height", DEFAULT_LINE_HEIGHT),
+            margin_h=config.get("reader.margin_horizontal", 60),
+            margin_v=config.get("reader.margin_vertical", 40),
+        )
 
     def _render_page(self, content: PageContent):
         """Renderiza o conteúdo da página."""
@@ -816,7 +885,7 @@ class ReaderView(QWidget):
             # (features próprias do leitor), então <script>/on*/javascript:
             # de um EPUB baixado da internet executariam aqui (§2.1).
             from src.readers.html_sanitizer import sanitize_book_html
-            css = get_reader_css(self._theme)
+            css = self._reader_css()
             html = f"""<!DOCTYPE html>
             <html><head><style>{css}</style></head>
             <body>{sanitize_book_html(content.content)}</body></html>"""
@@ -831,7 +900,8 @@ class ReaderView(QWidget):
         self._page_label.setText(f"{page + 1}/{total}")
         self._progress_bar.set_page_info(page + 1, total)
         self.progress_changed.emit(self._book_id, page, total)
-        
+        self._update_bookmark_button(page)
+
         # Emite contexto para a IA
         # Pega as primeiras 1000 letras do texto da página para contexto
         page_text = ""
@@ -994,6 +1064,8 @@ class ReaderView(QWidget):
     def close_reader(self):
         """Fecha o leitor atual."""
         self._stop_audio_if_running()
+        if getattr(self, "_typography_popover", None) is not None:
+            self._typography_popover.hide()
         if self._reader and self._reader.is_open:
             self._reader.close()
             self._reader = None
@@ -1003,6 +1075,8 @@ class ReaderView(QWidget):
 
         # Apply theme to TOC and AnnotationPanel
         self._toc_widget.set_theme(theme)
+        if hasattr(self, "_bookmarks_panel"):
+            self._bookmarks_panel.set_theme(theme)
         self._annotation_panel.set_theme(theme)
         if hasattr(self, '_dock'):
             self._dock.set_theme(theme)
@@ -1015,7 +1089,7 @@ class ReaderView(QWidget):
 
         # Apply CSS to current reader if open
         if self._reader and hasattr(self._reader, "set_theme_css"):
-            self._reader.set_theme_css(get_reader_css(theme))
+            self._reader.set_theme_css(self._reader_css())
 
         if theme == "light":
             bg_toolbar = "#f4f4f5"
@@ -1186,6 +1260,30 @@ class ReaderView(QWidget):
             QPushButton:hover {{ background: {btn_hover_bg}; }}
             QPushButton:checked {{ {hl_checked_style} }}
         """)
+        if hasattr(self, "_typography_btn"):
+            self._typography_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: 1px solid {btn_bg};
+                    border-radius: 6px;
+                    color: {btn_color};
+                    font-size: 13px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{ background: {btn_hover_bg}; }}
+                QPushButton:checked {{ {checked_style} }}
+            """)
+        if hasattr(self, "_bookmark_btn"):
+            self._bookmark_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: 1px solid {btn_bg};
+                    border-radius: 6px;
+                    font-size: 16px;
+                }}
+                QPushButton:hover {{ background: {btn_hover_bg}; }}
+                QPushButton:checked {{ {checked_style} }}
+            """)
 
         # 2. Scroll area
         self._image_scroll.setStyleSheet(f"background-color: {bg_scroll};")
@@ -1274,6 +1372,9 @@ class ReaderView(QWidget):
 
     def _on_escape(self):
         """Escape: fecha popover → busca → limpa rubber band → sai do fullscreen → fecha leitor."""
+        if getattr(self, "_typography_popover", None) is not None and self._typography_popover.isVisible():
+            self._typography_popover.hide()
+            return
         if hasattr(self, "_selection_popover") and self._selection_popover.isVisible():
             self._selection_popover.hide()
             return
@@ -1315,6 +1416,149 @@ class ReaderView(QWidget):
             self._image_label.unsetCursor()
             self._hide_selection_marquee()
             self._last_selection_coords = None
+
+    # ── Tipografia do Leitor (botão "Aa") ────────────────────────────────────
+
+    def _open_typography_popover(self) -> None:
+        """Abre/fecha o popover de tipografia ancorado no botão 'Aa'."""
+        if self._typography_popover is None:
+            self._typography_popover = ReaderTypographyPopover(self)
+            self._typography_popover.typography_changed.connect(self._on_typography_changed)
+            self._typography_popover.theme_changed.connect(self._on_reader_theme_changed)
+            self._typography_popover.closed.connect(
+                lambda: self._typography_btn.setChecked(False))
+
+        pop = self._typography_popover
+        if pop.isVisible():
+            pop.hide()
+            return
+
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            pop.set_values(
+                config.get("reader.font_family", DEFAULT_FONT_FAMILY),
+                config.get("reader.font_size", DEFAULT_FONT_SIZE),
+                config.get("reader.line_height", DEFAULT_LINE_HEIGHT),
+                config.get("reader.margin_horizontal", 60),
+                self._theme,
+            )
+        else:
+            pop.set_values(DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE,
+                           DEFAULT_LINE_HEIGHT, 60, self._theme)
+
+        self._typography_btn.setChecked(True)
+        btn = self._typography_btn
+        anchor = btn.mapToGlobal(QPoint(btn.width(), btn.height() + 4))
+        pop.show_at(anchor)
+
+    def _on_typography_changed(self, values: dict) -> None:
+        """Persiste a tipografia nas chaves reader.* e re-renderiza (ao vivo)."""
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            try:
+                config.set("reader.font_family", values["font_family"])
+                config.set("reader.font_size", values["font_size"])
+                config.set("reader.line_height", values["line_height"])
+                config.set("reader.margin_horizontal", values["margin_horizontal"])
+            except Exception as exc:
+                logger.warning(f"Falha ao salvar tipografia (ignorado): {exc}")
+        self._apply_reader_typography()
+
+    def _apply_reader_typography(self) -> None:
+        """Re-renderiza a página atual com a tipografia atual (aplicação ao vivo).
+
+        Reusa o pipeline de renderização: ``_render_page`` regenera o CSS via
+        ``_reader_css`` a partir da config. Em PDF (imagem) a tipografia não
+        afeta o render; o re-render é inócuo.
+        """
+        if self._reader and self._reader.is_open:
+            self._go_to_page(self._reader.current_page)
+
+    def _on_reader_theme_changed(self, theme: str) -> None:
+        """Troca o tema do leitor a partir do popover.
+
+        Fonte única de verdade = a chave global ``theme`` (a MESMA do diálogo de
+        configurações). Propaga app-wide via ``MainWindow._apply_theme`` quando
+        disponível (reader + sidebar + assistente + diálogos); senão aplica só
+        ao leitor. Sem chave ``reader.theme`` duplicada.
+        """
+        config = getattr(self.window(), "_config", None)
+        if config is not None:
+            try:
+                config.set("theme", theme)
+            except Exception as exc:
+                logger.warning(f"Falha ao salvar tema (ignorado): {exc}")
+        win = self.window()
+        if win is not None and hasattr(win, "_apply_theme"):
+            win._apply_theme()
+        else:
+            self.set_theme(theme)
+
+    # ── Marcadores de página (bookmarks) ─────────────────────────────────────
+
+    def _short_excerpt(self, text: str, limit: int = 60) -> str:
+        """Trecho curto de uma linha (rótulo do marcador), sem quebras."""
+        if not text:
+            return ""
+        snippet = " ".join(text.split())
+        return snippet[:limit].rstrip()
+
+    def _toggle_current_bookmark(self) -> None:
+        """Alterna o marcador da página atual e atualiza botão + painel."""
+        if not self._reader or self._db is None or not self._book_id:
+            # Não deixa o botão preso: reflete que não há marcador aplicável.
+            if hasattr(self, "_bookmark_btn"):
+                self._bookmark_btn.setChecked(False)
+            return
+        page = self._reader.current_page
+        label = self._short_excerpt(self._current_page_text())
+        try:
+            state = self._db.toggle_bookmark(self._book_id, page, label)
+        except Exception as exc:
+            logger.warning(f"Falha ao alternar marcador (ignorado): {exc}")
+            return
+        self._update_bookmark_button(page)
+        self._refresh_bookmarks()
+        self._show_status("Página marcada." if state else "Marcador removido.", 2500)
+
+    def _update_bookmark_button(self, page: int) -> None:
+        """Sincroniza o botão 🔖 com o estado real da página (marcada ou não)."""
+        if not hasattr(self, "_bookmark_btn"):
+            return
+        marked = False
+        if self._db is not None and self._book_id:
+            try:
+                marked = self._db.is_bookmarked(self._book_id, page)
+            except Exception:
+                marked = False
+        # setChecked NÃO dispara clicked → sem reentrância com o toggle.
+        self._bookmark_btn.setChecked(marked)
+        self._bookmark_btn.setToolTip(
+            "Remover marcador da página" if marked else "Marcar página")
+
+    def _refresh_bookmarks(self) -> None:
+        """Recarrega o painel de Marcadores a partir do banco (ADR-005)."""
+        if not hasattr(self, "_bookmarks_panel"):
+            return
+        rows = []
+        if self._db is not None and self._book_id:
+            try:
+                rows = self._db.get_bookmarks(self._book_id)
+            except Exception as exc:
+                logger.warning(f"Falha ao carregar marcadores (ignorado): {exc}")
+                rows = []
+        self._bookmarks_panel.set_bookmarks(rows)
+
+    def _on_bookmark_removed(self, page: int) -> None:
+        """Remove o marcador da página (via botão do item no painel)."""
+        if self._db is not None and self._book_id:
+            try:
+                self._db.remove_bookmark(self._book_id, page)
+            except Exception as exc:
+                logger.warning(f"Falha ao remover marcador (ignorado): {exc}")
+        self._refresh_bookmarks()
+        if self._reader and self._reader.current_page == page:
+            self._update_bookmark_button(page)
 
     # ── Integração RAG Lado a Lado ───────────────────────────────────────────
 
