@@ -59,6 +59,11 @@ class RAGPanel(QWidget):
         self._full_answer = ""
         self._reading_context = None
         self._is_standalone = False
+        # Config (injetada pelo MainWindow via set_config): persiste a
+        # preferência de colapso da sidebar (fontes/modelo/indexação) entre
+        # sessões. Sem config, o padrão embutido (recolhida) ainda vale — só
+        # não persiste (ADR-005, degradação graciosa).
+        self._config = None
         # Feedback (Fase 1b): id de sessão por pergunta + última query, para
         # gravar 👍/👎 em agent_feedback; 1 voto por resposta.
         self._current_session_id = ""
@@ -571,7 +576,12 @@ class RAGPanel(QWidget):
         splitter.setStretchFactor(1, 0)
 
         root.addWidget(splitter, stretch=1)
-        
+
+        # Padrão: sidebar recolhida (espaço morto na tela do Assistente) —
+        # set_config, se chamado depois pelo MainWindow, pode reabrir com a
+        # preferência persistida do usuário.
+        self._apply_sidebar_collapsed(True)
+
         # Inicializa o visual com o tema Escuro padrão
         self.set_theme("dark")
 
@@ -811,11 +821,30 @@ class RAGPanel(QWidget):
         """Recolhe/expande a barra lateral (fontes, modelo, indexação).
 
         Recolhida, a área de resposta ocupa toda a largura do painel — útil no
-        dock do leitor, onde o espaço é mais estreito.
+        dock do leitor, onde o espaço é mais estreito. A escolha do usuário é
+        persistida (se houver config injetada) para valer nas próximas sessões.
         """
         collapse = self._sidebar_toggle_btn.isChecked()
         self._sidebar_widget.setVisible(not collapse)
         self._sidebar_toggle_btn.setText("⟨" if collapse else "⟩")
+        if self._config is not None:
+            self._config.set("rag.sidebar_collapsed", collapse)
+
+    def _apply_sidebar_collapsed(self, collapsed: bool) -> None:
+        """Aplica o estado de colapso da sidebar sem disparar persistência."""
+        self._sidebar_toggle_btn.setChecked(collapsed)
+        self._sidebar_widget.setVisible(not collapsed)
+        self._sidebar_toggle_btn.setText("⟨" if collapsed else "⟩")
+
+    def set_config(self, config) -> None:
+        """Injeta o ConfigManager para ler/persistir a preferência de sidebar.
+
+        Chamado pelo MainWindow logo após instanciar o RAGPanel. Aplica o
+        estado salvo (``rag.sidebar_collapsed``, default recolhida).
+        """
+        self._config = config
+        collapsed = config.get("rag.sidebar_collapsed", True) if config else True
+        self._apply_sidebar_collapsed(collapsed)
 
     def set_indexed_count(self, count: int) -> None:
         """Atualiza o contador de chunks indexados."""

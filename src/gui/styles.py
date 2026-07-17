@@ -435,6 +435,17 @@ QToolTip {
     font-size: 11px;
     font-weight: 600;
 }
+QScrollArea#bookDetailsScroll {
+    border: none;
+    background: transparent;
+}
+#bookDetailsScrollContent {
+    background: transparent;
+}
+#bookDetailsActionBar {
+    background: transparent;
+    border-top: 1px solid #2d333f;
+}
 QPushButton#dangerBtn {
     background: transparent;
     border: 1px solid #3f3f46;
@@ -1687,6 +1698,17 @@ QToolTip {
     color: #555555;
     font-size: 11px;
     font-weight: 600;
+}
+QScrollArea#bookDetailsScroll {
+    border: none;
+    background: transparent;
+}
+#bookDetailsScrollContent {
+    background: transparent;
+}
+#bookDetailsActionBar {
+    background: transparent;
+    border-top: 1px solid #d4d4d8;
 }
 QPushButton#dangerBtn {
     background: transparent;
@@ -2941,6 +2963,17 @@ QToolTip {
     color: #705E4B;
     font-size: 11px;
     font-weight: 600;
+}
+QScrollArea#bookDetailsScroll {
+    border: none;
+    background: transparent;
+}
+#bookDetailsScrollContent {
+    background: transparent;
+}
+#bookDetailsActionBar {
+    background: transparent;
+    border-top: 1px solid #d4cbb8;
 }
 QPushButton#dangerBtn {
     background: transparent;

@@ -140,6 +140,10 @@ class LibraryView(QWidget):
         self._cards: list[BookCard] = []
         self._selected_ids: set[int] = set()
         self._is_search_result = False
+        # Última lista efetivamente renderizada pela grade (ajustes pós-teste,
+        # jul/2026): base do atalho de ``load_books`` que evita destruir e
+        # recriar todos os cards quando NADA mudou desde a última renderização.
+        self._rendered_books: list[dict] = []
         self._setup_ui()
 
     def _setup_ui(self):
@@ -465,6 +469,18 @@ class LibraryView(QWidget):
             ]
         self._all_books = books
         self._is_search_result = is_search
+        # Atalho (ajustes pós-teste, jul/2026): se a lista enriquecida é
+        # IDÊNTICA (por valor, mesma ordem) à última renderizada, não destrói
+        # nem recria os cards — a reconstrução completa custa ~1 ms/card
+        # (medido em tools/profile_transitions.py) e era paga à toa nas
+        # transições que voltam à biblioteca sem mudança de dados (ex.:
+        # estatísticas → biblioteca, assistente → biblioteca). Lista vazia
+        # nunca usa o atalho: o widget de estado vazio depende de
+        # ``is_search``, que pode ter mudado entre as chamadas.
+        if books and self._cards and books == self._rendered_books:
+            if self._selected_ids:
+                self._clear_selection()
+            return
         self._selected_ids.clear()
         self._refresh_grid(books)
 
@@ -495,43 +511,53 @@ class LibraryView(QWidget):
         self._continue_cards.clear()
 
     def _refresh_grid(self, books: list[dict]):
-        """Renderiza a grade com a lista fornecida."""
-        self._clear_grid()
+        """Renderiza a grade com a lista fornecida.
 
-        if not books:
-            if self._is_search_result:
-                self._empty_widget.hide()
-                self._search_empty_widget.show()
+        Ajustes pós-teste (jul/2026): a reconstrução acontece com os repaints
+        suspensos (``setUpdatesEnabled(False)``) — um único repaint ao final,
+        em vez de um por card adicionado/removido durante a transição.
+        """
+        self._rendered_books = books
+        self.setUpdatesEnabled(False)
+        try:
+            self._clear_grid()
+
+            if not books:
+                if self._is_search_result:
+                    self._empty_widget.hide()
+                    self._search_empty_widget.show()
+                else:
+                    self._search_empty_widget.hide()
+                    self._empty_widget.show()
+                self._count_label.setText("0 livros")
+                self._update_bulk_bar()
+                return
+
+            self._empty_widget.hide()
+            self._search_empty_widget.hide()
+            total = len(self._all_books)
+            shown = len(books)
+            if shown < total:
+                self._count_label.setText(
+                    f"{shown} de {total} livros (filtrado)"
+                )
             else:
-                self._search_empty_widget.hide()
-                self._empty_widget.show()
-            self._count_label.setText("0 livros")
+                self._count_label.setText(
+                    f"{total} {'livro' if total == 1 else 'livros'}"
+                )
+
+            cols = max(1, (self.width() - 48) // (CARD_WIDTH + GRID_SPACING))
+            for i, book in enumerate(books):
+                card = BookCard(book)
+                card.clicked.connect(self._on_card_clicked)
+                card.double_clicked.connect(self.book_open.emit)
+                card.context_action.connect(self._on_card_context_action)
+                self._cards.append(card)
+                self._grid_layout.addWidget(card, i // cols, i % cols)
+
             self._update_bulk_bar()
-            return
-
-        self._empty_widget.hide()
-        self._search_empty_widget.hide()
-        total = len(self._all_books)
-        shown = len(books)
-        if shown < total:
-            self._count_label.setText(
-                f"{shown} de {total} livros (filtrado)"
-            )
-        else:
-            self._count_label.setText(
-                f"{total} {'livro' if total == 1 else 'livros'}"
-            )
-
-        cols = max(1, (self.width() - 48) // (CARD_WIDTH + GRID_SPACING))
-        for i, book in enumerate(books):
-            card = BookCard(book)
-            card.clicked.connect(self._on_card_clicked)
-            card.double_clicked.connect(self.book_open.emit)
-            card.context_action.connect(self._on_card_context_action)
-            self._cards.append(card)
-            self._grid_layout.addWidget(card, i // cols, i % cols)
-
-        self._update_bulk_bar()
+        finally:
+            self.setUpdatesEnabled(True)
 
     # ── Seleção ───────────────────────────────────────────────────────────────
 

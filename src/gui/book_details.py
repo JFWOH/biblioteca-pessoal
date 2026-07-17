@@ -1,7 +1,7 @@
 """Painel de detalhes do livro."""
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton,
+    QWidget, QVBoxLayout, QLabel, QPushButton, QScrollArea,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QFont
@@ -46,7 +46,25 @@ class BookDetails(QWidget):
         self.hide()  # Oculto até selecionar um livro
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # ── Área informativa (rolável) ──────────────────────────────────────
+        # Capa + título + autor + estrelas + meta + tags + descrição + grafo
+        # cabem num QScrollArea: com "Livros relacionados" populado, o
+        # conteúdo pode exceder a altura do painel — sem scroll, o Qt
+        # comprimia tudo (botões sobrepostos/cortados, título sobre a capa).
+        self._info_scroll = QScrollArea()
+        self._info_scroll.setWidgetResizable(True)
+        self._info_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._info_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._info_scroll.setObjectName("bookDetailsScroll")
+        self._info_scroll.setMinimumHeight(120)
+
+        info_content = QWidget()
+        info_content.setObjectName("bookDetailsScrollContent")
+        layout = QVBoxLayout(info_content)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
@@ -122,8 +140,14 @@ class BookDetails(QWidget):
 
         layout.addStretch()
 
-        # Botões de ação
-        btn_layout = QVBoxLayout()
+        self._info_scroll.setWidget(info_content)
+        outer.addWidget(self._info_scroll, stretch=1)
+
+        # ── Botões de ação (fixos, sempre visíveis, fora do scroll) ─────────
+        btn_container = QWidget()
+        btn_container.setObjectName("bookDetailsActionBar")
+        btn_layout = QVBoxLayout(btn_container)
+        btn_layout.setContentsMargins(16, 8, 16, 16)
         btn_layout.setSpacing(8)
 
         # Emoji vai como ÍCONE (setIcon), nunca embutido no texto: no Windows o
@@ -178,7 +202,7 @@ class BookDetails(QWidget):
         self._del_btn.clicked.connect(lambda: self._emit_action("delete"))
         btn_layout.addWidget(self._del_btn)
 
-        layout.addLayout(btn_layout)
+        outer.addWidget(btn_container)
 
     def show_book(self, book: dict):
         """Exibe os detalhes de um livro."""

@@ -310,6 +310,7 @@ class MainWindow(QMainWindow):
 
         # ── Página do Assistente IA (RAG) ──
         self._rag_panel = RAGPanel()
+        self._rag_panel.set_config(self._config)  # persiste colapso da sidebar (rag.sidebar_collapsed)
         self._rag_panel.query_requested.connect(self._on_rag_query)
         self._rag_panel.index_requested.connect(self._on_rag_index_all)
         self._rag_panel.stop_requested.connect(self._on_rag_stop)
@@ -381,7 +382,12 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(qss)
-        self.setStyleSheet(qss)
+        # Ajustes pós-teste (jul/2026): NÃO reaplicar a folha na própria janela
+        # (o antigo self.setStyleSheet(qss) foi removido). A folha da
+        # QApplication já cobre a MainWindow e TODOS os descendentes; a cópia
+        # duplicada fazia cada widget resolver estilo contra duas folhas de
+        # ~1.3k linhas em cada polish — custo medido de +2–4% na reconstrução
+        # da grade a cada transição de seção (tools/profile_transitions.py).
         self._reader_view.set_theme(theme)
         self._sidebar.set_theme(theme)
         self._rag_panel.set_theme(theme)

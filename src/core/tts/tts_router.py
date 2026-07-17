@@ -291,9 +291,19 @@ class TTSRouter:
             logger.info("TTS_ROUTER: Using fallback provider '%s' (preferred was '%s')",
                         provider.name, profile.preferred_provider)
 
-        # Resolve voice ID dynamically if not explicitly specified or if fallback occurred
+        # Resolve voice ID dynamically if not explicitly specified or if fallback occurred.
+        # Também resolvemos quando o idioma do TEXTO (override do chamador — ex.:
+        # página em inglês detectada pelo AudioWorker) difere do idioma do PERFIL:
+        # senão uma página em inglês seria lida com a voz portuguesa CONFIGURADA
+        # (voice_id fixo do perfil). Só a voz troca — rate/volume/estilo do
+        # usuário são preservados.
         voice_id = profile.voice_id
-        if not voice_id or was_fallback:
+        language_mismatch = (
+            language is not None
+            and self._primary_language(effective_language)
+            != self._primary_language(profile.language)
+        )
+        if not voice_id or was_fallback or language_mismatch:
             voice_id = self._resolve_voice(provider, effective_language, profile.style)
 
         # Chunk the text for interruptible playback
@@ -599,6 +609,13 @@ class TTSRouter:
                 logger.warning("TTS_ROUTER: Error resuming active player: %s", e)
 
     # ── Helpers ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _primary_language(language: Optional[str]) -> str:
+        """Subtag primário de um código de idioma ('en-US'→'en', 'pt_BR'→'pt')."""
+        if not language:
+            return ""
+        return language.strip().lower().replace("_", "-").split("-")[0]
 
     def _resolve_voice(self, provider: BaseTTSProvider, language: str, style: str) -> Optional[str]:
         """Resolve a suitable voice ID for the given provider, language, and style.
