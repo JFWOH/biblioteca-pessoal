@@ -262,6 +262,29 @@ class SettingsDialog(QDialog):
         watch_layout.addLayout(watch_btns)
 
         layout.addWidget(watch_group)
+
+        # Metas de leitura (Tarefa 5.2 — estatísticas vivas)
+        goals_group = QGroupBox("Metas de Leitura")
+        goals_group.setObjectName("settingsGroup")
+        goals_layout = QVBoxLayout(goals_group)
+
+        goal_row = QHBoxLayout()
+        goal_row.addWidget(QLabel("Meta anual de livros lidos:"))
+        self._annual_goal_spin = QSpinBox()
+        self._annual_goal_spin.setRange(0, 999)
+        self._annual_goal_spin.setSpecialValueText("Sem meta")
+        self._annual_goal_spin.setFixedWidth(100)
+        self._annual_goal_spin.setObjectName("settingsNumericInput")
+        goal_row.addWidget(self._annual_goal_spin)
+        goal_row.addStretch()
+        goals_layout.addLayout(goal_row)
+
+        goal_hint = QLabel(
+            "0 = meta desativada. O progresso aparece no painel de Estatísticas.")
+        goal_hint.setWordWrap(True)
+        goals_layout.addWidget(goal_hint)
+
+        layout.addWidget(goals_group)
         layout.addStretch()
         return tab
 
@@ -658,6 +681,9 @@ class SettingsDialog(QDialog):
         for d in dirs:
             self._watch_list.addItem(d)
 
+        # Metas de leitura (Tarefa 5.2)
+        self._annual_goal_spin.setValue(self._config.get("stats.annual_goal_books", 0))
+
         # TTS — Narração (Fase 13)
         tts_cfg = self._config.tts_config
         book_cfg = tts_cfg.get("book_narrator", {})
@@ -728,6 +754,9 @@ class SettingsDialog(QDialog):
 
         dirs = [self._watch_list.item(i).text() for i in range(self._watch_list.count())]
         self._config.set("watched_directories", dirs)
+
+        # Metas de leitura (Tarefa 5.2)
+        self._config.set("stats.annual_goal_books", self._annual_goal_spin.value())
 
         # TTS — Narração (Fase 13)
         self._config.set("tts.book_narrator.preferred_provider", self._tts_book_provider.currentData())

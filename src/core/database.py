@@ -5,7 +5,7 @@ import logging
 import sqlite3
 import threading
 from pathlib import Path
-from datetime import datetime
+from datetime import date, datetime
 
 from src.core.fts_search import (
     SNIPPET_CLOSE,
@@ -13,6 +13,7 @@ from src.core.fts_search import (
     SNIPPET_OPEN,
     sanitize_fts_query,
 )
+from src.core.reading_stats import compute_reading_streak, compute_weekly_minutes
 from src.utils.constants import DB_PATH
 
 logger = logging.getLogger(__name__)
@@ -234,7 +235,16 @@ class LibraryDB:
                     UNIQUE(book_id, page_number),
                     FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS reading_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    book_id INTEGER NOT NULL,
+                    date TEXT NOT NULL,
+                    seconds INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(book_id, date),
+                    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+                );
                 CREATE INDEX IF NOT EXISTS idx_bookmarks_book ON bookmarks(book_id);
+                CREATE INDEX IF NOT EXISTS idx_reading_sessions_date ON reading_sessions(date);
                 CREATE INDEX IF NOT EXISTS idx_mentions_book ON concept_mentions(book_id);
                 CREATE INDEX IF NOT EXISTS idx_mentions_concept ON concept_mentions(concept_id);
                 CREATE INDEX IF NOT EXISTS idx_chat_turns_book ON chat_turns(book_id, id);
@@ -362,6 +372,8 @@ class LibraryDB:
             self.conn.execute("DELETE FROM dossier_synthesis_cache WHERE book_id = ?", (book_id,))
             self.conn.execute("DELETE FROM page_translation_cache WHERE book_id = ?", (book_id,))
             self.conn.execute("DELETE FROM bookmarks WHERE book_id = ?", (book_id,))
+            # Log diário de sessões de leitura (Tarefa 5.2: streak/minutos por semana).
+            self.conn.execute("DELETE FROM reading_sessions WHERE book_id = ?", (book_id,))
             # Conteúdo full-text (Tarefa 5.1): não tem FK para books (tabela
             # virtual FTS5), então o CASCADE não a alcança — apaga na mão.
             self.conn.execute("DELETE FROM book_content_fts WHERE book_id = ?", (book_id,))
@@ -386,10 +398,35 @@ class LibraryDB:
     # ── Progresso ──────────────────────────────────────────────────────
 
     def update_reading_progress(self, book_id: int, current_page: int,
-                                total_pages: int, time_spent: int = 0) -> None:
+                                total_pages: int, time_spent: int = 0,
+                                today: str | None = None) -> None:
+        """Grava o progresso de leitura do livro.
+
+        Retrocompatível: a assinatura antiga continua válida (``time_spent``
+        segue opcional, default 0) — nenhum chamador existente precisa mudar.
+
+        Tarefa 5.2 (estatísticas vivas), na MESMA transação:
+        - Quando ``time_spent > 0``, soma o tempo no log diário
+          ``reading_sessions`` (upsert por ``book_id``+``date``, UNIQUE),
+          base de ``get_reading_streak``/``get_weekly_reading_minutes``.
+        - Quando o progresso cruza 99.5% pela PRIMEIRA vez (transição de
+          status para 'read'), ``books.date_modified`` é atualizado — usado
+          como sinal de "concluído em" por ``get_books_read_in_year`` (ver
+          esse método para a limitação com dados históricos). Reaberturas
+          posteriores do mesmo livro já 'read' NÃO tocam ``date_modified``
+          de novo, para a data de conclusão ficar estável.
+
+        ``today`` (``"YYYY-MM-DD"``) é injetável para testes; por padrão usa
+        a data local do sistema.
+        """
         pct = (current_page / total_pages * 100) if total_pages > 0 else 0
         status = "read" if pct >= 99.5 else ("reading" if current_page > 0 else "unread")
+        day = today or date.today().isoformat()
         with self._write_lock:
+            prev = self.conn.execute(
+                "SELECT read_status FROM books WHERE id = ?", (book_id,)).fetchone()
+            prev_status = prev["read_status"] if prev else None
+
             self.conn.execute(
                 """INSERT INTO reading_progress (book_id, current_page, total_pages,
                    percentage, last_read, time_spent_seconds)
@@ -399,7 +436,23 @@ class LibraryDB:
                    percentage=excluded.percentage, last_read=CURRENT_TIMESTAMP,
                    time_spent_seconds=time_spent_seconds+excluded.time_spent_seconds""",
                 (book_id, current_page, total_pages, pct, time_spent))
-            self.conn.execute("UPDATE books SET read_status = ? WHERE id = ?", (status, book_id))
+
+            if status == "read" and prev_status != "read":
+                self.conn.execute(
+                    "UPDATE books SET read_status = ?, date_modified = CURRENT_TIMESTAMP "
+                    "WHERE id = ?", (status, book_id))
+            else:
+                self.conn.execute(
+                    "UPDATE books SET read_status = ? WHERE id = ?", (status, book_id))
+
+            if time_spent and time_spent > 0:
+                self.conn.execute(
+                    """INSERT INTO reading_sessions (book_id, date, seconds)
+                       VALUES (?, ?, ?)
+                       ON CONFLICT(book_id, date) DO UPDATE SET
+                       seconds = seconds + excluded.seconds""",
+                    (book_id, day, int(time_spent)))
+
             self.conn.commit()
 
     def get_reading_progress(self, book_id: int) -> dict | None:
@@ -1143,6 +1196,51 @@ class LibraryDB:
         return {"total": total, "read": read, "reading": reading, "unread": unread,
                 "favorites": favs, "formats": {r["file_format"]: r["c"] for r in fmt_rows},
                 "total_reading_time_seconds": time_s}
+
+    # ── Estatísticas vivas (Tarefa 5.2) ──────────────────────────────────
+    # Alimentadas pelo log diário ``reading_sessions`` (ver
+    # ``update_reading_progress``). A lógica pura (streak/série semanal)
+    # vive em ``src/core/reading_stats.py`` (ADR-006, testável sem DB).
+
+    def get_reading_streak(self, today: str | None = None) -> int:
+        """Dias consecutivos de leitura — ver a regra em
+        ``reading_stats.compute_reading_streak`` (não zera só por o dia de
+        hoje ainda não ter sessão registrada). Sem sessões → 0."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT date FROM reading_sessions WHERE seconds > 0").fetchall()
+        return compute_reading_streak({r["date"] for r in rows}, today)
+
+    def get_weekly_reading_minutes(self, weeks: int = 8,
+                                   today: str | None = None) -> list[dict]:
+        """Série semanal de minutos lidos (últimas ``weeks`` semanas ISO,
+        mais antiga → mais recente; a última é sempre a semana corrente).
+        Sem sessões → todas as semanas aparecem com ``minutes=0``."""
+        rows = self.conn.execute(
+            "SELECT date, seconds FROM reading_sessions").fetchall()
+        return compute_weekly_minutes([dict(r) for r in rows], weeks=weeks, today=today)
+
+    def get_books_read_in_year(self, year: int | None = None) -> int:
+        """Livros concluídos no ano informado (padrão: ano corrente).
+
+        Sinal usado: ``books.read_status='read'`` E o ano de
+        ``books.date_modified``. ``date_modified`` é atualizado para
+        ``CURRENT_TIMESTAMP`` em ``update_reading_progress`` especificamente
+        na transição para 'read' (1ª vez que cruza 99.5%) — não em
+        reaberturas seguintes do mesmo livro.
+
+        Limitação conhecida: livros que já estavam com ``read_status='read'``
+        ANTES desta mudança (dados históricos) não passaram por essa
+        transição rastreada — para eles ``date_modified`` reflete a última
+        edição de metadados (ou a criação do registro), não a conclusão real
+        da leitura. Aceito para um app local de usuário único: a contagem é
+        precisa para toda conclusão a partir de agora, e apenas
+        aproximada para o histórico anterior.
+        """
+        year_str = str(year) if year is not None else str(date.today().year)
+        r = self.conn.execute(
+            "SELECT COUNT(*) FROM books WHERE read_status='read' "
+            "AND strftime('%Y', date_modified) = ?", (year_str,)).fetchone()
+        return r[0]
 
     def get_unique_authors(self) -> list[str]:
         rows = self.conn.execute(

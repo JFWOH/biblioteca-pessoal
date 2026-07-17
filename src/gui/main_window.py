@@ -453,6 +453,14 @@ class MainWindow(QMainWindow):
         self._book_details.set_collection_mode(section.startswith("collection_"))
         if section == "stats":
             stats = self._db.get_statistics()
+            # Estatísticas vivas (Tarefa 5.2): streak, minutos/semana e,
+            # quando configurada, a meta anual de livros lidos.
+            stats["streak_days"] = self._db.get_reading_streak()
+            stats["weekly_minutes"] = self._db.get_weekly_reading_minutes()
+            annual_goal = self._config.get("stats.annual_goal_books", 0)
+            if annual_goal:
+                stats["annual_goal_books"] = annual_goal
+                stats["books_read_this_year"] = self._db.get_books_read_in_year()
             self._stats_panel.update_stats(stats)
             self._main_stack.setCurrentIndex(2)
         elif section in ("ai_assistant", "global_search"):
@@ -591,8 +599,11 @@ class MainWindow(QMainWindow):
         self._sidebar.show()
         self._load_library()
 
-    def _on_progress(self, book_id: int, page: int, total: int):
-        self._db.update_reading_progress(book_id, page, total)
+    def _on_progress(self, book_id: int, page: int, total: int, seconds: int = 0):
+        # Tarefa 5.2: 'seconds' (tempo real medido pelo ReaderView, já com
+        # teto anti-idle) alimenta o log diário reading_sessions via
+        # update_reading_progress — que só grava sessão quando seconds > 0.
+        self._db.update_reading_progress(book_id, page, total, time_spent=seconds)
         self._reader_view.set_annotation_page(page)
 
     def _on_rag_annotation_save(self, book_id: int, page: int, content: str):

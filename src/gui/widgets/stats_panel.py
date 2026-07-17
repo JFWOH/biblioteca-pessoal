@@ -2,8 +2,9 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QGridLayout,
+    QGridLayout, QProgressBar,
 )
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 
@@ -61,6 +62,84 @@ class StatCard(QFrame):
         self._value_label.setText(str(value))
 
 
+class WeeklyBarChart(QWidget):
+    """Gráfico de barras simples com os minutos lidos por semana (Tarefa 5.2).
+
+    Decisão de implementação: em vez de um ``QPainter`` customizado, cada
+    barra é um ``QFrame`` cuja altura em pixels é proporcional ao valor —
+    assim o gráfico herda o tema (escuro/claro/sépia) via QSS por objectName
+    (``#weeklyBarTrack``/``#weeklyBarFill``/``#weeklyBarLabel`` em
+    ``styles.py``), sem precisar hardcodar cores no Python nem redesenhar em
+    ``paintEvent`` a cada troca de tema. Sem dependência nova (sem
+    matplotlib) — só widgets Qt padrão.
+    """
+
+    BAR_AREA_HEIGHT = 72
+    BAR_WIDTH = 22
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(8)
+
+    def set_data(self, weeks: list[dict]) -> None:
+        """Redesenha as barras a partir de ``weeks`` (formato de
+        ``reading_stats.compute_weekly_minutes``: lista de dicts com
+        ``label`` e ``minutes``). Degradação graciosa: lista vazia (ou sem
+        nenhum minuto) mostra uma dica textual, nunca lança exceção.
+        """
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+
+        if not weeks:
+            hint = QLabel("Nenhuma sessão de leitura registrada ainda.")
+            hint.setObjectName("statsEmptyHint")
+            self._layout.addWidget(hint)
+            self._layout.addStretch()
+            return
+
+        max_minutes = max((int(w.get("minutes", 0) or 0) for w in weeks), default=0)
+
+        for week in weeks:
+            minutes = int(week.get("minutes", 0) or 0)
+
+            col_widget = QWidget()
+            col = QVBoxLayout(col_widget)
+            col.setContentsMargins(0, 0, 0, 0)
+            col.setSpacing(4)
+
+            track = QFrame()
+            track.setObjectName("weeklyBarTrack")
+            track.setFixedSize(self.BAR_WIDTH, self.BAR_AREA_HEIGHT)
+            track.setToolTip(f"{week.get('label', '')}: {minutes} min")
+            track_layout = QVBoxLayout(track)
+            track_layout.setContentsMargins(2, 2, 2, 2)
+            track_layout.setSpacing(0)
+            track_layout.addStretch()
+
+            if minutes > 0 and max_minutes > 0:
+                fill_h = max(3, int((self.BAR_AREA_HEIGHT - 4) * minutes / max_minutes))
+                fill = QFrame()
+                fill.setObjectName("weeklyBarFill")
+                fill.setFixedSize(self.BAR_WIDTH - 4, fill_h)
+                track_layout.addWidget(fill)
+
+            col.addWidget(track, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+            lbl = QLabel(week.get("label", ""))
+            lbl.setObjectName("weeklyBarLabel")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+            col.addWidget(lbl)
+
+            self._layout.addWidget(col_widget)
+
+        self._layout.addStretch()
+
+
 class StatsPanel(QWidget):
     """Painel de estatísticas da biblioteca."""
 
@@ -94,6 +173,8 @@ class StatsPanel(QWidget):
             ("unread", "0", "Não lidos", "📋", "#a78bfa"),
             ("favorites", "0", "Favoritos", "⭐", "#fbbf24"),
             ("time", "0h", "Tempo de leitura", "⏱️", "#f472b6"),
+            ("streak", "0", "Sequência", "🔥", "#fb923c"),
+            ("week", "0m", "Esta semana", "⏱️", "#22d3ee"),
         ]
 
         for i, (key, value, label, icon, color) in enumerate(cards_config):
@@ -112,6 +193,28 @@ class StatsPanel(QWidget):
             "color: #71717a; font-size: 12px; padding: 8px 0;"
         )
         layout.addWidget(self._formats_label)
+
+        # Progresso semanal (Tarefa 5.2) — últimas 8 semanas.
+        week_title = QLabel("📈 Minutos de leitura — últimas 8 semanas")
+        week_title.setObjectName("statsSectionTitle")
+        layout.addWidget(week_title)
+
+        self._weekly_chart = WeeklyBarChart()
+        layout.addWidget(self._weekly_chart)
+
+        # Meta anual (Tarefa 5.2) — só aparece quando configurada (> 0).
+        self._goal_title = QLabel("📚 Meta do ano")
+        self._goal_title.setObjectName("statsSectionTitle")
+        self._goal_bar = QProgressBar()
+        self._goal_bar.setTextVisible(False)
+        self._goal_caption = QLabel()
+        self._goal_caption.setObjectName("statsGoalCaption")
+        self._goal_title.hide()
+        self._goal_bar.hide()
+        self._goal_caption.hide()
+        layout.addWidget(self._goal_title)
+        layout.addWidget(self._goal_bar)
+        layout.addWidget(self._goal_caption)
 
         layout.addStretch()
 
@@ -146,3 +249,35 @@ class StatsPanel(QWidget):
             self._formats_label.setText(f"📄 Formatos: {' · '.join(fmt_parts)}")
         else:
             self._formats_label.setText("")
+
+        # Sequência de leitura (streak) — Tarefa 5.2. Ausência da chave (ex.:
+        # chamador antigo/teste com dict mínimo) degrada para 0.
+        if "streak" in self._cards:
+            self._cards["streak"].update_value(str(stats.get("streak_days", 0)))
+
+        # Série semanal + card "Esta semana" (última entrada da série).
+        weekly = stats.get("weekly_minutes") or []
+        week_minutes = int(weekly[-1].get("minutes", 0)) if weekly else 0
+        if "week" in self._cards:
+            if week_minutes >= 60:
+                self._cards["week"].update_value(
+                    f"{week_minutes // 60}h{week_minutes % 60:02d}")
+            else:
+                self._cards["week"].update_value(f"{week_minutes}m")
+        self._weekly_chart.set_data(weekly)
+
+        # Meta anual — só exibida quando configurada (> 0); degrada
+        # ocultando os widgets quando ausente/zero (sem meta definida).
+        annual_goal = int(stats.get("annual_goal_books") or 0)
+        if annual_goal > 0:
+            read_count = int(stats.get("books_read_this_year") or 0)
+            self._goal_bar.setRange(0, annual_goal)
+            self._goal_bar.setValue(min(read_count, annual_goal))
+            self._goal_caption.setText(f"{read_count} de {annual_goal} livros")
+            self._goal_title.show()
+            self._goal_bar.show()
+            self._goal_caption.show()
+        else:
+            self._goal_title.hide()
+            self._goal_bar.hide()
+            self._goal_caption.hide()

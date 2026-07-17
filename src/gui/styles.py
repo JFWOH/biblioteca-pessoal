@@ -357,6 +357,35 @@ QToolTip {
     letter-spacing: 1px;
 }
 
+/* ── Estatísticas vivas (Tarefa 5.2) ─────────────────── */
+#statsSectionTitle {
+    color: #e4e4e7;
+    font-size: 13px;
+    font-weight: 600;
+}
+#statsEmptyHint {
+    color: #71717a;
+    font-size: 12px;
+    font-style: italic;
+}
+#statsGoalCaption {
+    color: #a1a1aa;
+    font-size: 12px;
+}
+#weeklyBarTrack {
+    background-color: #2d333f;
+    border-radius: 4px;
+}
+#weeklyBarFill {
+    background: qlineargradient(x1:0, y1:1, x2:0, y2:0,
+        stop:0 #059669, stop:1 #34d399);
+    border-radius: 4px;
+}
+#weeklyBarLabel {
+    color: #71717a;
+    font-size: 10px;
+}
+
 /* ── Badges ────────────────────────────────────────── */
 #badge {
     background-color: #059669;
@@ -1579,6 +1608,35 @@ QToolTip {
     color: #555555;
     text-transform: uppercase;
     letter-spacing: 1px;
+}
+
+/* ── Estatísticas vivas (Tarefa 5.2) ─────────────────── */
+#statsSectionTitle {
+    color: #1A1A1A;
+    font-size: 13px;
+    font-weight: 600;
+}
+#statsEmptyHint {
+    color: #71717a;
+    font-size: 12px;
+    font-style: italic;
+}
+#statsGoalCaption {
+    color: #555555;
+    font-size: 12px;
+}
+#weeklyBarTrack {
+    background-color: #e4e4e7;
+    border-radius: 4px;
+}
+#weeklyBarFill {
+    background: qlineargradient(x1:0, y1:1, x2:0, y2:0,
+        stop:0 #059669, stop:1 #34d399);
+    border-radius: 4px;
+}
+#weeklyBarLabel {
+    color: #71717a;
+    font-size: 10px;
 }
 
 /* ── Badges ────────────────────────────────────────── */
@@ -2804,6 +2862,35 @@ QToolTip {
     color: #705E4B;
     text-transform: uppercase;
     letter-spacing: 1px;
+}
+
+/* ── Estatísticas vivas (Tarefa 5.2) ─────────────────── */
+#statsSectionTitle {
+    color: #433422;
+    font-size: 13px;
+    font-weight: 600;
+}
+#statsEmptyHint {
+    color: #705E4B;
+    font-size: 12px;
+    font-style: italic;
+}
+#statsGoalCaption {
+    color: #705E4B;
+    font-size: 12px;
+}
+#weeklyBarTrack {
+    background-color: #d4cbb8;
+    border-radius: 4px;
+}
+#weeklyBarFill {
+    background: qlineargradient(x1:0, y1:1, x2:0, y2:0,
+        stop:0 #059669, stop:1 #34d399);
+    border-radius: 4px;
+}
+#weeklyBarLabel {
+    color: #705E4B;
+    font-size: 10px;
 }
 
 /* ── Badges ────────────────────────────────────────── */
