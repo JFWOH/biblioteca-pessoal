@@ -1,12 +1,21 @@
 """Banco de dados SQLite com FTS5 para a biblioteca."""
 
 import hashlib
+import logging
 import sqlite3
 import threading
 from pathlib import Path
 from datetime import datetime
 
+from src.core.fts_search import (
+    SNIPPET_CLOSE,
+    SNIPPET_ELLIPSIS,
+    SNIPPET_OPEN,
+    sanitize_fts_query,
+)
 from src.utils.constants import DB_PATH
+
+logger = logging.getLogger(__name__)
 
 
 def page_translation_fingerprint(text: str) -> str:
@@ -248,6 +257,25 @@ class LibraryDB:
                 """)
             except sqlite3.OperationalError:
                 pass
+            # FTS5 do CONTEÚDO dos livros (Tarefa 5.1). Tabela FTS *normal*
+            # (não contentless, não external-content): armazena uma cópia do
+            # texto de cada página. Decisão consciente — só a tabela normal
+            # suporta ``snippet()`` (contentless não guarda o texto, então não
+            # gera trecho) e permite ``DELETE ... WHERE book_id`` direto para o
+            # replace/rebuild por livro. Custo: ~1x o tamanho do texto extraído
+            # em disco (comparável ao que ocr_pages/Chroma já guardam), aceitável
+            # numa biblioteca pessoal. ``remove_diacritics 2`` deixa a busca
+            # insensível a acento (essencial em PT: "café" casa "cafe").
+            # book_id/page_number são UNINDEXED: guardados e recuperáveis, mas
+            # fora do índice de tokens (não poluem o MATCH).
+            try:
+                self.conn.execute("""
+                    CREATE VIRTUAL TABLE book_content_fts USING fts5(
+                        book_id UNINDEXED, page_number UNINDEXED, content,
+                        tokenize='unicode61 remove_diacritics 2')
+                """)
+            except sqlite3.OperationalError:
+                pass
             for sql in [
                 """CREATE TRIGGER IF NOT EXISTS books_ai AFTER INSERT ON books BEGIN
                     INSERT INTO books_fts(rowid, title, author, description)
@@ -334,6 +362,9 @@ class LibraryDB:
             self.conn.execute("DELETE FROM dossier_synthesis_cache WHERE book_id = ?", (book_id,))
             self.conn.execute("DELETE FROM page_translation_cache WHERE book_id = ?", (book_id,))
             self.conn.execute("DELETE FROM bookmarks WHERE book_id = ?", (book_id,))
+            # Conteúdo full-text (Tarefa 5.1): não tem FK para books (tabela
+            # virtual FTS5), então o CASCADE não a alcança — apaga na mão.
+            self.conn.execute("DELETE FROM book_content_fts WHERE book_id = ?", (book_id,))
 
             self.conn.execute("DELETE FROM books WHERE id = ?", (book_id,))
             self.conn.commit()
@@ -964,6 +995,114 @@ class LibraryDB:
             """SELECT b.* FROM books b JOIN books_fts fts ON b.id=fts.rowid
                WHERE books_fts MATCH ? ORDER BY rank""", (query,)).fetchall()
         return [dict(r) for r in rows]
+
+    # ── Busca full-text no CONTEÚDO dos livros (FTS5 — Tarefa 5.1) ──────
+    # Alimentado pelo indexador (DocumentIndexerService) na MESMA passada de
+    # extração da indexação RAG, e por backfill em ocioso para livros antigos.
+    # Toda a lógica de sanitização/marcadores vive em src/core/fts_search.py.
+
+    def fts_index_book(self, book_id: int, pages) -> int:
+        """(Re)indexa o conteúdo de um livro no FTS, SUBSTITUINDO o anterior.
+
+        ``pages`` é um iterável de ``(page_number, content)`` (page_number
+        0-based, consistente com o metadado do Chroma). Páginas vazias são
+        puladas. Grava em lotes (200 páginas por commit) para não segurar uma
+        transação enorme em livros longos. Devolve o nº de páginas indexadas.
+        ADR-005: se o FTS5 estiver indisponível, vira no-op silencioso.
+        """
+        inserted = 0
+        with self._write_lock:
+            try:
+                self.conn.execute(
+                    "DELETE FROM book_content_fts WHERE book_id = ?", (book_id,))
+                batch: list[tuple] = []
+                for page_number, content in pages:
+                    text = (content or "").strip()
+                    if not text:
+                        continue
+                    batch.append((book_id, int(page_number), text))
+                    if len(batch) >= 200:
+                        self.conn.executemany(
+                            "INSERT INTO book_content_fts (book_id, page_number, content) "
+                            "VALUES (?,?,?)", batch)
+                        self.conn.commit()
+                        inserted += len(batch)
+                        batch = []
+                if batch:
+                    self.conn.executemany(
+                        "INSERT INTO book_content_fts (book_id, page_number, content) "
+                        "VALUES (?,?,?)", batch)
+                    inserted += len(batch)
+                self.conn.commit()
+            except sqlite3.OperationalError as exc:
+                logger.warning(
+                    "FTS de conteúdo indisponível (book_id=%s): %s", book_id, exc)
+        return inserted
+
+    def fts_remove_book(self, book_id: int) -> None:
+        """Remove todo o conteúdo indexado de um livro do FTS."""
+        with self._write_lock:
+            try:
+                self.conn.execute(
+                    "DELETE FROM book_content_fts WHERE book_id = ?", (book_id,))
+                self.conn.commit()
+            except sqlite3.OperationalError:
+                pass
+
+    def fts_search(self, query: str, limit: int = 50) -> list[dict]:
+        """Busca no conteúdo indexado. Ordena por relevância (bm25, menor=melhor).
+
+        Devolve dicts com: ``book_id``, ``page_number`` (0-based), ``snippet``
+        (trecho com os termos entre os marcadores de destaque) e ``rank``.
+        ADR-005: query vazia/malformada → lista vazia, nunca exceção.
+        """
+        match = sanitize_fts_query(query)
+        if not match:
+            return []
+        try:
+            rows = self.conn.execute(
+                """SELECT book_id, page_number,
+                          snippet(book_content_fts, 2, ?, ?, ?, 12) AS snippet,
+                          bm25(book_content_fts) AS rank
+                   FROM book_content_fts
+                   WHERE book_content_fts MATCH ?
+                   ORDER BY rank
+                   LIMIT ?""",
+                (SNIPPET_OPEN, SNIPPET_CLOSE, SNIPPET_ELLIPSIS, match, int(limit))
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [dict(r) for r in rows]
+
+    def fts_is_indexed(self, book_id: int) -> bool:
+        """True se o livro já tem PELO MENOS uma página no FTS de conteúdo."""
+        try:
+            r = self.conn.execute(
+                "SELECT 1 FROM book_content_fts WHERE book_id = ? LIMIT 1",
+                (book_id,)).fetchone()
+        except sqlite3.OperationalError:
+            return False
+        return r is not None
+
+    def fts_stats(self) -> dict:
+        """Resumo do índice de conteúdo: nº de páginas e de livros cobertos."""
+        try:
+            pages = self.conn.execute(
+                "SELECT COUNT(*) FROM book_content_fts").fetchone()[0]
+            books = self.conn.execute(
+                "SELECT COUNT(DISTINCT book_id) FROM book_content_fts").fetchone()[0]
+        except sqlite3.OperationalError:
+            return {"pages": 0, "books": 0}
+        return {"pages": pages, "books": books}
+
+    def fts_pending_count(self) -> int:
+        """Quantos livros ainda NÃO têm conteúdo no FTS (para o rodapé da busca)."""
+        try:
+            return self.conn.execute(
+                "SELECT COUNT(*) FROM books WHERE id NOT IN "
+                "(SELECT book_id FROM book_content_fts)").fetchone()[0]
+        except sqlite3.OperationalError:
+            return 0
 
     def filter_books(self, format=None, status=None, min_rating=None,
                      author=None) -> list[dict]:

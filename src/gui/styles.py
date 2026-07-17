@@ -199,6 +199,32 @@ QMenu#bookCardContextMenu::separator { height: 1px; background: #2d333f; margin:
     background-color: #20242d;
 }
 
+/* ── Busca no conteúdo (Tarefa 5.1) ─────────────────── */
+QCheckBox#contentToggle { color: #cbd5e1; spacing: 6px; padding: 4px 6px; }
+QCheckBox#contentToggle::indicator {
+    width: 16px; height: 16px; border: 1px solid #2d333f;
+    border-radius: 4px; background-color: #161920;
+}
+QCheckBox#contentToggle::indicator:checked {
+    background-color: #10b981; border-color: #10b981;
+}
+#contentSearchResults { background-color: #0f1115; }
+#contentSearchTitle { font-size: 16px; font-weight: 600; color: #e5e7eb; }
+#contentSearchCount { color: #94a3b8; font-size: 12px; }
+QPushButton#contentSearchBack {
+    background-color: #2d333f; color: #e5e7eb; border: 1px solid #20242d;
+    border-radius: 8px; padding: 6px 14px; font-weight: 600;
+}
+QPushButton#contentSearchBack:hover { background-color: #3a424f; }
+#contentResultRow {
+    background-color: #161920; border: 1px solid #2d333f; border-radius: 10px;
+}
+#contentResultRow:hover { border-color: #10b981; background-color: #1b2029; }
+#contentResultBook { color: #e5e7eb; font-weight: 600; font-size: 13px; }
+#contentResultSnippet { color: #cbd5e1; font-size: 12px; }
+#contentSearchEmpty { color: #94a3b8; font-size: 14px; padding: 40px; }
+#contentSearchFooter { color: #94a3b8; font-size: 12px; padding-top: 4px; }
+
 /* ── Botões Principais ─────────────────────────────── */
 QPushButton#primaryBtn {
     background-color: #059669;
@@ -1396,6 +1422,32 @@ QMenu#bookCardContextMenu::separator { height: 1px; background: #e4e4e7; margin:
     border-color: #059669;
     background-color: #ffffff;
 }
+
+/* ── Busca no conteúdo (Tarefa 5.1) ─────────────────── */
+QCheckBox#contentToggle { color: #52525b; spacing: 6px; padding: 4px 6px; }
+QCheckBox#contentToggle::indicator {
+    width: 16px; height: 16px; border: 1px solid #d4d4d8;
+    border-radius: 4px; background-color: #ffffff;
+}
+QCheckBox#contentToggle::indicator:checked {
+    background-color: #059669; border-color: #059669;
+}
+#contentSearchResults { background-color: #f4f4f5; }
+#contentSearchTitle { font-size: 16px; font-weight: 600; color: #1A1A1A; }
+#contentSearchCount { color: #6b7280; font-size: 12px; }
+QPushButton#contentSearchBack {
+    background-color: #e4e4e7; color: #1A1A1A; border: 1px solid #d4d4d8;
+    border-radius: 8px; padding: 6px 14px; font-weight: 600;
+}
+QPushButton#contentSearchBack:hover { background-color: #d4d4d8; }
+#contentResultRow {
+    background-color: #ffffff; border: 1px solid #e4e4e7; border-radius: 10px;
+}
+#contentResultRow:hover { border-color: #059669; background-color: #f0fdf4; }
+#contentResultBook { color: #1A1A1A; font-weight: 600; font-size: 13px; }
+#contentResultSnippet { color: #3f3f46; font-size: 12px; }
+#contentSearchEmpty { color: #6b7280; font-size: 14px; padding: 40px; }
+#contentSearchFooter { color: #6b7280; font-size: 12px; padding-top: 4px; }
 
 /* ── Botões Principais ─────────────────────────────── */
 QPushButton#primaryBtn {
@@ -2595,6 +2647,32 @@ QMenu#bookCardContextMenu::separator { height: 1px; background: #d4cbb8; margin:
     border-color: #059669;
     background-color: #EADFCA;
 }
+
+/* ── Busca no conteúdo (Tarefa 5.1) ─────────────────── */
+QCheckBox#contentToggle { color: #5c4b33; spacing: 6px; padding: 4px 6px; }
+QCheckBox#contentToggle::indicator {
+    width: 16px; height: 16px; border: 1px solid #d4cbb8;
+    border-radius: 4px; background-color: #EADFCA;
+}
+QCheckBox#contentToggle::indicator:checked {
+    background-color: #059669; border-color: #059669;
+}
+#contentSearchResults { background-color: #F4ECD8; }
+#contentSearchTitle { font-size: 16px; font-weight: 600; color: #433422; }
+#contentSearchCount { color: #6b5d49; font-size: 12px; }
+QPushButton#contentSearchBack {
+    background-color: #EADFCA; color: #433422; border: 1px solid #d4cbb8;
+    border-radius: 8px; padding: 6px 14px; font-weight: 600;
+}
+QPushButton#contentSearchBack:hover { background-color: #e0d4bb; }
+#contentResultRow {
+    background-color: #EADFCA; border: 1px solid #d4cbb8; border-radius: 10px;
+}
+#contentResultRow:hover { border-color: #059669; background-color: #efe6d0; }
+#contentResultBook { color: #433422; font-weight: 600; font-size: 13px; }
+#contentResultSnippet { color: #5c4b33; font-size: 12px; }
+#contentSearchEmpty { color: #6b5d49; font-size: 14px; padding: 40px; }
+#contentSearchFooter { color: #6b5d49; font-size: 12px; padding-top: 4px; }
 
 /* ── Botões Principais ─────────────────────────────── */
 QPushButton#primaryBtn {

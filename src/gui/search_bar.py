@@ -1,6 +1,6 @@
 """Barra de busca com filtros."""
 
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QComboBox
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QComboBox, QCheckBox
 from PyQt6.QtCore import pyqtSignal, QTimer
 
 
@@ -43,17 +43,33 @@ class SearchBar(QWidget):
         self._format_filter.setObjectName("formatFilter")
         layout.addWidget(self._format_filter)
 
+        # Modo "buscar no conteúdo" (Tarefa 5.1): quando marcado, a busca vai ao
+        # texto full-text das páginas (FTS5) em vez de título/autor/tema. Simples
+        # e descobrível — um toggle ao lado do filtro de formato.
+        self._content_toggle = QCheckBox("No conteúdo")
+        self._content_toggle.setObjectName("contentToggle")
+        self._content_toggle.setToolTip(
+            "Buscar dentro do texto das páginas dos livros (não só título/autor)")
+        self._content_toggle.toggled.connect(lambda: self._debounce_timer.start())
+        layout.addWidget(self._content_toggle)
+
     def _emit_search(self):
         query = self._input.text().strip()
         filters = {}
         fmt = self._format_filter.currentData()
         if fmt:
             filters["format"] = fmt
+        if self._content_toggle.isChecked():
+            filters["content"] = True
         self.search_changed.emit(query, filters)
+
+    def is_content_mode(self) -> bool:
+        return self._content_toggle.isChecked()
 
     def clear(self):
         self._input.clear()
         self._format_filter.setCurrentIndex(0)
+        self._content_toggle.setChecked(False)
 
     def set_focus(self):
         self._input.setFocus()
