@@ -204,3 +204,76 @@ def test_rag_panel_unresolved_citation_not_added(qtbot):
     keys = [panel._sources_list.item(i).data(Qt.ItemDataRole.UserRole)
             for i in range(panel._sources_list.count())]
     assert all(k is None for k in keys) or len(keys) == 0
+
+
+# ── Citações clicáveis NO CORPO da resposta (débito 3.1) ───────────────────
+
+def test_rag_panel_body_citation_becomes_anchor(qtbot):
+    """Resposta com citação resolvida → âncora no corpo + mapa índice→alvo."""
+    from src.gui.widgets.rag_panel import RAGPanel
+
+    panel = RAGPanel()
+    qtbot.addWidget(panel)
+    panel.set_books_provider(lambda: [{"id": 5, "title": "Dom Casmurro"}])
+    panel.on_sources_found([])
+    answer = "Como em [Dom Casmurro, p. 12], vemos que..."
+    panel.on_token_received(answer)  # streaming: corpo é preenchido token a token
+    panel.on_answer_complete(answer)
+
+    assert 'href="citation:0"' in panel._response_area.document().toHtml()
+    # p. 12 (1-based) → página 11 (0-based)
+    assert panel._citation_targets.get(0) == (5, 11)
+    # texto continua legível (âncora usa o próprio trecho como rótulo)
+    assert "[Dom Casmurro, p. 12]" in panel._response_area.toPlainText()
+
+
+def test_rag_panel_body_anchor_click_emits_source_clicked(qtbot):
+    """Clique simulado numa âncora citation:N → source_clicked(book_id, page0)."""
+    from PyQt6.QtCore import QUrl
+
+    from src.gui.widgets.rag_panel import RAGPanel
+
+    panel = RAGPanel()
+    qtbot.addWidget(panel)
+    panel.set_books_provider(lambda: [{"id": 5, "title": "Dom Casmurro"}])
+    panel.on_sources_found([])
+    answer = "Veja [Dom Casmurro, p. 12]."
+    panel.on_token_received(answer)
+    panel.on_answer_complete(answer)
+
+    got = []
+    panel.source_clicked.connect(lambda b, p: got.append((b, p)))
+    panel._on_citation_anchor_clicked(QUrl("citation:0"))
+    assert got == [(5, 11)]
+
+
+def test_rag_panel_body_unresolved_citation_no_anchor(qtbot):
+    """Citação não resolvida → sem âncora e sem alvo (texto plano; ADR-005)."""
+    from src.gui.widgets.rag_panel import RAGPanel
+
+    panel = RAGPanel()
+    qtbot.addWidget(panel)
+    panel.set_books_provider(lambda: [{"id": 5, "title": "Dom Casmurro"}])
+    panel.on_sources_found([])
+    answer = "Veja [Livro Que Nao Existe, p. 3]."
+    panel.on_token_received(answer)
+    panel.on_answer_complete(answer)
+
+    assert panel._citation_targets == {}
+    assert 'href="citation:' not in panel._response_area.document().toHtml()
+
+
+def test_rag_panel_body_unknown_anchor_is_noop(qtbot):
+    """Âncora sem alvo no mapa não emite nada nem quebra (degradação graciosa)."""
+    from PyQt6.QtCore import QUrl
+
+    from src.gui.widgets.rag_panel import RAGPanel
+
+    panel = RAGPanel()
+    qtbot.addWidget(panel)
+
+    got = []
+    panel.source_clicked.connect(lambda b, p: got.append((b, p)))
+    panel._on_citation_anchor_clicked(QUrl("citation:99"))
+    panel._on_citation_anchor_clicked(QUrl("http://example.com"))
+    assert got == []
