@@ -6,15 +6,18 @@ fontes bibliográficas e controle de indexação — tudo rodando localmente.
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from PyQt6.QtCore import Qt, QEvent, pyqtSignal
-from PyQt6.QtGui import QFont, QTextCursor
+from PyQt6.QtGui import QColor, QFont, QTextCursor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTextBrowser, QListWidget, QListWidgetItem,
     QProgressBar, QFrame, QSplitter, QComboBox,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RAGPanel(QWidget):
@@ -57,10 +60,6 @@ class RAGPanel(QWidget):
         super().__init__(parent)
         self._is_generating = False
         self._full_answer = ""
-        # Débito 3.1: mapa índice-da-citação → (book_id, page0) do corpo da
-        # resposta, preenchido por _linkify_citations_in_body e consumido pelo
-        # clique da âncora. Zerado a cada nova pergunta (_begin_new_query).
-        self._citation_targets: dict[int, tuple[int, int]] = {}
         self._reading_context = None
         self._is_standalone = False
         # Config (injetada pelo MainWindow via set_config): persiste a
@@ -612,7 +611,10 @@ class RAGPanel(QWidget):
     def set_theme(self, theme: str) -> None:
         """Aplica folha de estilos (QSS) correspondente ao tema selecionado (Claro, Sépia ou Escuro)."""
         self._current_theme = theme
-        
+        # Âncoras de citação já renderizadas têm cor embutida no HTML — o QSS
+        # abaixo não as alcança; recolore os fragments para o tema novo.
+        self._recolor_citation_anchors()
+
         if theme == "light":
             # Cores do tema Claro
             bg_main = "#FFFFFF"
@@ -992,13 +994,13 @@ class RAGPanel(QWidget):
         self._full_answer = full_answer
         self._set_generating(False)
 
-        # Fontes clicáveis (Tarefa 3.1): enriquece a lista com as citações
-        # [Título, p. X] presentes na resposta, resolvidas para book_id.
-        self._augment_sources_with_citations(full_answer)
-
-        # Débito 3.1: linkifica as citações [Título, p. X] no CORPO da resposta
-        # (após o streaming — nunca durante), tornando-as clicáveis.
-        self._linkify_citations_in_body()
+        # Fontes clicáveis (Tarefa 3.1) + citações clicáveis no corpo (débito
+        # 3.1): a lista de livros é buscada UMA vez e a resolução fuzzy de cada
+        # citação é compartilhada entre os dois consumidores — o fuzzy-match é
+        # O(citações × livros) e rodaria dobrado na thread da GUI.
+        books = self._fetch_books_for_citations()
+        resolved = self._augment_sources_with_citations(full_answer, books)
+        self._linkify_citations_in_body(books, resolved)
 
         # Human-in-the-loop: Mostrar botão de salvar anotação se houver contexto de livro
         is_global = getattr(self, "_is_standalone", False)
@@ -1235,27 +1237,40 @@ class RAGPanel(QWidget):
         item.setData(Qt.ItemDataRole.UserRole, (int(book_id), page0))
         item.setToolTip("Clique para abrir na fonte · " + (item.toolTip() or ""))
 
-    def _augment_sources_with_citations(self, answer: str) -> None:
+    def _fetch_books_for_citations(self) -> list:
+        """Busca a lista de livros UMA vez por resposta (lista de fontes +
+        linkificação do corpo consomem a mesma). Falha do provider → lista
+        vazia COM log (ADR-005: degrada sem quebrar; AGENTS.md: exceção
+        nunca é engolida em silêncio)."""
+        if self._books_provider is None:
+            return []
+        try:
+            return self._books_provider() or []
+        except Exception:
+            logger.warning(
+                "Falha ao obter livros para resolver citações da resposta",
+                exc_info=True)
+            return []
+
+    def _augment_sources_with_citations(
+            self, answer: str, books: list) -> dict[str, tuple[int, int] | None]:
         """Acrescenta à lista de fontes as citações ``[Título, p. X]`` da resposta.
 
         Resolve o título → book_id via fuzzy match (``resolve_citation``) contra os
         livros do banco. Só adiciona pares ``(book_id, page)`` ainda não presentes
         (dedup com os trechos recuperados). Título não resolvido → ignorado
         (degradação graciosa, ADR-005).
+
+        Retorna a memoização ``raw → (book_id, page0) | None`` para a
+        linkificação do corpo reaproveitar sem repetir o fuzzy-match.
         """
-        if not answer or not answer.strip() or self._books_provider is None:
-            return
+        if not answer or not answer.strip():
+            return {}
         from src.core.rag.source_citations import parse_citations, resolve_citation
 
         citations = parse_citations(answer)
-        if not citations:
-            return
-        try:
-            books = self._books_provider() or []
-        except Exception:
-            books = []
-        if not books:
-            return
+        if not citations or not books:
+            return {}
 
         existing: set[tuple[int, int]] = set()
         for i in range(self._sources_list.count()):
@@ -1263,19 +1278,23 @@ class RAGPanel(QWidget):
             if isinstance(data, tuple):
                 existing.add(data)
 
+        resolved: dict[str, tuple[int, int] | None] = {}
         for cit in citations:
-            book_id, page1 = resolve_citation(cit, books)
-            if book_id is None:
-                continue
-            page0 = max(0, int(page1) - 1)  # citação é 1-based; leitor é 0-based
-            key = (int(book_id), page0)
-            if key in existing:
+            if cit.raw not in resolved:
+                book_id, page1 = resolve_citation(cit, books)
+                # citação é 1-based; leitor é 0-based
+                resolved[cit.raw] = (
+                    None if book_id is None
+                    else (int(book_id), max(0, int(page1) - 1)))
+            key = resolved[cit.raw]
+            if key is None or key in existing:
                 continue
             existing.add(key)
-            item = QListWidgetItem(f"🔖 {cit.title} · p. {page1}")
+            item = QListWidgetItem(f"🔖 {cit.title} · p. {cit.page}")
             item.setData(Qt.ItemDataRole.UserRole, key)
             item.setToolTip("Citação da resposta · clique para abrir")
             self._sources_list.addItem(item)
+        return resolved
 
     def _on_source_item_clicked(self, item) -> None:
         """Emite ``source_clicked`` se o item carregar ``(book_id, page0)``."""
@@ -1292,82 +1311,108 @@ class RAGPanel(QWidget):
             return "#0f766e"
         return "#34d399"  # dark / fallback
 
-    def _linkify_citations_in_body(self) -> None:
+    def _linkify_citations_in_body(
+            self, books: list,
+            resolved: dict[str, tuple[int, int] | None]) -> None:
         """Torna as citações ``[Título, p. X]`` do corpo da resposta clicáveis.
 
         Chamado APÓS o fim do streaming (nunca durante — o cursor de tokens não
-        pode ser perturbado). Reutiliza ``parse_citations``/``resolve_citation``
-        (core puro, ADR-006); cada citação resolvida vira uma âncora
-        ``href="citation:N"`` cujo N indexa ``_citation_targets`` →
-        ``(book_id, page0)``. Citações não resolvidas continuam texto plano
-        (degradação graciosa, ADR-005). Preserva a posição de scroll.
+        pode ser perturbado). Cada citação resolvida vira uma âncora
+        AUTO-CONTIDA ``href="citation:{book_id}:{page0}"`` — o alvo vive no
+        próprio documento, sem mapa paralelo para sincronizar. As posições vêm
+        de ``Citation.start/end`` (offsets do texto exibido — o corpo é
+        construído só com insertPlainText, então offset == posição do
+        documento); a substituição em ordem REVERSA preserva os offsets
+        anteriores, num único edit block (um só layout pass). Citações não
+        resolvidas continuam texto plano (ADR-005). Preserva o scroll.
+
+        ``resolved``: memoização ``raw → alvo`` vinda da lista de fontes;
+        citações que só existem no documento resolvem aqui.
         """
-        self._citation_targets = {}
-        if self._books_provider is None:
-            return
         text = self._response_area.toPlainText()
-        if not text.strip():
+        if not text.strip() or not books:
             return
         from src.core.rag.source_citations import parse_citations, resolve_citation
 
         citations = parse_citations(text)
         if not citations:
             return
-        try:
-            books = self._books_provider() or []
-        except Exception:
-            return
-        if not books:
-            return
 
         import html as html_lib
-
-        from PyQt6.QtGui import QTextCursor
 
         color = self._citation_link_color()
         doc = self._response_area.document()
         sb = self._response_area.verticalScrollBar()
         scroll_pos = sb.value()
 
-        # Percorre as citações na ordem do documento; para cada uma, localiza o
-        # trecho cru e (se resolvida) o substitui por uma âncora. O cursor de
-        # busca avança sempre, para alinhar ocorrências duplicadas.
-        search = QTextCursor(doc)
-        for idx, cit in enumerate(citations):
-            found = doc.find(cit.raw, search)
-            if found.isNull():
-                continue
-            book_id, page1 = resolve_citation(cit, books)
-            if book_id is None:
-                search = found  # não resolvida: segue como texto plano
-                continue
-            page0 = max(0, int(page1) - 1)  # citação é 1-based; leitor é 0-based
-            self._citation_targets[idx] = (int(book_id), page0)
-            anchor = (
-                f'<a href="citation:{idx}" '
-                f'style="color:{color}; text-decoration:underline;">'
-                f'{html_lib.escape(cit.raw)}</a>'
-            )
-            found.insertHtml(anchor)  # substitui o trecho selecionado
-            search = found
+        cursor = QTextCursor(doc)
+        cursor.beginEditBlock()
+        try:
+            for cit in reversed(citations):
+                if cit.raw in resolved:
+                    target = resolved[cit.raw]
+                else:
+                    book_id, page1 = resolve_citation(cit, books)
+                    # citação é 1-based; leitor é 0-based
+                    target = (None if book_id is None
+                              else (int(book_id), max(0, int(page1) - 1)))
+                if target is None:
+                    continue  # não resolvida: segue como texto plano
+                anchor = (
+                    f'<a href="citation:{target[0]}:{target[1]}" '
+                    f'style="color:{color}; text-decoration:underline;">'
+                    f'{html_lib.escape(cit.raw)}</a>'
+                )
+                cursor.setPosition(cit.start)
+                cursor.setPosition(cit.end, QTextCursor.MoveMode.KeepAnchor)
+                cursor.insertHtml(anchor)  # substitui o trecho selecionado
+        finally:
+            cursor.endEditBlock()
 
         sb.setValue(scroll_pos)
 
+    def _recolor_citation_anchors(self) -> None:
+        """Reaplica a cor do tema às âncoras de citação já renderizadas.
+
+        A cor nasce embutida no HTML da âncora (rich-text não obedece QSS de
+        widget); trocar de tema depois da resposta deixaria links do tema
+        antigo ilegíveis sobre o fundo novo — este passe recolore os
+        fragments âncora ``citation:``.
+        """
+        area = getattr(self, "_response_area", None)
+        if area is None:  # set_theme pode rodar antes da UI montar
+            return
+        doc = area.document()
+        color = QColor(self._citation_link_color())
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                fmt = frag.charFormat()
+                if fmt.isAnchor() and fmt.anchorHref().startswith("citation:"):
+                    cursor = QTextCursor(doc)
+                    cursor.setPosition(frag.position())
+                    cursor.setPosition(frag.position() + frag.length(),
+                                       QTextCursor.MoveMode.KeepAnchor)
+                    fmt.setForeground(color)
+                    cursor.setCharFormat(fmt)
+                it += 1
+            block = block.next()
+
     def _on_citation_anchor_clicked(self, url) -> None:
-        """Trata o clique numa âncora ``citation:N`` do corpo e emite
+        """Clique numa âncora ``citation:{book_id}:{page0}`` do corpo → emite
         ``source_clicked(book_id, page0)`` — o MESMO sinal das fontes.
 
-        Âncora desconhecida/sem alvo → no-op (degradação graciosa, ADR-005)."""
-        ref = url.toString() if url is not None else ""
+        Âncora malformada → no-op (degradação graciosa, ADR-005)."""
+        ref = url.toString()
         if not ref.startswith("citation:"):
             return
         try:
-            idx = int(ref.split(":", 1)[1])
-        except (ValueError, IndexError):
+            _scheme, book_id, page0 = ref.split(":")
+            self.source_clicked.emit(int(book_id), int(page0))
+        except ValueError:
             return
-        target = self._citation_targets.get(idx)
-        if target is not None:
-            self.source_clicked.emit(int(target[0]), int(target[1]))
 
     def on_progress_updated(self, current: int, total: int, message: str) -> None:
         """Atualiza o progresso da indexação."""
@@ -1405,7 +1450,6 @@ class RAGPanel(QWidget):
         pelo reenvio com motivo (3.8, _on_retry_with_reason_clicked) — as
         duas entradas de uma nova rodada de consulta."""
         self._response_area.clear()
-        self._citation_targets = {}  # 3.1: novo turno zera as âncoras de citação
         self._sources_list.clear()
         self._set_generating(True)
         self._save_note_btn.setVisible(False)
