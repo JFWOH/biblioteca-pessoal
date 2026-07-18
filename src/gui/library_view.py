@@ -12,10 +12,10 @@ from src.gui.styles import emoji_icon
 from src.utils.constants import CARD_WIDTH, GRID_SPACING
 
 # ── Dimensões do card compacto da prateleira "Continuar lendo" ─────────────
-CONTINUE_CARD_W = 132
-CONTINUE_CARD_H = 232  # soma exata do conteúdo (capa+título+barra+meta+margens)
-CONTINUE_THUMB_W = 112
-CONTINUE_THUMB_H = 150
+CONTINUE_CARD_W = 120
+CONTINUE_CARD_H = 206  # soma exata do conteúdo (capa+título+barra+meta+margens)
+CONTINUE_THUMB_W = 100
+CONTINUE_THUMB_H = 128
 
 
 class _ContinueReadingCard(QWidget):
@@ -66,7 +66,7 @@ class _ContinueReadingCard(QWidget):
         title = QLabel(book.get("title", "Sem título"))
         title.setObjectName("continueCardTitle")
         title.setWordWrap(True)
-        title.setMaximumHeight(32)
+        title.setMaximumHeight(28)
         title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         layout.addWidget(title)
 
@@ -276,7 +276,11 @@ class LibraryView(QWidget):
         self._continue_layout = QHBoxLayout(self._continue_container)
         self._continue_layout.setContentsMargins(0, 0, 0, 0)
         self._continue_layout.setSpacing(GRID_SPACING)
-        self._continue_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        # AlignTop: a folga do viewport (espaço da barra de rolagem) fica toda
+        # ABAIXO dos cards, colando-os no header — faixa visualmente menor.
+        self._continue_layout.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
         self._continue_scroll.setWidget(self._continue_container)
         cont_layout.addWidget(self._continue_scroll)
 
