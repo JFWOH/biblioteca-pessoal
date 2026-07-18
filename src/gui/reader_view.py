@@ -109,6 +109,19 @@ class ReaderView(QWidget):
         from src.core.audio.continuous_player import PreSynthesisCache
         self._presynth_cache = PreSynthesisCache()
         self._presynth_worker = None
+        # Parada ASSÍNCRONA da narração (perf/gui): virar página durante a
+        # narração ou trocar de narração ("Ouvir original") não pode mais
+        # bloquear a GUI com wait(2000). O worker sinalizado para parar fica
+        # aqui, DRENANDO, até seu `finished` REAL chegar — só então é solto/
+        # deleteLater (nunca destruímos um QThread cuja thread do SO ainda vive
+        # — lição do PR #32/SIGABRT). Uma narração NOVA pedida enquanto o antigo
+        # drena é ENFILEIRADA (o TTSRouter é COMPARTILHADO e seu estado —
+        # _is_cancelled/_active_player/_active_provider — não tolera dois
+        # speak() simultâneos): ela só dispara no `finished` do último worker em
+        # drenagem, com um QTimer de segurança (nunca um wait bloqueante).
+        self._retiring_workers: list = []
+        self._pending_narration = None            # callable de lançamento adiado
+        self._pending_narration_timer = None      # watchdog de segurança
         self._resume_banner = None  # banner "retomar leitura" (tarefa 3.7)
         # Tarefa 5.2 — cronômetro de leitura por página: timestamp monotônico
         # de quando a página atual entrou em exibição (None = nada correndo)
@@ -1354,7 +1367,9 @@ class ReaderView(QWidget):
         # Tarefa 5.2: o tempo da última página lida é descarregado no
         # fechamento (senão a última página de cada sessão nunca contaria).
         self._flush_reading_time()
-        self._stop_audio_if_running()
+        # Teardown: espera (bloqueante, limitado) os workers de áudio — aqui é
+        # encerramento, não interação, então nenhum worker órfão pode sobreviver.
+        self._teardown_audio_workers()
         if getattr(self, "_typography_popover", None) is not None:
             self._typography_popover.hide()
         if self._reader and self._reader.is_open:
@@ -2352,27 +2367,27 @@ class ReaderView(QWidget):
         evita que uma tradução PT com termos técnicos EN seja lida com voz
         inglesa. ``None`` mantém a autodetecção confiante do worker.
         """
-        from src.gui.workers.audio_worker import AudioWorker
-        from src.core.tts.voice_profile import NarrationRole
-
         self._audio_stopped_by_user = False
         self._chain_continuous = chain_continuous
         self.narration_epoch += 1
-        self._audio_worker = AudioWorker(
-            text,
-            role=NarrationRole.BOOK_NARRATOR,
-            router=self._tts_router,
-            language=language,
-            parent=self,
-        )
 
-        self._audio_worker.playback_started.connect(self._on_audio_started)
-        self._audio_worker.playback_finished.connect(self._on_audio_finished)
-        self._audio_worker.error_occurred.connect(self._on_audio_error)
-        self._audio_worker.finished.connect(self._on_audio_worker_finished)
-        self._audio_worker.provider_changed.connect(self._on_audio_provider_changed)
+        def _do_launch() -> None:
+            from src.gui.workers.audio_worker import AudioWorker
+            from src.core.tts.voice_profile import NarrationRole
+            worker = AudioWorker(
+                text,
+                role=NarrationRole.BOOK_NARRATOR,
+                router=self._tts_router,
+                language=language,
+                parent=self,
+            )
+            self._connect_audio_worker(worker)
+            self._audio_worker = worker
+            worker.start()
 
-        self._audio_worker.start()
+        # Serializa o INÍCIO da nova narração se um worker antigo ainda drena
+        # (o TTSRouter compartilhado não tolera dois speak() simultâneos).
+        self._start_or_defer_narration(_do_launch)
 
     def narrate_text(self, text: str, chain_continuous: bool = False,
                      language: str | None = None) -> None:
@@ -2716,25 +2731,25 @@ class ReaderView(QWidget):
 
     def _play_prepared(self, segments) -> None:
         """Toca áudio JÁ sintetizado da próxima página (AudioWorker em prepared)."""
-        from src.gui.workers.audio_worker import AudioWorker
-        from src.core.tts.voice_profile import NarrationRole
-
         self._audio_stopped_by_user = False
         self._chain_continuous = True
         self.narration_epoch += 1
-        self._audio_worker = AudioWorker(
-            "",
-            role=NarrationRole.BOOK_NARRATOR,
-            router=self._tts_router,
-            prepared=segments,
-            parent=self,
-        )
-        self._audio_worker.playback_started.connect(self._on_audio_started)
-        self._audio_worker.playback_finished.connect(self._on_audio_finished)
-        self._audio_worker.error_occurred.connect(self._on_audio_error)
-        self._audio_worker.finished.connect(self._on_audio_worker_finished)
-        self._audio_worker.provider_changed.connect(self._on_audio_provider_changed)
-        self._audio_worker.start()
+
+        def _do_launch() -> None:
+            from src.gui.workers.audio_worker import AudioWorker
+            from src.core.tts.voice_profile import NarrationRole
+            worker = AudioWorker(
+                "",
+                role=NarrationRole.BOOK_NARRATOR,
+                router=self._tts_router,
+                prepared=segments,
+                parent=self,
+            )
+            self._connect_audio_worker(worker)
+            self._audio_worker = worker
+            worker.start()
+
+        self._start_or_defer_narration(_do_launch)
 
     def _on_audio_error(self, err_msg):
         # item E: se falhou antes de tocar (ex.: durante "Traduzindo…"), não
@@ -2762,17 +2777,189 @@ class ReaderView(QWidget):
             self._audio_worker = None
 
     def _stop_audio_if_running(self):
-        """Para a narração por completo (libera o worker) e restaura a UI."""
+        """Para a narração SEM bloquear a GUI (perf/gui): drenagem assíncrona.
+
+        Antes chamava ``wait(2000)``, congelando a GUI ao virar página durante a
+        narração e ao trocar de narração ("Ouvir original"). Agora o worker é
+        apenas SINALIZADO para parar (stop cooperativo) e movido para
+        ``_retiring_workers``; sua referência só é solta quando o ``finished``
+        REAL chega (``_on_retiring_worker_finished``) — nunca destruímos um
+        QThread cuja thread do SO ainda vive (lição do PR #32/SIGABRT). Para
+        teardown (fechar leitor) use ``_teardown_audio_workers``, onde um wait
+        bloqueante é aceitável (é encerramento, não interação).
+        """
         self._audio_stopped_by_user = True
         self._invalidate_presynth()  # stop/troca de página descarta pré-síntese (3.6)
-        if hasattr(self, '_audio_worker') and self._audio_worker and self._audio_worker.isRunning():
-            self._audio_worker.stop()
-            self._audio_worker.wait(2000)
-            self._audio_worker = None
+        # Parar é decisão explícita: cancela qualquer narração ENFILEIRADA.
+        self._pending_narration = None
+        self._cancel_pending_safety_timer()
+        self._retire_current_audio_worker()
         self._audio_paused = False
         self._set_audio_button_state("Ouvir", "🔊", "Ouvir Página (TTS)", menu_label="Ouvir página")
         if hasattr(self, "_act_audio_stop"):
             self._act_audio_stop.setEnabled(False)
+
+    def _connect_audio_worker(self, worker) -> None:
+        """Conecta os sinais do AudioWorker aos handlers da GUI.
+
+        DRY entre ``_launch_audio_worker`` e ``_play_prepared`` — ambos criam um
+        AudioWorker e ligam os MESMOS cinco sinais.
+        """
+        worker.playback_started.connect(self._on_audio_started)
+        worker.playback_finished.connect(self._on_audio_finished)
+        worker.error_occurred.connect(self._on_audio_error)
+        worker.finished.connect(self._on_audio_worker_finished)
+        worker.provider_changed.connect(self._on_audio_provider_changed)
+
+    def _retire_current_audio_worker(self) -> None:
+        """Sinaliza o worker atual para parar e o move para a aposentadoria.
+
+        NÃO bloqueia (sem ``wait``). Desconecta os sinais de callback que não
+        devem mais agir na UI (``playback_*``, ``error``, ``provider`` —
+        senão a narração antiga encadearia página ou mexeria no botão depois de
+        substituída) e reconecta ``finished`` a ``_on_retiring_worker_finished``,
+        que só solta/deleteLater quando a thread do SO realmente terminou.
+        """
+        worker = getattr(self, "_audio_worker", None)
+        self._audio_worker = None
+        if worker is None:
+            return
+        for sig_name in ("playback_started", "playback_finished",
+                         "error_occurred", "provider_changed"):
+            try:
+                getattr(worker, sig_name).disconnect()
+            except (TypeError, RuntimeError):
+                pass
+        try:
+            worker.finished.disconnect()
+        except (TypeError, RuntimeError):
+            pass
+        if not worker.isRunning():
+            worker.deleteLater()
+            return
+        self._retiring_workers.append(worker)
+        # Conecta ANTES do stop(): o `finished` só é emitido quando run()
+        # retorna (queued para a thread da GUI), então nunca o perdemos.
+        worker.finished.connect(lambda w=worker: self._on_retiring_worker_finished(w))
+        try:
+            worker.stop()  # cooperativo: sinaliza cancelamento e para player/router
+        except Exception:
+            pass
+
+    def _on_retiring_worker_finished(self, worker) -> None:
+        """A thread do SO do worker aposentado terminou de fato → solta e destrói.
+
+        Quando o ÚLTIMO worker em drenagem termina, dispara a narração
+        ENFILEIRADA (se houver): garante que só UM ``speak()`` use o TTSRouter
+        compartilhado por vez.
+        """
+        if worker in self._retiring_workers:
+            self._retiring_workers.remove(worker)
+        try:
+            worker.deleteLater()
+        except Exception:
+            pass
+        if not self._retiring_workers and self._pending_narration is not None:
+            self._run_pending_narration()
+
+    def _start_or_defer_narration(self, launch_fn) -> None:
+        """Inicia a narração agora, ou a ENFILEIRA se um worker antigo drena.
+
+        O TTSRouter é COMPARTILHADO e seu estado interno
+        (``_is_cancelled``/``_active_player``/``_active_provider``) não tolera
+        dois ``speak()`` concorrentes. Enquanto houver worker em
+        ``_retiring_workers``, guardamos o lançamento (o último pedido vence) e
+        o disparamos no ``finished`` REAL do último (ver
+        ``_on_retiring_worker_finished``), com um QTimer de segurança para nunca
+        travar o recurso — jamais um ``wait()`` bloqueante na thread da GUI.
+        """
+        if self._retiring_workers:
+            self._pending_narration = launch_fn
+            self._arm_pending_safety_timer()
+        else:
+            launch_fn()
+
+    def _arm_pending_safety_timer(self) -> None:
+        """(Re)arma o watchdog que dispara a narração pendente mesmo que o
+        ``finished`` do worker antigo não chegue (degradação graciosa)."""
+        from PyQt6.QtCore import QTimer
+        self._cancel_pending_safety_timer()
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(self._on_pending_safety_timeout)
+        # Teto > (join 1.0s interno do router + drenagem do player). Na prática
+        # o `finished` chega antes; o timer só cobre o caso patológico.
+        timer.start(2500)
+        self._pending_narration_timer = timer
+
+    def _cancel_pending_safety_timer(self) -> None:
+        timer = getattr(self, "_pending_narration_timer", None)
+        if timer is not None:
+            try:
+                timer.stop()
+                timer.deleteLater()
+            except Exception:
+                pass
+            self._pending_narration_timer = None
+
+    def _on_pending_safety_timeout(self) -> None:
+        """Watchdog: o worker antigo não sinalizou ``finished`` a tempo. Dispara
+        a narração pendente assim mesmo — o player antigo já foi parado por
+        ``stop()``; a referência ao worker segue viva em ``_retiring_workers``
+        (seu ``finished`` ainda a limpará quando chegar)."""
+        self._pending_narration_timer = None
+        self._run_pending_narration()
+
+    def _run_pending_narration(self) -> None:
+        """Dispara o lançamento adiado (se ainda válido)."""
+        fn = self._pending_narration
+        self._pending_narration = None
+        self._cancel_pending_safety_timer()
+        if fn is None:
+            return
+        # O usuário parou de vez nesse meio-tempo → não ressuscita a narração.
+        if self._audio_stopped_by_user:
+            return
+        worker = getattr(self, "_audio_worker", None)
+        if worker is not None and worker.isRunning():
+            return  # já há algo tocando; não empilha um segundo player
+        fn()
+
+    def _teardown_audio_workers(self) -> None:
+        """Teardown (fechar leitor / fechar app): garante que NENHUM worker de
+        áudio sobreviva. Aqui um ``wait`` BLOQUEANTE é aceitável — é
+        encerramento, não interação (a lição do PR #32 é esperar a thread do SO
+        antes de destruir). Silencia os sinais de cada worker antes do wait para
+        que nenhum callback re-dispare narração durante o teardown.
+        """
+        self._audio_stopped_by_user = True
+        self._pending_narration = None
+        self._cancel_pending_safety_timer()
+        self._invalidate_presynth()
+        worker = getattr(self, "_audio_worker", None)
+        self._audio_worker = None
+        workers = list(getattr(self, "_retiring_workers", []))
+        self._retiring_workers = []
+        if worker is not None:
+            workers.append(worker)
+        for w in workers:
+            for sig_name in ("playback_started", "playback_finished",
+                             "error_occurred", "provider_changed", "finished"):
+                try:
+                    getattr(w, sig_name).disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            try:
+                if w.isRunning():
+                    w.stop()
+                    w.wait(2000)
+            except Exception:
+                pass
+            try:
+                w.deleteLater()
+            except Exception:
+                pass
+        self._audio_paused = False
 
     def _on_audio_provider_changed(self, provider_name: str):
         """Item 4 (transparência do motor): mostra qual engine TTS está ativo.
