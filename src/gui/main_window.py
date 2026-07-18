@@ -1380,7 +1380,7 @@ class MainWindow(QMainWindow):
         encadeia a próxima página — o loop contínuo traduzido morre
         naturalmente em vez de continuar num estado inconsistente.
 
-        ``enable_chaining``: False para a ação avulsa "Ler Página Traduzida"
+        ``enable_chaining``: False para a ação avulsa "Ouvir traduzido (PT)"
         (Commit 4 e anteriores); True para a leitura contínua traduzida
         (Commit 5) — repassado para narrate_text(chain_continuous=...), que
         aciona _on_audio_finished → _continue_narration ao terminar.
@@ -1404,11 +1404,20 @@ class MainWindow(QMainWindow):
 
         self._statusbar.showMessage(f"🌐 Traduzindo página {page_label}…", 60000)
         self._page_translation_pending = True
+        # Época capturada no PEDIDO: se o usuário iniciar outra narração
+        # enquanto o NLLB traduz (ex.: "Ouvir original"), a época avança e o
+        # resultado atrasado é descartado — sem isso a tradução pronta
+        # atropelaria a narração recém-pedida e re-armaria a cadeia traduzida.
+        epoch_at_request = self._reader_view.narration_epoch
 
         def _on_success(result: str):
             self._page_translation_pending = False
             if not (result or "").strip():
                 self._statusbar.showMessage("⚠️ Tradução vazia — nada a narrar.", 5000)
+                return
+            if self._reader_view.narration_epoch != epoch_at_request:
+                self._statusbar.showMessage(
+                    "ℹ️ Tradução descartada — outra narração foi iniciada no meio-tempo.", 4000)
                 return
             self._statusbar.showMessage(f"🔊 Narrando página {page_label}…", 5000)
             # A tradução acima é en→pt (tgt_lang="pt"): narra em português explícito.

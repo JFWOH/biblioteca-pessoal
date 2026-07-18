@@ -102,6 +102,31 @@ def test_helper_updates_menu_action_text_with_inline_emoji():
     assert 'self._act_audio_toggle.setText(f"{icon_emoji} {menu_label or label}")' in body
 
 
+def test_audio_menu_has_explicit_original_translated_pair():
+    """Par explícito "Ouvir original / Ouvir traduzido" (descobribilidade —
+    sugestão registrada em 2026-07-17): as mesmas QActions entram nos DOIS
+    menus (padrão do compartilhamento de ações de tradução)."""
+    src = _src()
+    assert 'self._act_listen_original = QAction("🔊 Ouvir original", self)' in src
+    assert "self._act_listen_original.triggered.connect(self._on_listen_original)" in src
+    assert 'QAction("🌐 Ouvir traduzido (PT)", self)' in src
+    assert "self._audio_menu.addAction(self._act_listen_original)" in src
+    assert "self._audio_menu.addAction(self._act_read_translated)" in src
+    assert "self._overflow_menu.addAction(self._act_listen_original)" in src
+    assert "self._overflow_menu.addAction(self._act_read_translated)" in src
+
+
+def test_listen_original_delegates_to_shared_helpers():
+    """'Ouvir original' reutiliza _current_page_text() (extração) e
+    narrate_text() (stop+launch), em vez de re-implementar os dois caminhos.
+    chain_continuous=True: a narração é do original DESTA página, mas a
+    continuidade segue os toggles (desligados → nada encadeia)."""
+    src = _src()
+    body = _method_body(src, "_on_listen_original")
+    assert "self._current_page_text().strip()" in body
+    assert "self.narrate_text(page_text, chain_continuous=True)" in body
+
+
 def test_anchor_fallback_no_longer_uses_removed_widget():
     """O menu rápido de TTS (_on_tts_settings_clicked) usava _tts_settings_btn
     como âncora de fallback; agora usa o próprio _audio_btn (sempre visível)."""

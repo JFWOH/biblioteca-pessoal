@@ -78,6 +78,54 @@ def test_on_audio_finished_covers_both_continuous_modes():
     assert "self._continuous_reading or self._continuous_translate_mode" in body
 
 
+def test_continue_narration_chains_translated_mode_independently():
+    """Regressão: _continue_narration exigia _continuous_reading e matava a
+    cadeia quando SÓ a leitura contínua TRADUZIDA estava ligada — o loop
+    traduzido morria em silêncio após a 1ª página. A guarda deve aceitar
+    qualquer um dos dois modos, como _on_audio_finished já promete."""
+    match = re.search(r"def _continue_narration\(self\):(.*?)\n    def ",
+                      _READER_VIEW, re.DOTALL)
+    assert match, "_continue_narration não encontrado"
+    body = match.group(1)
+    assert "if not (self._continuous_reading or self._continuous_translate_mode):" in body
+
+
+def test_continue_narration_skips_presynth_cache_in_translate_mode():
+    """A pré-síntese guarda áudio do idioma ORIGINAL (só o modo normal a
+    produz); no modo traduzido a cadeia deve ignorar o cache — senão um
+    resto pré-sintetizado antes de ligar o modo tocaria a página SEM
+    tradução."""
+    match = re.search(r"def _continue_narration\(self\):(.*?)\n    def ",
+                      _READER_VIEW, re.DOTALL)
+    body = match.group(1)
+    take_idx = body.index("self._presynth_cache.take(")
+    guard_idx = body.index("if not self._continuous_translate_mode:")
+    assert guard_idx < take_idx
+
+
+def test_enabling_translate_mode_invalidates_presynth():
+    """Ligar a leitura contínua traduzida descarta a pré-síntese pendente
+    (áudio do original não vale para o modo traduzido)."""
+    match = re.search(
+        r"def _toggle_continuous_translate_reading\(self, checked: bool\):(.*?)\n    def ",
+        _READER_VIEW, re.DOTALL)
+    assert "self._invalidate_presynth()" in match.group(1)
+
+
+def test_delayed_translation_result_is_discarded_by_narration_epoch():
+    """Corrida: com a tradução NLLB em andamento, o usuário inicia OUTRA
+    narração (ex.: 'Ouvir original'); o resultado atrasado não pode
+    atropelá-la. A época é capturada no pedido e conferida no sucesso; toda
+    narração nova (normal e pré-sintetizada) avança a época."""
+    match = re.search(
+        r"def _translate_and_narrate\(self, text: str, enable_chaining: bool\):(.*?)\n    def ",
+        _MAIN_WINDOW, re.DOTALL)
+    body = match.group(1)
+    assert "epoch_at_request = self._reader_view.narration_epoch" in body
+    assert "self._reader_view.narration_epoch != epoch_at_request" in body
+    assert _READER_VIEW.count("self.narration_epoch += 1") == 2  # _launch_audio_worker e _play_prepared
+
+
 def test_sync_overflow_menu_syncs_translated_action_checkbox():
     match = re.search(r"def _sync_overflow_menu\(self\).*?:(.*?)\n    def ",
                       _READER_VIEW, re.DOTALL)
