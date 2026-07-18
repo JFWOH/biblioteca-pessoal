@@ -4,14 +4,22 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from src.utils.constants import DATA_DIR
+
 logger = logging.getLogger(__name__)
 
 class TraceLogger:
     """Implementa o ADR-004: Structured Agent Trace Logger."""
 
-    def __init__(self, session_id: str, traces_dir: str = "data/traces"):
+    def __init__(self, session_id: str, traces_dir: Optional[str] = None):
+        # Default ABSOLUTO (DATA_DIR/traces). Um default RELATIVO ("data/traces")
+        # é resolvido contra o CWD: o app lançado por atalho roda com
+        # CWD=system32, então TODOS os traces iam parar (e se perdiam) num
+        # diretório errado/inexistente — aconteceu na sessão real do usuário.
+        # DATA_DIR é ancorado em PROJECT_ROOT (src/utils/constants, core-safe,
+        # sem Qt), então independe de onde o processo foi iniciado.
         self.session_id = session_id
-        self.traces_dir = Path(traces_dir)
+        self.traces_dir = Path(traces_dir) if traces_dir else DATA_DIR / "traces"
         self.file_path = self.traces_dir / f"trace_{self.session_id}.jsonl"
         self._ensure_dir()
 

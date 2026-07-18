@@ -57,11 +57,14 @@ _MAX_CONTINUATIONS = 2
 class _ThinkingStatusTracker:
     """Feedback de raciocínio dos modelos thinking (gemma4) durante o stream.
 
-    Modelos thinking gastam dezenas de segundos emitindo ``message.thinking``
-    antes do primeiro token de ``content`` — janela em que a UI ficava muda e
-    parecia travada. O tracker converte esses chunks num status legível
-    ("Raciocinando… Ns", com throttle de 1s) entregue via callback puro
-    (ADR-006: nenhum PyQt6 aqui; a GUI decide como exibir).
+    Modelos thinking gastam dezenas de segundos — às vezes minutos — emitindo
+    ``message.thinking`` (raciocínio INVISÍVEL) antes do primeiro token de
+    ``content``. Janela em que a UI ficava muda e parecia travada. O tracker
+    converte esses chunks num status legível com CONTAGEM e TEMPO
+    ("💭 Pensando… (N tokens · Ns)", throttle de 1s) entregue via callback puro
+    (ADR-006: nenhum PyQt6 aqui; a GUI decide como exibir). O marcador "💭" no
+    início do texto sinaliza à GUI que é estado de raciocínio, para exibi-lo
+    num indicador proeminente e escondê-lo quando o conteúdo começar.
     """
 
     _THROTTLE_S = 1.0
@@ -75,11 +78,15 @@ class _ThinkingStatusTracker:
         self._started = time.monotonic()
         self._last_emit = 0.0
         self._announced = False
+        self._thinking_tokens = 0
 
     def on_chunk(self, msg: dict) -> None:
         """Processa um chunk do stream; emite status se houver thinking."""
         if not msg.get("thinking"):
             return
+        # Cada chunk de thinking do Ollama ≈ 1 token de raciocínio: dá ao
+        # usuário a noção de que o modelo está progredindo, não travado.
+        self._thinking_tokens += 1
         if not self._announced:
             self._announced = True
             if self._trace:
@@ -90,7 +97,8 @@ class _ThinkingStatusTracker:
         now = time.monotonic()
         if now - self._last_emit >= self._THROTTLE_S:
             self._last_emit = now
-            self._cb(f"🤔 Raciocinando… {int(now - self._started)}s")
+            elapsed = int(now - self._started)
+            self._cb(f"💭 Pensando… ({self._thinking_tokens} tokens · {elapsed}s)")
 
     def on_content_started(self) -> None:
         """Primeiro token de content chegou — troca o status para escrita."""
@@ -105,9 +113,21 @@ class Orchestrator:
     e heurísticas de encerramento precoce (Early-Exit).
     """
 
-    def __init__(self, engine: Any):
-        """Inicializa o orquestrador com a referência do motor RAG central."""
+    def __init__(self, engine: Any, num_ctx: int = 8192):
+        """Inicializa o orquestrador com a referência do motor RAG central.
+
+        ``num_ctx`` é a janela de contexto (em tokens) enviada ao Ollama em
+        TODAS as gerações do RAG. É injetado pela GUI a partir de ``rag.num_ctx``
+        (config), com default 8192. Trade-off: o prompt do RAG (system + esquema
+        de ferramentas + contexto recuperado + histórico do livro) estoura com
+        facilidade os 4096 do default do Ollama, que então TRUNCA o início do
+        prompt em silêncio — o modelo deixa de "ver" o contexto e responde vago
+        ou erra. 8192 acomoda o prompt típico ao custo de mais VRAM e um prefill
+        um pouco mais lento; valores maiores custam mais memória/tempo sem ganho
+        para o tamanho de prompt atual.
+        """
         self.engine = engine
+        self._num_ctx = num_ctx
 
     def _reformulate_query(self, query: str) -> List[str]:
         """Gera uma lista de consultas (queries) alternativas para a busca web.
@@ -532,12 +552,14 @@ class Orchestrator:
 
         Opções (num_predict/num_ctx/repeat_penalty/repeat_last_n) calibradas
         para mitigar repetição literal de parágrafos em respostas longas sem
-        cortar a profundidade de raciocínio dos modelos gemma4.
+        cortar a profundidade de raciocínio dos modelos gemma4. ``num_ctx`` vem
+        de ``self._num_ctx`` (injetado pela config; ver ``__init__``) e é
+        aplicado em toda geração do RAG — stream principal e fallback final.
         """
         return ollama_client.stream_chat(
             self.engine._ollama_url, self.engine._llm_model.strip(), msgs,
             tools=tools, temperature=temperature,
-            num_predict=4096, num_ctx=8192,
+            num_predict=4096, num_ctx=self._num_ctx,
             repeat_penalty=1.15, repeat_last_n=512,
         )
 
@@ -898,6 +920,16 @@ class Orchestrator:
         # só na 1ª rodada). Orçamento maior evita que is_budget_ok() aborte a
         # retomada de uma resposta truncada por comprimento no meio do caminho.
         state = AgentState(session_id=session_id, max_rounds=5, max_time_ms=150000)
+
+        # Antes do 1º stream o modelo pode nem estar carregado — ou estar sendo
+        # TROCADO (recarga de ~8 GB ao alternar entre gemma4 12B e e4b), o que
+        # dá minutos de silêncio antes do primeiro chunk. Avisa a GUI já, para
+        # não parecer "sem resposta" (status efêmero via callback puro, ADR-006).
+        if status_callback:
+            status_callback(
+                "🧠 Preparando o modelo… "
+                "(a primeira resposta após trocar de modelo pode levar ~1 min)"
+            )
 
         while state.is_budget_ok():
             state.current_round += 1

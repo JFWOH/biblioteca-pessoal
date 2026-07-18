@@ -103,6 +103,13 @@ DEFAULT_CONFIG = {
     # Painel do Assistente (RAG standalone): preferência de UI persistida.
     "rag": {
         "sidebar_collapsed": True,  # sidebar (fontes/modelo/indexação) recolhida por padrão
+        # Janela de contexto (tokens) enviada ao Ollama nas gerações do RAG.
+        # O default do Ollama (4096) trunca em silêncio o início do prompt do
+        # RAG (system + esquema de ferramentas + contexto + histórico), fazendo
+        # o modelo ignorar o contexto e responder vago/errado. 8192 acomoda o
+        # prompt típico; custa mais VRAM e um prefill um pouco mais lento
+        # (trade-off aceito). Ver Orchestrator.__init__ e _stream_chat.
+        "num_ctx": 8192,
     },
 }
 

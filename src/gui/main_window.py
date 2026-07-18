@@ -1199,7 +1199,8 @@ class MainWindow(QMainWindow):
             question_payload = question
 
         self._rag_worker = RAGWorker(
-            self._rag_engine, mode=RAGWorker.MODE_QUERY, question=question_payload, book_id=book_id
+            self._rag_engine, mode=RAGWorker.MODE_QUERY, question=question_payload,
+            book_id=book_id, num_ctx=self._config.get("rag.num_ctx", 8192),
         )
         self._rag_worker.token_received.connect(self._rag_panel.on_token_received)
         self._rag_worker.status_updated.connect(self._rag_panel.on_status_updated)

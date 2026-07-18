@@ -1270,6 +1270,16 @@ QPushButton#resumeBannerClose {
 QPushButton#resumeBannerClose:hover {
     background: #2d333f;
 }
+/* Indicador proeminente de raciocínio/preparo do modelo (painel do Assistente) */
+QLabel#ragThinkingIndicator {
+    background-color: rgba(16, 185, 129, 0.10);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 700;
+}
 """
 
 LIGHT_THEME = """
@@ -2533,6 +2543,16 @@ QPushButton#resumeBannerClose {
 }
 QPushButton#resumeBannerClose:hover {
     background: #e5e7eb;
+}
+/* Indicador proeminente de raciocínio/preparo do modelo (painel do Assistente) */
+QLabel#ragThinkingIndicator {
+    background-color: #f0fdf4;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 700;
 }
 """
 
@@ -3798,6 +3818,16 @@ QPushButton#resumeBannerClose {
 }
 QPushButton#resumeBannerClose:hover {
     background: #DED0B0;
+}
+/* Indicador proeminente de raciocínio/preparo do modelo (painel do Assistente) */
+QLabel#ragThinkingIndicator {
+    background-color: #EADFCA;
+    color: #705E4B;
+    border: 1px solid #d4cbb8;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 700;
 }
 """
 

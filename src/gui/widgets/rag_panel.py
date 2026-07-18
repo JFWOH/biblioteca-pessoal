@@ -186,6 +186,17 @@ class RAGPanel(QWidget):
         self._response_label = QLabel("💬 Resposta")
         chat_layout.addWidget(self._response_label)
 
+        # Indicador PROEMINENTE de raciocínio/preparo do modelo. Fica acima da
+        # resposta e só aparece enquanto o modelo "pensa" (status "💭") ou o
+        # modelo está sendo carregado/trocado (status "🧠") — o período em que
+        # a UI parecia travada ("sem resposta"). Some assim que o 1º token de
+        # conteúdo chega. Estilizado por objectName nos 3 temas (styles.py).
+        self._thinking_indicator = QLabel("")
+        self._thinking_indicator.setObjectName("ragThinkingIndicator")
+        self._thinking_indicator.setWordWrap(True)
+        self._thinking_indicator.setVisible(False)
+        chat_layout.addWidget(self._thinking_indicator)
+
         self._response_area = QTextEdit()
         self._response_area.setReadOnly(True)
         self._response_area.setObjectName("responseArea")
@@ -868,6 +879,7 @@ class RAGPanel(QWidget):
     def _reset_conversation_view(self) -> None:
         """Limpa a área de conversa ao trocar de livro (apenas visual)."""
         self._response_area.clear()
+        self._thinking_indicator.setVisible(False)
         self._sources_list.clear()
         self._full_answer = ""
         self._question_input.clear()
@@ -925,17 +937,35 @@ class RAGPanel(QWidget):
         sb = self._response_area.verticalScrollBar()
         sb.setValue(sb.maximum())
 
+    # Marcadores que sinalizam "modelo ocupado antes do conteúdo" — dignos do
+    # indicador proeminente: 💭 = raciocínio (thinking), 🧠 = preparo/troca do
+    # modelo. Definidos junto com o Orchestrator (_ThinkingStatusTracker e o
+    # status inicial de query_rag).
+    _THINKING_MARKERS = ("💭", "🧠")
+
     def on_status_updated(self, status: str) -> None:
         """Atualiza o estado efêmero da geração (raciocínio/escrita).
 
-        Vem do stream do modelo thinking via RAGWorker.status_updated; usa o
-        mesmo label do "Consultando…" e some junto com ele ao fim da geração.
+        Vem do stream do modelo thinking via RAGWorker.status_updated; alimenta
+        o pequeno label "Consultando…" e, quando o status indica que o modelo
+        está pensando/carregando (💭/🧠), também o indicador PROEMINENTE acima
+        da resposta — para o usuário ver que há progresso, não travamento.
         """
-        if self._is_generating and status:
-            self._gen_status.setText(status)
+        if not (self._is_generating and status):
+            return
+        self._gen_status.setText(status)
+        if status.startswith(self._THINKING_MARKERS):
+            self._thinking_indicator.setText(status)
+            self._thinking_indicator.setVisible(True)
+        else:
+            # "✍️ Escrevendo…" e afins: o conteúdo vai começar, esconde o chip.
+            self._thinking_indicator.setVisible(False)
 
     def on_token_received(self, token: str) -> None:
         """Acrescenta um token à área de resposta (streaming)."""
+        # Chegou conteúdo: a espera "invisível" acabou, oculta o indicador.
+        # setVisible(False) num widget já oculto é no-op no Qt — barato por token.
+        self._thinking_indicator.setVisible(False)
         cursor = self._response_area.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self._response_area.setTextCursor(cursor)
@@ -1307,6 +1337,7 @@ class RAGPanel(QWidget):
 
     def _clear_chat(self) -> None:
         self._response_area.clear()
+        self._thinking_indicator.setVisible(False)
         self._sources_list.clear()
         self._full_answer = ""
         self._question_input.clear()
@@ -1320,6 +1351,9 @@ class RAGPanel(QWidget):
         self._progress_bar.setVisible(active)
         self._gen_status.setVisible(active)
         self._question_input.setEnabled(not active)
+        # Indicador de raciocínio: começa oculto e só reaparece quando um status
+        # 💭/🧠 chega (on_status_updated). Ao terminar/parar, some.
+        self._thinking_indicator.setVisible(False)
         if active:
             self._save_note_btn.setVisible(False)
             self._flashcard_btn.setVisible(False)
