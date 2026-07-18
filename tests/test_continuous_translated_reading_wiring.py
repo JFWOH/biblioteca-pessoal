@@ -78,6 +78,18 @@ def test_on_audio_finished_covers_both_continuous_modes():
     assert "self._continuous_reading or self._continuous_translate_mode" in body
 
 
+def test_continue_narration_chains_translated_mode_independently():
+    """Regressão: _continue_narration exigia _continuous_reading e matava a
+    cadeia quando SÓ a leitura contínua TRADUZIDA estava ligada — o loop
+    traduzido morria em silêncio após a 1ª página. A guarda deve aceitar
+    qualquer um dos dois modos, como _on_audio_finished já promete."""
+    match = re.search(r"def _continue_narration\(self\):(.*?)\n    def ",
+                      _READER_VIEW, re.DOTALL)
+    assert match, "_continue_narration não encontrado"
+    body = match.group(1)
+    assert "if not (self._continuous_reading or self._continuous_translate_mode):" in body
+
+
 def test_sync_overflow_menu_syncs_translated_action_checkbox():
     match = re.search(r"def _sync_overflow_menu\(self\).*?:(.*?)\n    def ",
                       _READER_VIEW, re.DOTALL)

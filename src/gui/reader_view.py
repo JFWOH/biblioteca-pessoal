@@ -538,8 +538,13 @@ class ReaderView(QWidget):
                 _cfg.get("tts.continuous_translate_reading", False))
         self._act_continuous_translate.setChecked(self._continuous_translate_mode)
         self._act_continuous_translate.triggered.connect(self._toggle_continuous_translate_reading)
+        # Par explícito "Ouvir original / Ouvir traduzido" (sugestão registrada
+        # em 2026-07-17): narração ONE-SHOT da página atual, sem alterar os
+        # toggles persistidos de leitura contínua (normal/traduzida).
+        self._act_listen_original = QAction("🔊 Ouvir original", self)
+        self._act_listen_original.triggered.connect(self._on_listen_original)
         # Ler a página em português: traduz (NLLB offline) e narra o resultado.
-        self._act_read_translated = QAction("🌐 Ler Página Traduzida (PT)", self)
+        self._act_read_translated = QAction("🌐 Ouvir traduzido (PT)", self)
         self._act_read_translated.triggered.connect(self._on_read_translated_page)
         # Traduzir a página como TEXTO (cartão no painel), sem narrar.
         self._act_translate_page = QAction("🌐 Traduzir Página (texto)", self)
@@ -549,8 +554,9 @@ class ReaderView(QWidget):
         # a troca era lenta). São as MESMAS QActions dos dois menus — o Qt
         # sincroniza o estado (check) automaticamente entre eles.
         self._audio_menu.addSeparator()
-        self._audio_menu.addAction(self._act_continuous_translate)
+        self._audio_menu.addAction(self._act_listen_original)
         self._audio_menu.addAction(self._act_read_translated)
+        self._audio_menu.addAction(self._act_continuous_translate)
         self._overflow_menu.addAction(self._act_double_page)
         self._overflow_menu.addAction(self._act_highlight)
         self._overflow_menu.addSeparator()
@@ -569,6 +575,7 @@ class ReaderView(QWidget):
         self._overflow_menu.addAction(self._act_tts)
         self._overflow_menu.addAction(self._act_continuous)
         self._overflow_menu.addAction(self._act_continuous_translate)
+        self._overflow_menu.addAction(self._act_listen_original)
         self._overflow_menu.addAction(self._act_read_translated)
         self._overflow_menu.addAction(self._act_translate_page)
         self._overflow_menu.aboutToShow.connect(self._sync_overflow_menu)
@@ -2463,6 +2470,31 @@ class ReaderView(QWidget):
         # Tarefa 3.6: enquanto esta página toca, sintetiza a próxima em background.
         self._maybe_presynthesize_next()
 
+    def _on_listen_original(self):
+        """Narra a página atual no idioma ORIGINAL, one-shot.
+
+        Par explícito "Ouvir original / Ouvir traduzido": com a Leitura
+        Contínua Traduzida ligada, o corpo do botão Ouvir narra a tradução —
+        este item dá acesso direto ao original sem mexer nos toggles
+        persistidos. One-shot: não encadeia a próxima página (continuidade é
+        papel dos toggles). Sem ``language`` explícito, o AudioWorker
+        autodetecta (texto EN → voz EN; misto PT/EN → voz por sentença).
+        """
+        if not self._reader:
+            return
+        page = self._reader.current_page
+        page_text = ""
+        if hasattr(self._reader, "get_page_text"):
+            page_text = self._reader.get_page_text(page)
+        elif hasattr(self._reader, "get_chapter_text"):
+            page_text = self._reader.get_chapter_text(page)
+        page_text = (page_text or "").strip()
+        if not page_text:
+            self._show_status("⚠️ Página sem texto para narrar.", 4000)
+            return
+        self._stop_audio_if_running()
+        self._launch_audio_worker(page_text, chain_continuous=False)
+
     def _on_read_translated_page(self):
         """Narra a página atual traduzida para PT (item 7 do backlog UX).
 
@@ -2552,12 +2584,19 @@ class ReaderView(QWidget):
     def _continue_narration(self):
         """Avança para a próxima página com texto e narra (modo contínuo).
 
+        Cobre os DOIS modos contínuos (normal e traduzido) — a guarda exigia
+        só _continuous_reading e matava a cadeia traduzida quando o toggle
+        normal estava desligado (são independentes; _toggle_audio no fim
+        re-fork p/ tradução quando o modo traduzido está ativo).
+
         Tarefa 3.6: se a próxima página já foi pré-sintetizada, TOCA o áudio
         pronto (sem gap de síntese); senão, cai no caminho normal (síntese).
         """
         from src.core.audio.continuous_navigation import next_readable_page_with_text
 
-        if not self._continuous_reading or not self._reader:
+        if not (self._continuous_reading or self._continuous_translate_mode):
+            return
+        if not self._reader:
             return
         worker = getattr(self, "_audio_worker", None)
         if worker and worker.isRunning():

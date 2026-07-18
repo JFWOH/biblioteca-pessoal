@@ -1380,7 +1380,7 @@ class MainWindow(QMainWindow):
         encadeia a próxima página — o loop contínuo traduzido morre
         naturalmente em vez de continuar num estado inconsistente.
 
-        ``enable_chaining``: False para a ação avulsa "Ler Página Traduzida"
+        ``enable_chaining``: False para a ação avulsa "Ouvir traduzido (PT)"
         (Commit 4 e anteriores); True para a leitura contínua traduzida
         (Commit 5) — repassado para narrate_text(chain_continuous=...), que
         aciona _on_audio_finished → _continue_narration ao terminar.
