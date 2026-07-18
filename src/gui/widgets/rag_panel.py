@@ -6,15 +6,18 @@ fontes bibliográficas e controle de indexação — tudo rodando localmente.
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from PyQt6.QtCore import Qt, QEvent, pyqtSignal
-from PyQt6.QtGui import QFont, QTextCursor
+from PyQt6.QtGui import QColor, QFont, QTextCursor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QTextEdit, QListWidget, QListWidgetItem,
+    QPushButton, QTextBrowser, QListWidget, QListWidgetItem,
     QProgressBar, QFrame, QSplitter, QComboBox,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RAGPanel(QWidget):
@@ -197,9 +200,18 @@ class RAGPanel(QWidget):
         self._thinking_indicator.setVisible(False)
         chat_layout.addWidget(self._thinking_indicator)
 
-        self._response_area = QTextEdit()
+        # QTextBrowser (não QTextEdit): permite âncoras clicáveis no corpo da
+        # resposta (citações [Título, p. X] — débito 3.1). setOpenLinks/
+        # setOpenExternalLinks(False) impedem navegação interna/externa; o clique
+        # é tratado por _on_citation_anchor_clicked, que emite source_clicked.
+        # A linkificação só acontece ao FIM do streaming (_linkify_citations_in_body),
+        # para não perturbar o cursor de tokens.
+        self._response_area = QTextBrowser()
         self._response_area.setReadOnly(True)
         self._response_area.setObjectName("responseArea")
+        self._response_area.setOpenLinks(False)
+        self._response_area.setOpenExternalLinks(False)
+        self._response_area.anchorClicked.connect(self._on_citation_anchor_clicked)
         self._response_area.setPlaceholderText(
             "Faça uma pergunta sobre seus livros…\n\n"
             "Exemplos:\n"
@@ -599,7 +611,10 @@ class RAGPanel(QWidget):
     def set_theme(self, theme: str) -> None:
         """Aplica folha de estilos (QSS) correspondente ao tema selecionado (Claro, Sépia ou Escuro)."""
         self._current_theme = theme
-        
+        # Âncoras de citação já renderizadas têm cor embutida no HTML — o QSS
+        # abaixo não as alcança; recolore os fragments para o tema novo.
+        self._recolor_citation_anchors()
+
         if theme == "light":
             # Cores do tema Claro
             bg_main = "#FFFFFF"
@@ -979,9 +994,13 @@ class RAGPanel(QWidget):
         self._full_answer = full_answer
         self._set_generating(False)
 
-        # Fontes clicáveis (Tarefa 3.1): enriquece a lista com as citações
-        # [Título, p. X] presentes na resposta, resolvidas para book_id.
-        self._augment_sources_with_citations(full_answer)
+        # Fontes clicáveis (Tarefa 3.1) + citações clicáveis no corpo (débito
+        # 3.1): a lista de livros é buscada UMA vez e a resolução fuzzy de cada
+        # citação é compartilhada entre os dois consumidores — o fuzzy-match é
+        # O(citações × livros) e rodaria dobrado na thread da GUI.
+        books = self._fetch_books_for_citations()
+        resolved = self._augment_sources_with_citations(full_answer, books)
+        self._linkify_citations_in_body(books, resolved)
 
         # Human-in-the-loop: Mostrar botão de salvar anotação se houver contexto de livro
         is_global = getattr(self, "_is_standalone", False)
@@ -1218,27 +1237,40 @@ class RAGPanel(QWidget):
         item.setData(Qt.ItemDataRole.UserRole, (int(book_id), page0))
         item.setToolTip("Clique para abrir na fonte · " + (item.toolTip() or ""))
 
-    def _augment_sources_with_citations(self, answer: str) -> None:
+    def _fetch_books_for_citations(self) -> list:
+        """Busca a lista de livros UMA vez por resposta (lista de fontes +
+        linkificação do corpo consomem a mesma). Falha do provider → lista
+        vazia COM log (ADR-005: degrada sem quebrar; AGENTS.md: exceção
+        nunca é engolida em silêncio)."""
+        if self._books_provider is None:
+            return []
+        try:
+            return self._books_provider() or []
+        except Exception:
+            logger.warning(
+                "Falha ao obter livros para resolver citações da resposta",
+                exc_info=True)
+            return []
+
+    def _augment_sources_with_citations(
+            self, answer: str, books: list) -> dict[str, tuple[int, int] | None]:
         """Acrescenta à lista de fontes as citações ``[Título, p. X]`` da resposta.
 
         Resolve o título → book_id via fuzzy match (``resolve_citation``) contra os
         livros do banco. Só adiciona pares ``(book_id, page)`` ainda não presentes
         (dedup com os trechos recuperados). Título não resolvido → ignorado
         (degradação graciosa, ADR-005).
+
+        Retorna a memoização ``raw → (book_id, page0) | None`` para a
+        linkificação do corpo reaproveitar sem repetir o fuzzy-match.
         """
-        if not answer or not answer.strip() or self._books_provider is None:
-            return
+        if not answer or not answer.strip():
+            return {}
         from src.core.rag.source_citations import parse_citations, resolve_citation
 
         citations = parse_citations(answer)
-        if not citations:
-            return
-        try:
-            books = self._books_provider() or []
-        except Exception:
-            books = []
-        if not books:
-            return
+        if not citations or not books:
+            return {}
 
         existing: set[tuple[int, int]] = set()
         for i in range(self._sources_list.count()):
@@ -1246,25 +1278,141 @@ class RAGPanel(QWidget):
             if isinstance(data, tuple):
                 existing.add(data)
 
+        resolved: dict[str, tuple[int, int] | None] = {}
         for cit in citations:
-            book_id, page1 = resolve_citation(cit, books)
-            if book_id is None:
-                continue
-            page0 = max(0, int(page1) - 1)  # citação é 1-based; leitor é 0-based
-            key = (int(book_id), page0)
-            if key in existing:
+            if cit.raw not in resolved:
+                book_id, page1 = resolve_citation(cit, books)
+                # citação é 1-based; leitor é 0-based
+                resolved[cit.raw] = (
+                    None if book_id is None
+                    else (int(book_id), max(0, int(page1) - 1)))
+            key = resolved[cit.raw]
+            if key is None or key in existing:
                 continue
             existing.add(key)
-            item = QListWidgetItem(f"🔖 {cit.title} · p. {page1}")
+            item = QListWidgetItem(f"🔖 {cit.title} · p. {cit.page}")
             item.setData(Qt.ItemDataRole.UserRole, key)
             item.setToolTip("Citação da resposta · clique para abrir")
             self._sources_list.addItem(item)
+        return resolved
 
     def _on_source_item_clicked(self, item) -> None:
         """Emite ``source_clicked`` se o item carregar ``(book_id, page0)``."""
         data = item.data(Qt.ItemDataRole.UserRole) if item else None
         if isinstance(data, tuple) and len(data) == 2:
             self.source_clicked.emit(int(data[0]), int(data[1]))
+
+    def _citation_link_color(self) -> str:
+        """Cor do link de citação por tema (harmoniza com o acento verde do painel)."""
+        theme = getattr(self, "_current_theme", "dark")
+        if theme == "light":
+            return "#047857"
+        if theme == "sepia":
+            return "#0f766e"
+        return "#34d399"  # dark / fallback
+
+    def _linkify_citations_in_body(
+            self, books: list,
+            resolved: dict[str, tuple[int, int] | None]) -> None:
+        """Torna as citações ``[Título, p. X]`` do corpo da resposta clicáveis.
+
+        Chamado APÓS o fim do streaming (nunca durante — o cursor de tokens não
+        pode ser perturbado). Cada citação resolvida vira uma âncora
+        AUTO-CONTIDA ``href="citation:{book_id}:{page0}"`` — o alvo vive no
+        próprio documento, sem mapa paralelo para sincronizar. As posições vêm
+        de ``Citation.start/end`` (offsets do texto exibido — o corpo é
+        construído só com insertPlainText, então offset == posição do
+        documento); a substituição em ordem REVERSA preserva os offsets
+        anteriores, num único edit block (um só layout pass). Citações não
+        resolvidas continuam texto plano (ADR-005). Preserva o scroll.
+
+        ``resolved``: memoização ``raw → alvo`` vinda da lista de fontes;
+        citações que só existem no documento resolvem aqui.
+        """
+        text = self._response_area.toPlainText()
+        if not text.strip() or not books:
+            return
+        from src.core.rag.source_citations import parse_citations, resolve_citation
+
+        citations = parse_citations(text)
+        if not citations:
+            return
+
+        import html as html_lib
+
+        color = self._citation_link_color()
+        doc = self._response_area.document()
+        sb = self._response_area.verticalScrollBar()
+        scroll_pos = sb.value()
+
+        cursor = QTextCursor(doc)
+        cursor.beginEditBlock()
+        try:
+            for cit in reversed(citations):
+                if cit.raw in resolved:
+                    target = resolved[cit.raw]
+                else:
+                    book_id, page1 = resolve_citation(cit, books)
+                    # citação é 1-based; leitor é 0-based
+                    target = (None if book_id is None
+                              else (int(book_id), max(0, int(page1) - 1)))
+                if target is None:
+                    continue  # não resolvida: segue como texto plano
+                anchor = (
+                    f'<a href="citation:{target[0]}:{target[1]}" '
+                    f'style="color:{color}; text-decoration:underline;">'
+                    f'{html_lib.escape(cit.raw)}</a>'
+                )
+                cursor.setPosition(cit.start)
+                cursor.setPosition(cit.end, QTextCursor.MoveMode.KeepAnchor)
+                cursor.insertHtml(anchor)  # substitui o trecho selecionado
+        finally:
+            cursor.endEditBlock()
+
+        sb.setValue(scroll_pos)
+
+    def _recolor_citation_anchors(self) -> None:
+        """Reaplica a cor do tema às âncoras de citação já renderizadas.
+
+        A cor nasce embutida no HTML da âncora (rich-text não obedece QSS de
+        widget); trocar de tema depois da resposta deixaria links do tema
+        antigo ilegíveis sobre o fundo novo — este passe recolore os
+        fragments âncora ``citation:``.
+        """
+        area = getattr(self, "_response_area", None)
+        if area is None:  # set_theme pode rodar antes da UI montar
+            return
+        doc = area.document()
+        color = QColor(self._citation_link_color())
+        block = doc.begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                fmt = frag.charFormat()
+                if fmt.isAnchor() and fmt.anchorHref().startswith("citation:"):
+                    cursor = QTextCursor(doc)
+                    cursor.setPosition(frag.position())
+                    cursor.setPosition(frag.position() + frag.length(),
+                                       QTextCursor.MoveMode.KeepAnchor)
+                    fmt.setForeground(color)
+                    cursor.setCharFormat(fmt)
+                it += 1
+            block = block.next()
+
+    def _on_citation_anchor_clicked(self, url) -> None:
+        """Clique numa âncora ``citation:{book_id}:{page0}`` do corpo → emite
+        ``source_clicked(book_id, page0)`` — o MESMO sinal das fontes.
+
+        Âncora malformada → no-op (degradação graciosa, ADR-005)."""
+        ref = url.toString()
+        if not ref.startswith("citation:"):
+            return
+        try:
+            _scheme, book_id, page0 = ref.split(":")
+            self.source_clicked.emit(int(book_id), int(page0))
+        except ValueError:
+            return
 
     def on_progress_updated(self, current: int, total: int, message: str) -> None:
         """Atualiza o progresso da indexação."""

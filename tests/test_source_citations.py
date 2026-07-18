@@ -204,3 +204,109 @@ def test_rag_panel_unresolved_citation_not_added(qtbot):
     keys = [panel._sources_list.item(i).data(Qt.ItemDataRole.UserRole)
             for i in range(panel._sources_list.count())]
     assert all(k is None for k in keys) or len(keys) == 0
+
+
+# ── Citações clicáveis NO CORPO da resposta (débito 3.1) ───────────────────
+
+def test_rag_panel_body_citation_becomes_anchor(qtbot):
+    """Resposta com citação resolvida → âncora AUTO-CONTIDA no corpo
+    (href="citation:{book_id}:{page0}" — o alvo vive no próprio documento)."""
+    from src.gui.widgets.rag_panel import RAGPanel
+
+    panel = RAGPanel()
+    qtbot.addWidget(panel)
+    panel.set_books_provider(lambda: [{"id": 5, "title": "Dom Casmurro"}])
+    panel.on_sources_found([])
+    answer = "Como em [Dom Casmurro, p. 12], vemos que..."
+    panel.on_token_received(answer)  # streaming: corpo é preenchido token a token
+    panel.on_answer_complete(answer)
+
+    # p. 12 (1-based) → página 11 (0-based), embutida no próprio href
+    assert 'href="citation:5:11"' in panel._response_area.document().toHtml()
+    # texto continua legível (âncora usa o próprio trecho como rótulo)
+    assert "[Dom Casmurro, p. 12]" in panel._response_area.toPlainText()
+
+
+def test_rag_panel_body_anchor_click_emits_source_clicked(qtbot):
+    """Clique simulado numa âncora citation:{book_id}:{page0} → sinal."""
+    from PyQt6.QtCore import QUrl
+
+    from src.gui.widgets.rag_panel import RAGPanel
+
+    panel = RAGPanel()
+    qtbot.addWidget(panel)
+
+    got = []
+    panel.source_clicked.connect(lambda b, p: got.append((b, p)))
+    panel._on_citation_anchor_clicked(QUrl("citation:5:11"))
+    assert got == [(5, 11)]
+
+
+def test_rag_panel_body_unresolved_citation_no_anchor(qtbot):
+    """Citação não resolvida → sem âncora (texto plano; ADR-005)."""
+    from src.gui.widgets.rag_panel import RAGPanel
+
+    panel = RAGPanel()
+    qtbot.addWidget(panel)
+    panel.set_books_provider(lambda: [{"id": 5, "title": "Dom Casmurro"}])
+    panel.on_sources_found([])
+    answer = "Veja [Livro Que Nao Existe, p. 3]."
+    panel.on_token_received(answer)
+    panel.on_answer_complete(answer)
+
+    assert 'href="citation:' not in panel._response_area.document().toHtml()
+
+
+def test_rag_panel_body_malformed_anchor_is_noop(qtbot):
+    """Âncora malformada não emite nada nem quebra (degradação graciosa)."""
+    from PyQt6.QtCore import QUrl
+
+    from src.gui.widgets.rag_panel import RAGPanel
+
+    panel = RAGPanel()
+    qtbot.addWidget(panel)
+
+    got = []
+    panel.source_clicked.connect(lambda b, p: got.append((b, p)))
+    panel._on_citation_anchor_clicked(QUrl("citation:99"))          # falta a página
+    panel._on_citation_anchor_clicked(QUrl("citation:abc:def"))     # não numérica
+    panel._on_citation_anchor_clicked(QUrl("http://example.com"))   # esquema alheio
+    assert got == []
+
+
+def test_rag_panel_citation_spanning_newline_is_linkified(qtbot):
+    """Citação quebrada em duas linhas pelo streaming ainda vira âncora —
+    a linkificação usa os offsets de Citation.start/end (não busca textual,
+    que não atravessa blocos)."""
+    from src.gui.widgets.rag_panel import RAGPanel
+
+    panel = RAGPanel()
+    qtbot.addWidget(panel)
+    panel.set_books_provider(lambda: [{"id": 5, "title": "Dom Casmurro"}])
+    panel.on_sources_found([])
+    answer = "Como em [Dom\nCasmurro, p. 12] fica claro."
+    panel.on_token_received(answer)
+    panel.on_answer_complete(answer)
+
+    assert 'href="citation:5:11"' in panel._response_area.document().toHtml()
+
+
+def test_rag_panel_theme_switch_recolors_existing_anchors(qtbot):
+    """Trocar de tema APÓS a resposta recolore as âncoras já renderizadas —
+    a cor inicial é embutida no HTML e o QSS de widget não a alcança."""
+    from src.gui.widgets.rag_panel import RAGPanel
+
+    panel = RAGPanel()
+    qtbot.addWidget(panel)
+    panel.set_theme("dark")
+    panel.set_books_provider(lambda: [{"id": 5, "title": "Dom Casmurro"}])
+    panel.on_sources_found([])
+    answer = "Veja [Dom Casmurro, p. 12]."
+    panel.on_token_received(answer)
+    panel.on_answer_complete(answer)
+    assert "#34d399" in panel._response_area.document().toHtml()  # cor do dark
+
+    panel.set_theme("light")
+    html = panel._response_area.document().toHtml()
+    assert "#047857" in html      # cor do light aplicada às âncoras existentes
+    assert "#34d399" not in html  # nenhum resto da cor antiga
