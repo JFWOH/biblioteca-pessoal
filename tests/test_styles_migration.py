@@ -2,12 +2,14 @@
 
 Cobre os 10 arquivos da whitelist do contrato (book_card, book_details,
 collection_dialog, import_dialog, anki_export_dialog, book_dossier_dialog,
-tag_manager, settings_dialog, flashcards_dialog, ollama_wizard):
+tag_manager, settings_dialog, flashcards_dialog, ollama_wizard) e, desde a
+Onda 0b (1/2), também rag_panel e annotation_panel:
 
 1. Os widgets/diálogos continuam construíveis sob os 3 temas, sem exceção.
 2. Os objectNames-chave introduzidos na migração existem (contrato mínimo
    entre .py e as regras QSS em styles.py).
-3. As exceções documentadas (cor vinda de DADO — TagBadge, swatch de cor)
+3. As exceções documentadas (cor vinda de DADO — TagBadge, swatch de cor,
+   barra/paleta de cor de destaque do AnnotationItem/AnnotationPanel)
    permanecem com ``setStyleSheet`` inline calculado em runtime.
 
 Não reinstancia MainWindow (pesada). Não asserta o valor exato de cor —
@@ -17,7 +19,7 @@ MECANISMO (objectName aplicado, nenhuma exceção na construção).
 from unittest.mock import MagicMock
 
 import pytest
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QWidget
 
 from src.core.config import ConfigManager
 from src.core.database import LibraryDB
@@ -33,6 +35,8 @@ from src.gui.settings_dialog import SettingsDialog
 from src.gui.dialogs.flashcards_dialog import FlashcardsDialog
 from src.gui.dialogs.ollama_wizard import OllamaWizardDialog
 from src.gui.dialogs.shortcuts_dialog import ShortcutsDialog
+from src.gui.widgets.rag_panel import RAGPanel
+from src.gui.widgets.annotation_panel import AnnotationItem, AnnotationPanel
 
 
 @pytest.fixture(autouse=True)
@@ -102,6 +106,17 @@ def test_widgets_build_under_every_theme(qtbot, db, config, theme_css):
         (lambda: FlashcardsDialog(db, current_book_id=bid), None),
         (lambda: OllamaWizardDialog(), None),
         (lambda: ShortcutsDialog(), None),  # Onda 4 — novo diálogo, mesmo padrão de objectName
+        # Onda 0b (1/2): rag_panel e annotation_panel. O exercise do RAGPanel
+        # percorre os estados dinâmicos (objectName-swap + repolish) do badge.
+        (lambda: RAGPanel(),
+         lambda w: (w.set_ollama_status(True, "m"), w.set_ollama_status(False))),
+        (lambda: AnnotationPanel(),
+         lambda w: w.load_annotations([])),
+        (lambda: AnnotationItem(
+            {"annotation_type": "highlight", "content": "c", "title": "t",
+             "page_number": 1, "created_at": "2026-07-18 10:00",
+             "highlight_color": "#fbbf24", "id": 1}),
+         lambda w: w.set_theme("dark")),
     ]
     for factory, exercise in cases:
         widget = factory()
@@ -123,6 +138,34 @@ def test_migrated_widgets_have_no_inline_stylesheet(qtbot, db):
     assert details._title.styleSheet() == ""
     assert details._author.styleSheet() == ""
 
+    # Onda 0b (1/2): rag_panel — zero setStyleSheet (estado dinâmico virou
+    # objectName-swap; troca de tema é coberta pela folha da QApplication).
+    rag = RAGPanel()
+    qtbot.addWidget(rag)
+    assert rag.styleSheet() == ""
+    assert rag._send_btn.styleSheet() == ""
+    assert rag._status_badge.styleSheet() == ""
+    rag.set_ollama_status(True, "gemma4:e4b")
+    assert rag._status_badge.styleSheet() == ""  # estado muda via objectName
+    rag.set_theme("light")
+    assert rag._header.styleSheet() == ""        # set_theme não remonta QSS
+
+    # Onda 0b (1/2): annotation_panel — só as exceções de DADO ficam inline.
+    panel = AnnotationPanel()
+    qtbot.addWidget(panel)
+    assert panel.styleSheet() == ""
+    assert panel._title.styleSheet() == ""
+    assert panel._add_note_btn.styleSheet() == ""
+    panel.set_theme("sepia")
+    assert panel.styleSheet() == ""
+
+    item = AnnotationItem({"annotation_type": "note", "content": "c",
+                           "page_number": 0, "id": 1})
+    qtbot.addWidget(item)
+    assert item.styleSheet() == ""
+    assert item._page_btn.styleSheet() == ""
+    assert item._del_btn.styleSheet() == ""
+
 
 def test_data_driven_colors_remain_inline_exception(qtbot):
     """TagBadge e o swatch de cor: exceção documentada (cor é DADO)."""
@@ -130,6 +173,14 @@ def test_data_driven_colors_remain_inline_exception(qtbot):
     qtbot.addWidget(badge)
     # Continuam inline pois a cor vem do registro da tag, não do tema.
     assert "#ef4444" in badge.styleSheet()
+
+    # Onda 0b: a barra de cor do destaque (AnnotationItem) também é DADO —
+    # a cor vem do registro da anotação, não do tema.
+    item = AnnotationItem({"annotation_type": "highlight", "content": "c",
+                           "page_number": 0, "highlight_color": "#ef4444",
+                           "id": 1})
+    qtbot.addWidget(item)
+    assert any("#ef4444" in w.styleSheet() for w in item.findChildren(QWidget))
 
 
 def test_key_object_names_present(qtbot, db):
@@ -146,6 +197,27 @@ def test_key_object_names_present(qtbot, db):
     wizard = OllamaWizardDialog()
     qtbot.addWidget(wizard)
     assert wizard.objectName() == "wizardDialog"
+
+    # Onda 0b (1/2): rag_panel e annotation_panel.
+    rag = RAGPanel()
+    qtbot.addWidget(rag)
+    assert rag._send_btn.objectName() == "ragSendBtn"
+    assert rag._status_badge.objectName() == "ragStatusChecking"
+    rag.set_ollama_status(True, "m")
+    assert rag._status_badge.objectName() == "ragStatusOnline"
+    rag.set_ollama_status(False)
+    assert rag._status_badge.objectName() == "ragStatusOffline"
+    assert rag._thinking_indicator.objectName() == "ragThinkingIndicator"
+
+    panel = AnnotationPanel()
+    qtbot.addWidget(panel)
+    assert panel.objectName() == "annotationPanel"
+
+    item = AnnotationItem({"annotation_type": "note", "content": "c",
+                           "page_number": 0, "id": 1})
+    qtbot.addWidget(item)
+    assert item.objectName() == "annotationItem"
+    assert item._page_btn.objectName() == "annotationItemPageBtn"
 
 
 def test_theme_propagation_still_works_after_migration(qtbot):
