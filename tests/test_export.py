@@ -80,3 +80,64 @@ class TestExportAnnotations:
         result = export_annotations_markdown(db, book_id, tmp_path / "result.md")
         assert isinstance(result, Path)
         assert result.name == "result.md"
+
+
+class TestExportTiposDaIAETiposDesconhecidos:
+    """Regressão do relato real (2026-07-18): livro só com anotações da IA
+    exportava o cabeçalho ("Total: 2 anotações") e corpo VAZIO — os tipos
+    ai_note/ai_bookmark não estavam no dicionário de seções."""
+
+    @pytest.fixture
+    def db_ai(self, tmp_path):
+        db = LibraryDB(tmp_path / "ai.db")
+        book_id = db.add_book(
+            title="Livro IA", author="A", file_path=str(tmp_path / "a.pdf"),
+            file_format="pdf",
+        )
+        db.add_annotation(
+            book_id=book_id, page_number=10,
+            content="Explicação gerada pela IA\ncom segunda linha",
+            highlight_color="", annotation_type="ai_note",
+        )
+        db.add_annotation(
+            book_id=book_id, page_number=20, content="Ponto marcado pela IA",
+            highlight_color="", annotation_type="ai_bookmark",
+        )
+        return db, book_id
+
+    def test_conteudo_de_ai_note_e_ai_bookmark_aparece_no_corpo(self, db_ai, tmp_path):
+        db, book_id = db_ai
+        out = export_annotations_markdown(db, book_id, tmp_path / "out.md")
+        content = out.read_text(encoding="utf-8")
+        assert "Explicação gerada pela IA" in content
+        assert "Ponto marcado pela IA" in content
+        assert "Notas da IA" in content
+        assert "Marcadores da IA" in content
+
+    def test_total_do_cabecalho_bate_com_o_corpo(self, db_ai, tmp_path):
+        db, book_id = db_ai
+        out = export_annotations_markdown(db, book_id, tmp_path / "out.md")
+        content = out.read_text(encoding="utf-8")
+        assert "**Total:** 2 anotações" in content
+        assert content.count("### Página") == 2
+
+    def test_conteudo_multilinha_vira_blockquote_completo(self, db_ai, tmp_path):
+        db, book_id = db_ai
+        out = export_annotations_markdown(db, book_id, tmp_path / "out.md")
+        content = out.read_text(encoding="utf-8")
+        assert "> com segunda linha" in content
+
+    def test_tipo_desconhecido_futuro_nao_e_descartado(self, tmp_path):
+        db = LibraryDB(tmp_path / "x.db")
+        book_id = db.add_book(
+            title="Livro X", author="A", file_path=str(tmp_path / "x.pdf"),
+            file_format="pdf",
+        )
+        db.add_annotation(
+            book_id=book_id, page_number=1, content="Conteúdo tipo novo",
+            highlight_color="", annotation_type="tipo_futuro",
+        )
+        out = export_annotations_markdown(db, book_id, tmp_path / "out.md")
+        content = out.read_text(encoding="utf-8")
+        assert "Conteúdo tipo novo" in content
+        assert "Outras" in content
