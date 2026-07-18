@@ -26,14 +26,27 @@ def export_annotations_markdown(db: LibraryDB, book_id: int, output_path: str | 
         "",
     ]
 
-    # Agrupa por tipo
-    types = {"note": "📝 Notas", "highlight": "🖍️ Destaques", "bookmark": "🔖 Marcadores"}
+    # Agrupa por tipo. BUG corrigido (2026-07-18, relato real): o dicionário
+    # cobria só note/highlight/bookmark — anotações geradas pela IA
+    # (ai_note/ai_bookmark) entravam no TOTAL do cabeçalho mas eram puladas
+    # no corpo (arquivo saía "vazio"). Tipos desconhecidos futuros caem na
+    # seção "Outras" — o corpo nunca mais diverge do total.
+    types = {
+        "note": "📝 Notas",
+        "highlight": "🖍️ Destaques",
+        "bookmark": "🔖 Marcadores",
+        "ai_note": "🤖 Notas da IA",
+        "ai_bookmark": "🤖 Marcadores da IA",
+    }
     grouped: dict[str, list] = {}
     for ann in annotations:
         t = ann.get("annotation_type", "note")
         grouped.setdefault(t, []).append(ann)
 
-    for ann_type, label in types.items():
+    ordered = list(types.items()) + [
+        (t, f"📌 Outras ({t})") for t in grouped if t not in types
+    ]
+    for ann_type, label in ordered:
         items = grouped.get(ann_type, [])
         if not items:
             continue
@@ -41,13 +54,16 @@ def export_annotations_markdown(db: LibraryDB, book_id: int, output_path: str | 
         lines.append("")
         for ann in sorted(items, key=lambda a: a.get("page_number", 0)):
             page = ann.get("page_number", 0) + 1
+            title_ann = (ann.get("title") or "").strip()
             content = ann.get("content", "")
-            date = ann.get("created_at", "")[:16]
+            date = (ann.get("created_at") or "")[:16]
             color = ann.get("highlight_color", "")
 
-            lines.append(f"### Página {page}")
+            lines.append(f"### Página {page}" + (f" — {title_ann}" if title_ann else ""))
             if content:
-                lines.append(f"> {content}")
+                # Blockquote multilinha: cada linha do conteúdo prefixada,
+                # senão só a 1ª linha ficaria dentro da citação no Markdown.
+                lines.extend(f"> {ln}" for ln in str(content).splitlines())
             if color and ann_type == "highlight":
                 lines.append(f"*Cor: {color}*")
             if date:
