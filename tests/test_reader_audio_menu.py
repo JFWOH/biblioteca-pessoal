@@ -116,16 +116,15 @@ def test_audio_menu_has_explicit_original_translated_pair():
     assert "self._overflow_menu.addAction(self._act_read_translated)" in src
 
 
-def test_listen_original_is_one_shot_and_ignores_translate_mode():
-    """'Ouvir original' narra a página atual SEM encadear a próxima
-    (chain_continuous=False), sem consultar o modo traduzido e sem alterar
-    os toggles persistidos (nenhum config.set)."""
+def test_listen_original_delegates_to_shared_helpers():
+    """'Ouvir original' reutiliza _current_page_text() (extração) e
+    narrate_text() (stop+launch), em vez de re-implementar os dois caminhos.
+    chain_continuous=True: a narração é do original DESTA página, mas a
+    continuidade segue os toggles (desligados → nada encadeia)."""
     src = _src()
     body = _method_body(src, "_on_listen_original")
-    assert "self._stop_audio_if_running()" in body
-    assert "self._launch_audio_worker(page_text, chain_continuous=False)" in body
-    assert "if self._continuous_translate_mode:" not in body
-    assert "config.set(" not in body
+    assert "self._current_page_text().strip()" in body
+    assert "self.narrate_text(page_text, chain_continuous=True)" in body
 
 
 def test_anchor_fallback_no_longer_uses_removed_widget():
