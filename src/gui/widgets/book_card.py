@@ -46,35 +46,97 @@ class BookCard(QWidget):
             self.setToolTip(f"⚠️ Arquivo não encontrado:\n{file_path}")
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(6)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(10, 10, 10, 10)
+        self._layout.setSpacing(6)
+        # Capa: criada em _build_contents e REAPROVEITADA na reciclagem
+        # (update_book) quando (broken, cover_path) não muda — o load+scale do
+        # QPixmap é a parte mais cara do card (perf/gui).
+        self._cover_label = None
+        self._cover_key = None
+        self._build_contents()
 
-        # Capa
-        self._cover_label = QLabel()
-        self._cover_label.setFixedSize(COVER_WIDTH, COVER_HEIGHT)
-        self._cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._cover_label.setScaledContents(True)
+    def update_book(self, book_data: dict) -> None:
+        """Reconfigura o card in-place para outro livro (reciclagem, perf/gui).
 
-        if self._is_broken:
-            self._set_broken_cover()
-        else:
-            cover_path = self._book.get("cover_path", "")
-            if cover_path:
-                pixmap = QPixmap(cover_path)
-                if not pixmap.isNull():
-                    self._cover_label.setPixmap(
-                        pixmap.scaled(
-                            COVER_WIDTH, COVER_HEIGHT,
-                            Qt.AspectRatioMode.KeepAspectRatio,
-                            Qt.TransformationMode.SmoothTransformation,
+        Usado por ``LibraryView._refresh_grid`` para ATUALIZAR os cards
+        existentes por posição em vez de destruir/recriar todos (~1 ms/card).
+        Conteúdo idêntico (ex.: reflow de colunas no ``resizeEvent``) é
+        curto-circuitado — nada é reconstruído.
+        """
+        if book_data == self._book:
+            self._book = book_data
+            return
+        self._book = book_data
+        self._book_id = book_data.get("id", 0)
+        file_path = book_data.get("file_path", "")
+        self._is_broken = bool(file_path) and not Path(file_path).exists()
+        self.setToolTip(
+            f"⚠️ Arquivo não encontrado:\n{file_path}" if self._is_broken else "")
+        if self._is_selected:
+            # Reciclagem reseta o visual de seleção SEM emitir selected_changed
+            # (não é uma ação do usuário; a view já limpou _selected_ids).
+            self._is_selected = False
+            self.setProperty("selected", False)
+            self.style().unpolish(self)
+            self.style().polish(self)
+        self._clear_contents()
+        self._build_contents()
+
+    def _clear_contents(self) -> None:
+        """Esvazia o layout para repopular na reciclagem. A capa é apenas
+        DESTACADA (não destruída): ``_build_contents`` decide reaproveitá-la
+        ou recriá-la conforme a chave (broken, cover_path)."""
+
+        def _clear(layout):
+            while layout.count():
+                item = layout.takeAt(0)
+                w = item.widget()
+                if w is not None:
+                    if w is self._cover_label:
+                        continue  # preservada para possível reuso
+                    w.deleteLater()
+                elif item.layout() is not None:
+                    _clear(item.layout())
+                    item.layout().deleteLater()
+
+        _clear(self._layout)
+
+    def _build_contents(self) -> None:
+        """Preenche o layout com o conteúdo do livro atual (``self._book``)."""
+        layout = self._layout
+
+        # Capa — reaproveitada quando o estado visual não mudou.
+        cover_key = (self._is_broken,
+                     "" if self._is_broken else self._book.get("cover_path", ""))
+        if self._cover_label is None or cover_key != self._cover_key:
+            if self._cover_label is not None:
+                self._cover_label.deleteLater()
+            self._cover_label = QLabel()
+            self._cover_label.setFixedSize(COVER_WIDTH, COVER_HEIGHT)
+            self._cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._cover_label.setScaledContents(True)
+
+            if self._is_broken:
+                self._set_broken_cover()
+            else:
+                cover_path = self._book.get("cover_path", "")
+                if cover_path:
+                    pixmap = QPixmap(cover_path)
+                    if not pixmap.isNull():
+                        self._cover_label.setPixmap(
+                            pixmap.scaled(
+                                COVER_WIDTH, COVER_HEIGHT,
+                                Qt.AspectRatioMode.KeepAspectRatio,
+                                Qt.TransformationMode.SmoothTransformation,
+                            )
                         )
-                    )
-                    self._cover_label.setObjectName("bookCoverImage")
+                        self._cover_label.setObjectName("bookCoverImage")
+                    else:
+                        self._set_placeholder_cover()
                 else:
                     self._set_placeholder_cover()
-            else:
-                self._set_placeholder_cover()
+            self._cover_key = cover_key
 
         layout.addWidget(self._cover_label)
 

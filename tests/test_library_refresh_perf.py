@@ -7,6 +7,11 @@ destruídos/recriados — reconstrução completa custa ~1 ms/card (medida em
 à biblioteca sem mudança de dados. ``_refresh_grid`` também passou a suspender
 repaints (``setUpdatesEnabled``) durante a reconstrução.
 
+Rodada 4 (perf/gui): quando a lista MUDA, ``_refresh_grid`` RECICLA os cards
+in-place (``BookCard.update_book`` por posição, criando/removendo só o delta
+de tamanho) em vez de destruir/recriar todos — os testes de "lista mudou"
+agora afirmam a reciclagem (mesmo objeto, conteúdo novo).
+
 Estes testes são FUNCIONAIS (identidade de objetos, estados visuais) — nunca
 de tempo: medição de tempo fica fora da suíte, no script de profiling.
 """
@@ -50,31 +55,74 @@ def test_reload_identical_with_same_progress_map_reuses_cards(view):
     assert view._cards == before
 
 
-def test_reload_with_changed_title_rebuilds(view):
+def test_reload_with_changed_title_recycles_card_in_place(view):
+    """Rodada 4 (perf/gui): título mudou → o MESMO BookCard é reconfigurado
+    (update_book), não destruído/recriado."""
     view.load_books([_book(1, title="Original")])
     before = list(view._cards)
 
     view.load_books([_book(1, title="Renomeado")])
 
-    assert view._cards[0] is not before[0]
+    assert view._cards[0] is before[0], "card deve ser reciclado, não recriado"
     assert view._cards[0].book_data["title"] == "Renomeado"
 
 
-def test_reload_with_changed_progress_rebuilds(view):
+def test_reload_with_changed_progress_recycles_card_in_place(view):
     view.load_books([_book(1)], progress_map={1: 10.0})
     before = list(view._cards)
 
     view.load_books([_book(1)], progress_map={1: 20.0})
 
-    assert view._cards[0] is not before[0]
+    assert view._cards[0] is before[0], "card deve ser reciclado, não recriado"
     assert view._cards[0].book_data["percentage"] == 20.0
 
 
-def test_reload_with_different_list_rebuilds(view):
+def test_reload_with_different_list_shrinks_by_delta(view):
     view.load_books([_book(1), _book(2)])
+    first_card = view._cards[0]
     view.load_books([_book(1)])
     assert len(view._cards) == 1
+    assert view._cards[0] is first_card  # posição 0 reciclada; só o delta saiu
     assert view._count_label.text().startswith("1 ")
+
+
+def test_reload_with_longer_list_grows_by_delta(view):
+    view.load_books([_book(1)])
+    first_card = view._cards[0]
+    view.load_books([_book(1), _book(2)])
+    assert len(view._cards) == 2
+    assert view._cards[0] is first_card  # existente reciclado
+    assert view._cards[1]._book_id == 2  # só o delta foi criado
+
+
+def test_recycled_card_shows_new_book_everywhere(view):
+    """A reciclagem reconfigura TODO o conteúdo do card: id, broken e progresso."""
+    view.load_books([_book(1, title="Um")])
+    card = view._cards[0]
+
+    view.load_books(
+        [{"id": 9, "title": "Outro", "file_path": "/caminho/fantasma.epub"}],
+        progress_map={9: 60.0},
+    )
+
+    assert view._cards[0] is card
+    assert card._book_id == 9
+    assert card.is_broken is True
+    assert card._progress_bar is not None
+    assert card._progress_bar.value() == 60
+
+
+def test_recycled_card_resets_selection_visual(view):
+    """Card selecionado que recebe OUTRO livro não pode continuar com o visual
+    de seleção (a view já limpou _selected_ids no load_books)."""
+    view.load_books([_book(1), _book(2)])
+    view._toggle_selection(1)
+    assert view._cards[0].is_selected
+
+    view.load_books([_book(3), _book(4)])  # lista diferente → recicla
+
+    assert view._selected_ids == set()
+    assert all(not c.is_selected for c in view._cards)
 
 
 # ── Atalho preserva a semântica de seleção e dos estados vazios ─────────────
