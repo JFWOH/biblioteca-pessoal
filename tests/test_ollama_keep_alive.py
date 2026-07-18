@@ -64,6 +64,48 @@ def test_orchestrator_chat_payload(monkeypatch):
     assert captured[0][1]["keep_alive"] == OLLAMA_KEEP_ALIVE
 
 
+def _fake_stream_urlopen(captured):
+    """urlopen fake que grava o payload e responde um stream mínimo do /api/chat."""
+    def fake(req, timeout=None):
+        captured.append(json.loads(req.data.decode("utf-8")) if req.data else {})
+        resp = MagicMock()
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        resp.__iter__ = lambda s: iter([
+            json.dumps({"message": {"content": "ok"}, "done": True}).encode("utf-8"),
+        ])
+        return resp
+    return fake
+
+
+def test_orchestrator_sends_num_ctx_default():
+    """rag.num_ctx (default 8192) chega ao Ollama em options.num_ctx.
+
+    Sem num_ctx explícito o Ollama assume 4096, que trunca o prompt do RAG.
+    """
+    from src.core.rag.orchestrator import Orchestrator
+    engine = MagicMock()
+    engine._llm_model = "gemma4:e4b"
+    engine._ollama_url = "http://localhost:11434"
+    captured = []
+    with patch("urllib.request.urlopen", side_effect=_fake_stream_urlopen(captured)):
+        list(Orchestrator(engine)._stream_chat([{"role": "user", "content": "oi"}]))
+    assert captured[0]["options"]["num_ctx"] == 8192
+
+
+def test_orchestrator_num_ctx_is_injectable():
+    """O num_ctx do construtor (injetado pela GUI a partir da config) prevalece."""
+    from src.core.rag.orchestrator import Orchestrator
+    engine = MagicMock()
+    engine._llm_model = "gemma4:e4b"
+    engine._ollama_url = "http://localhost:11434"
+    captured = []
+    with patch("urllib.request.urlopen", side_effect=_fake_stream_urlopen(captured)):
+        list(Orchestrator(engine, num_ctx=16384)._stream_chat(
+            [{"role": "user", "content": "oi"}]))
+    assert captured[0]["options"]["num_ctx"] == 16384
+
+
 def test_proactive_worker_payload(qtbot):
     from src.gui.workers.proactive_worker import ProactiveWorker
     worker = ProactiveWorker(model="gemma4:e4b", page_text="texto da página")

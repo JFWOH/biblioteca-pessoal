@@ -640,9 +640,10 @@ class TestThinkingStatusFeedback:
         assert "Deixe-me pensar" not in answer
         assert "Capitu é a personagem central." in answer
         # Status de raciocínio emitido antes do content, escrita ao começar.
-        assert any("Raciocinando" in s for s in statuses)
+        # (Marcador "💭 Pensando… (N tokens · Ns)" — observabilidade do RAG.)
+        assert any("Pensando" in s for s in statuses)
         assert any("Escrevendo" in s for s in statuses)
-        assert statuses.index(next(s for s in statuses if "Raciocinando" in s)) < \
+        assert statuses.index(next(s for s in statuses if "Pensando" in s)) < \
             statuses.index(next(s for s in statuses if "Escrevendo" in s))
 
     def test_stream_without_thinking_only_signals_writing(self, mock_engine):
@@ -657,7 +658,7 @@ class TestThinkingStatusFeedback:
                     "Pergunta simples", status_callback=statuses.append))
 
         assert "Resposta direta." in "".join(tokens)
-        assert not any("Raciocinando" in s for s in statuses)
+        assert not any("Pensando" in s for s in statuses)
         assert any("Escrevendo" in s for s in statuses)
 
     def test_query_rag_without_status_callback_keeps_working(self, mock_engine):

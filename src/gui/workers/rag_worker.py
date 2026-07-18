@@ -52,15 +52,20 @@ class RAGWorker(QThread):
         mode: str = MODE_QUERY,
         question: str = "",
         book_id: int | None = None,
+        num_ctx: int = 8192,
         parent=None,
     ) -> None:
         super().__init__(parent)
-        # Compatibilidade elegante com instâncias legadas de RAGEngine
+        # Compatibilidade elegante com instâncias legadas de RAGEngine.
+        # ``num_ctx`` (janela de contexto do Ollama, lido de rag.num_ctx pela
+        # MainWindow) é injetado no Orchestrator que criamos aqui. Se já veio um
+        # Orchestrator pronto, respeitamos o num_ctx dele (ADR-006: o core puro
+        # não lê config; a GUI injeta).
         if isinstance(engine, Orchestrator):
             self._orchestrator = engine
             self._engine = engine.engine
         else:
-            self._orchestrator = Orchestrator(engine)
+            self._orchestrator = Orchestrator(engine, num_ctx=num_ctx)
             self._engine = engine
             
         self._mode = mode
