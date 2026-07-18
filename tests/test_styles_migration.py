@@ -112,11 +112,13 @@ def test_widgets_build_under_every_theme(qtbot, db, config, theme_css):
          lambda w: (w.set_ollama_status(True, "m"), w.set_ollama_status(False))),
         (lambda: AnnotationPanel(),
          lambda w: w.load_annotations([])),
+        # AnnotationItem não tem mais set_theme (API morta removida na
+        # auditoria da Onda 0b — o QSS central cobre o item por objectName).
         (lambda: AnnotationItem(
             {"annotation_type": "highlight", "content": "c", "title": "t",
              "page_number": 1, "created_at": "2026-07-18 10:00",
              "highlight_color": "#fbbf24", "id": 1}),
-         lambda w: w.set_theme("dark")),
+         None),
     ]
     for factory, exercise in cases:
         widget = factory()

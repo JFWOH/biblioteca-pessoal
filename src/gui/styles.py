@@ -1561,6 +1561,10 @@ QPushButton#ragModelApplyBtn:disabled { background: #1f2937; color: #374151;
    Exceção de DADO (permanece inline no .py): cor do destaque (color_bar)
    e swatches da paleta — a cor vem do registro/paleta, não do tema. */
 #annotationPanel { background-color: #0f1115; }
+/* O setStyleSheet antigo cascateava o bg aos descendentes; a regra por id
+   não — sem transparência, o viewport do scroll ficaria com o bg global. */
+#annotationPanel QScrollArea { background: transparent; }
+#annotationPanel QScrollArea > QWidget > QWidget { background: transparent; }
 #annotationPanelTitle { color: #e5e7eb; }
 QComboBox#annotationTypeFilter {
     background-color: #0f1115; border: 1px solid #2d333f;
@@ -3112,8 +3116,8 @@ QPushButton#ragReasonChipBtn {
 QPushButton#ragReasonChipBtn:hover { background: rgba(16, 185, 129, 0.12);
                         color: #10b981; border-color: #10b981; }
 QLineEdit#ragReasonEdit {
-    background: transparent; border: 1px solid #3f3f46;
-    border-radius: 8px; color: #e5e7eb;
+    background: transparent; border: 1px solid #d4d4d8;
+    border-radius: 8px; color: #1A1A1A;
     padding: 4px 10px; font-size: 11px;
 }
 QLineEdit#ragReasonEdit:focus { border-color: #10b981; }
@@ -3195,6 +3199,8 @@ QPushButton#ragModelApplyBtn:disabled { background: #1f2937; color: #374151;
    Exceção de DADO (permanece inline no .py): cor do destaque (color_bar)
    e swatches da paleta — a cor vem do registro/paleta, não do tema. */
 #annotationPanel { background-color: #ffffff; }
+#annotationPanel QScrollArea { background: transparent; }
+#annotationPanel QScrollArea > QWidget > QWidget { background: transparent; }
 #annotationPanelTitle { color: #1A1A1A; }
 QComboBox#annotationTypeFilter {
     background-color: #ffffff; border: 1px solid #d4d4d8;
@@ -4747,8 +4753,8 @@ QPushButton#ragReasonChipBtn {
 QPushButton#ragReasonChipBtn:hover { background: rgba(16, 185, 129, 0.12);
                         color: #10b981; border-color: #10b981; }
 QLineEdit#ragReasonEdit {
-    background: transparent; border: 1px solid #3f3f46;
-    border-radius: 8px; color: #e5e7eb;
+    background: transparent; border: 1px solid #d4cbb8;
+    border-radius: 8px; color: #433422;
     padding: 4px 10px; font-size: 11px;
 }
 QLineEdit#ragReasonEdit:focus { border-color: #10b981; }
@@ -4830,6 +4836,8 @@ QPushButton#ragModelApplyBtn:disabled { background: #1f2937; color: #374151;
    Exceção de DADO (permanece inline no .py): cor do destaque (color_bar)
    e swatches da paleta — a cor vem do registro/paleta, não do tema. */
 #annotationPanel { background-color: #faf5ed; }
+#annotationPanel QScrollArea { background: transparent; }
+#annotationPanel QScrollArea > QWidget > QWidget { background: transparent; }
 #annotationPanelTitle { color: #5B4636; }
 QComboBox#annotationTypeFilter {
     background-color: #faf5ed; border: 1px solid #d4cbb8;

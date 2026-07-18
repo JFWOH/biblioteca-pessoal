@@ -497,6 +497,8 @@ class RAGPanel(QWidget):
     def _swap_object_name(self, widget, object_name: str) -> None:
         """Troca o objectName do widget (estado dinâmico) e força o repolish
         do QSS — mesmo padrão usado em ``AnkiExportDialog`` e ``OllamaWizardDialog``."""
+        if widget.objectName() == object_name:
+            return  # estado inalterado — evita repolish à toa
         widget.setObjectName(object_name)
         widget.style().unpolish(widget)
         widget.style().polish(widget)

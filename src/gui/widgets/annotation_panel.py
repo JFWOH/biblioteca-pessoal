@@ -21,7 +21,6 @@ class AnnotationItem(QFrame):
         self.setObjectName("annotationItem")
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self._setup_ui()
-        self.set_theme("dark")
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -116,12 +115,6 @@ class AnnotationItem(QFrame):
             self.rename_requested.emit(
                 self._annotation.get("id", 0), new_title.strip())
 
-    def set_theme(self, theme: str):
-        """Tema aplicado via QSS central (styles.py, seletores #annotationItem*),
-        herdada da folha da QApplication (Onda 0b). Mantido só para compat de
-        API — quem chama (AnnotationPanel.set_theme) continua funcionando."""
-        self._theme = theme
-
 
 class AnnotationPanel(QWidget):
     """Painel lateral para gerenciar anotações de um livro."""
@@ -145,6 +138,10 @@ class AnnotationPanel(QWidget):
         self._book_id = 0
         self._current_page = 0
         self.setObjectName("annotationPanel")
+        # Sem este atributo, QWidget SUBCLASSE não pinta background vindo de
+        # QSS (#annotationPanel { background-color } seria regra morta) — o
+        # antigo setStyleSheet inline pintava por cascata; o QSS central não.
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         # Largura mínima razoável; sem máximo, para preencher todo o dock.
         self.setMinimumWidth(240)
         self._setup_ui()
@@ -254,19 +251,10 @@ class AnnotationPanel(QWidget):
         self._count_label.setObjectName("annotationCountLabel")
         layout.addWidget(self._count_label)
 
-        self.set_theme("dark")
-
     def set_theme(self, theme: str):
-        """Tema aplicado via QSS central (styles.py, seletores #annotation*),
-        herdada da folha da QApplication (Onda 0b). Mantido para compat de API
-        (reader_view chama a cada troca de tema) e para propagar aos itens já
-        carregados na lista (AnnotationItem.set_theme, hoje também um no-op
-        de estilo — QSS central cobre ambos)."""
-        self._theme = theme
-        for i in range(self._list_layout.count()):
-            w = self._list_layout.itemAt(i).widget()
-            if isinstance(w, AnnotationItem):
-                w.set_theme(theme)
+        """No-op de compat: o tema vem do QSS central da QApplication
+        (styles.py, seletores #annotation*, Onda 0b) — nada a propagar por
+        widget. Mantido porque reader_view chama a cada troca de tema."""
 
     def set_page(self, page: int):
         """Define a página atual para novas anotações."""
@@ -292,8 +280,6 @@ class AnnotationPanel(QWidget):
 
         for ann in filtered_annotations:
             widget = AnnotationItem(ann)
-            if hasattr(self, "_theme"):
-                widget.set_theme(self._theme)
             widget.delete_requested.connect(self.annotation_deleted.emit)
             widget.goto_requested.connect(self.goto_page.emit)
             widget.rename_requested.connect(self.annotation_renamed.emit)
