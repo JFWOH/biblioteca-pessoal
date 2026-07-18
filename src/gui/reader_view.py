@@ -544,6 +544,13 @@ class ReaderView(QWidget):
         # Traduzir a página como TEXTO (cartão no painel), sem narrar.
         self._act_translate_page = QAction("🌐 Traduzir Página (texto)", self)
         self._act_translate_page.triggered.connect(self._on_translate_page)
+        # Atalho de tradução TAMBÉM no menu do botão de áudio (pedido do
+        # usuário, 2026-07-17: o modo traduzido ficava "escondido" no menu ⋯ e
+        # a troca era lenta). São as MESMAS QActions dos dois menus — o Qt
+        # sincroniza o estado (check) automaticamente entre eles.
+        self._audio_menu.addSeparator()
+        self._audio_menu.addAction(self._act_continuous_translate)
+        self._audio_menu.addAction(self._act_read_translated)
         self._overflow_menu.addAction(self._act_double_page)
         self._overflow_menu.addAction(self._act_highlight)
         self._overflow_menu.addSeparator()
