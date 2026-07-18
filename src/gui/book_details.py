@@ -215,8 +215,14 @@ class BookDetails(QWidget):
         if cover_path:
             pixmap = QPixmap(cover_path)
             if not pixmap.isNull():
+                # Largura limitada ao VIEWPORT real do painel (não os 250px
+                # fixos de antes): com o scroll horizontal desligado, um
+                # pixmap mais largo que o painel era pintado além do rótulo e
+                # CORTADO na borda (sintoma real do usuário, 2026-07-17).
+                viewport_w = self._info_scroll.viewport().width()
+                avail_w = (viewport_w - 32) if viewport_w > 60 else 250
                 self._cover.setPixmap(pixmap.scaled(
-                    250, 280, Qt.AspectRatioMode.KeepAspectRatio,
+                    min(250, avail_w), 280, Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 ))
             else:

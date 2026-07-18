@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QLabel, QGridLayout,
-    QHBoxLayout, QPushButton, QFrame, QProgressBar, QComboBox,
+    QHBoxLayout, QPushButton, QFrame, QProgressBar, QComboBox, QSizePolicy,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QCursor
@@ -286,6 +286,14 @@ class LibraryView(QWidget):
 
         self._continue_cards: list[_ContinueReadingCard] = []
         self._continue_widget.hide()
+        # Política vertical FIXED: sem isto o QVBoxLayout distribui espaço
+        # excedente também para a faixa (Preferred cresce), esticando-a de
+        # ~224px para 400+px com vazios acima/abaixo do scroll interno —
+        # medido pela sonda offscreen em 2026-07-17 (faixa 423px, scroll a
+        # y=99). Todo o excedente deve ir para a GRADE (stretch=1 abaixo).
+        self._continue_widget.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+        )
         layout.addWidget(self._continue_widget)
 
         # ── Barra de ação em lote (flutuante, visível ao selecionar) ─────────
@@ -363,7 +371,7 @@ class LibraryView(QWidget):
         )
 
         scroll.setWidget(self._grid_container)
-        layout.addWidget(scroll)
+        layout.addWidget(scroll, stretch=1)
 
         # ── Estado vazio ──────────────────────────────────────────────────────
         self._empty_widget = QWidget()
