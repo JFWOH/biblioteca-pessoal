@@ -306,7 +306,8 @@ class BookDetails(QWidget):
         self._related_header.setVisible(bool(related))
         for rel in related:
             shared_n = int(rel.get("weight") or 0)
-            btn = QPushButton(f"📕 {rel['title']}  ({shared_n} em comum)")
+            btn = QPushButton(f"{rel['title']}  ({shared_n} em comum)")
+            btn.setIcon(emoji_icon("📕"))
             btn.setObjectName("bookDetailsRelatedBtn")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setToolTip("Em comum: " + ", ".join(rel.get("shared") or []))

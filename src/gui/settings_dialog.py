@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QFont
 
 from src.core.config import ConfigManager, DEFAULT_CONFIG
+from src.gui.styles import emoji_icon
 from src.utils.constants import (
     THEME_DARK, THEME_LIGHT, THEME_SEPIA,
     MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_FONT_SIZE,
@@ -70,7 +71,8 @@ class SettingsDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
 
-        save_btn = QPushButton("💾  Salvar")
+        save_btn = QPushButton("Salvar")
+        save_btn.setIcon(emoji_icon("💾"))
         save_btn.setObjectName("primaryBtn")
         save_btn.clicked.connect(self._save_and_close)
         btn_layout.addWidget(save_btn)

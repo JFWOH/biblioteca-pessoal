@@ -41,6 +41,7 @@ _EMOJI = re.compile(
 )
 
 _READER_VIEW = Path(__file__).resolve().parent.parent / "src" / "gui" / "reader_view.py"
+_MAIN_WINDOW = Path(__file__).resolve().parent.parent / "src" / "gui" / "main_window.py"
 
 # Botões de ação do BookDetails que passam a carregar o emoji como ícone.
 _BOOK_DETAILS_ICON_BTNS = (
@@ -353,3 +354,88 @@ def test_ai_response_card_buttons_have_no_emoji_in_text(qtbot):
     _assert_no_emoji_buttons(card)
     assert not card._stop_btn.icon().isNull()
     assert not card._retry_btn.icon().isNull()
+
+
+# ── Rodada A1 (débito Onda 4, contrato pós-PR #46): varredura final —
+# sidebar / settings_dialog / dialogs/ollama_wizard ─────────────────────
+
+def test_sidebar_buttons_have_no_emoji_in_text(qtbot):
+    from src.gui.sidebar import Sidebar
+    sidebar = Sidebar()
+    qtbot.addWidget(sidebar)
+    _assert_no_emoji_buttons(sidebar)
+    assert not sidebar.add_collection_btn.icon().isNull()
+    assert not sidebar._buttons["stats"].icon().isNull()
+    assert not sidebar._opds_btn.icon().isNull()
+
+    # Botão de coleção dinâmico: o nome (dado do usuário) vai pro texto,
+    # o emoji fixo ("📁") vai pro ícone — nunca concatenado no texto.
+    sidebar.add_collection_button("Ficção Científica", 1)
+    _assert_no_emoji_buttons(sidebar)
+    collection_btn = sidebar._buttons["collection_1"]
+    assert not collection_btn.icon().isNull()
+    assert collection_btn.text() == "Ficção Científica"
+
+
+def test_sidebar_opds_button_text_transition_keeps_icon_and_clean_text(qtbot):
+    """Mesma transição de texto feita por ``MainWindow._on_opds_toggled``
+    (liga/desliga o servidor OPDS, main_window.py) — o ícone é fixado uma
+    única vez no construtor do Sidebar e sobrevive à troca de ``.text()``;
+    nenhum dos dois estados pode reintroduzir o emoji no texto."""
+    from src.gui.sidebar import Sidebar
+    sidebar = Sidebar()
+    qtbot.addWidget(sidebar)
+    btn = sidebar._opds_btn
+    assert not btn.icon().isNull()
+    assert not _has_emoji(btn.text())
+
+    # Estado "ligado" (ramo `checked` de _on_opds_toggled).
+    btn.setText("Servidor ON (192.168.0.10)")
+    assert not _has_emoji(btn.text())
+    assert not btn.icon().isNull()
+
+    # Estado "desligado" (ramo `else` de _on_opds_toggled).
+    btn.setText("Iniciar Servidor OPDS")
+    assert not _has_emoji(btn.text())
+    assert not btn.icon().isNull()
+
+
+def test_main_window_opds_button_setText_calls_have_no_emoji_in_text():
+    """``main_window.py`` não é instanciado em teste (pesado — RAG/DB/GUI
+    reais); checagem estática do fonte, mesmo padrão do reader_view: nenhuma
+    chamada ``_opds_btn.setText(...)`` pode embutir o emoji no texto."""
+    src = _MAIN_WINDOW.read_text(encoding="utf-8")
+    offenders = [
+        f"setText: {m.group(2)!r}"
+        for m in re.finditer(r'_opds_btn\.setText\(\s*f?(["\'])(.*?)\1', src)
+        if _has_emoji(m.group(2))
+    ]
+    assert not offenders, "emoji no texto do botão OPDS (main_window.py):\n" + "\n".join(offenders)
+
+
+def test_settings_dialog_buttons_have_no_emoji_in_text(qtbot, tmp_path):
+    from src.core.config import ConfigManager
+    from src.gui.settings_dialog import SettingsDialog
+    config = ConfigManager(tmp_path / "config.json")
+    dlg = SettingsDialog(config)
+    qtbot.addWidget(dlg)
+    _assert_no_emoji_buttons(dlg)
+    save_buttons = [b for b in dlg.findChildren(QPushButton) if b.objectName() == "primaryBtn"]
+    assert save_buttons, "esperava o botão Salvar"
+    assert not save_buttons[0].icon().isNull()
+
+
+def test_ollama_wizard_buttons_have_no_emoji_in_text(qtbot):
+    from src.gui.dialogs.ollama_wizard import OllamaWizardDialog
+    wizard = OllamaWizardDialog()
+    qtbot.addWidget(wizard)
+    _assert_no_emoji_buttons(wizard)
+    assert not wizard._done_btn.icon().isNull()
+    assert not wizard._manual_btn.icon().isNull()
+
+    # Página de conclusão: sucesso e erro trocam ícone/label do QLabel (fora
+    # do escopo do bug) mas não devem afetar o texto dos botões.
+    wizard._on_install_complete(True, "instalado com sucesso")
+    _assert_no_emoji_buttons(wizard)
+    wizard._on_install_complete(False, "falhou")
+    _assert_no_emoji_buttons(wizard)

@@ -6,6 +6,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QFont
 
+from src.gui.styles import emoji_icon
+
 
 class Sidebar(QWidget):
     """Barra lateral com navegação por seções."""
@@ -13,13 +15,15 @@ class Sidebar(QWidget):
     section_changed = pyqtSignal(str)  # nome da seção
     opds_toggled = pyqtSignal(bool)    # estado do servidor
 
+    # (chave, emoji p/ ícone, rótulo SEM emoji) — o emoji embutido no texto
+    # do QPushButton sobrepõe o rótulo no Windows (ver styles.py::emoji_icon).
     SECTIONS = [
-        ("all", "📚  Todos os Livros"),
-        ("reading", "📖  Lendo"),
-        ("unread", "📋  Não Lidos"),
-        ("read", "✅  Lidos"),
-        ("favorites", "⭐  Favoritos"),
-        ("global_search", "🔍  Pesquisa Global"),
+        ("all", "📚", "Todos os Livros"),
+        ("reading", "📖", "Lendo"),
+        ("unread", "📋", "Não Lidos"),
+        ("read", "✅", "Lidos"),
+        ("favorites", "⭐", "Favoritos"),
+        ("global_search", "🔍", "Pesquisa Global"),
     ]
 
     def __init__(self, parent=None):
@@ -50,8 +54,9 @@ class Sidebar(QWidget):
         section_label.setObjectName("sidebarSection")
         layout.addWidget(section_label)
 
-        for key, label in self.SECTIONS:
+        for key, emoji, label in self.SECTIONS:
             btn = QPushButton(label)
+            btn.setIcon(emoji_icon(emoji))
             btn.setCheckable(True)
             btn.clicked.connect(lambda checked, k=key: self._on_section_click(k))
             layout.addWidget(btn)
@@ -68,7 +73,8 @@ class Sidebar(QWidget):
         self._collections_layout.setSpacing(2)
         layout.addLayout(self._collections_layout)
 
-        self.add_collection_btn = QPushButton("➕  Nova Coleção")
+        self.add_collection_btn = QPushButton("Nova Coleção")
+        self.add_collection_btn.setIcon(emoji_icon("➕"))
         self.add_collection_btn.setObjectName("secondaryBtn")
         layout.addWidget(self.add_collection_btn)
 
@@ -83,7 +89,8 @@ class Sidebar(QWidget):
         )
 
         # Botão de Estatísticas
-        stats_btn = QPushButton("📊  Estatísticas")
+        stats_btn = QPushButton("Estatísticas")
+        stats_btn.setIcon(emoji_icon("📊"))
         stats_btn.setCheckable(True)
         stats_btn.clicked.connect(lambda: self._on_section_click("stats"))
         layout.addWidget(stats_btn)
@@ -97,7 +104,8 @@ class Sidebar(QWidget):
 
         # Servidor OPDS
         layout.addSpacing(8)
-        self._opds_btn = QPushButton("📡  Iniciar Servidor OPDS")
+        self._opds_btn = QPushButton("Iniciar Servidor OPDS")
+        self._opds_btn.setIcon(emoji_icon("📡"))
         self._opds_btn.setCheckable(True)
         self._opds_btn.setObjectName("sidebarOpdsBtn")
         self._opds_btn.toggled.connect(self.opds_toggled.emit)
@@ -138,7 +146,8 @@ class Sidebar(QWidget):
     def add_collection_button(self, name: str, collection_id: int):
         """Adiciona um botão de coleção à sidebar."""
         key = f"collection_{collection_id}"
-        btn = QPushButton(f"📁  {name}")
+        btn = QPushButton(name)
+        btn.setIcon(emoji_icon("📁"))
         btn.setCheckable(True)
         btn.clicked.connect(lambda checked, k=key: self._on_section_click(k))
         self._collections_layout.addWidget(btn)
