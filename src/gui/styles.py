@@ -365,17 +365,31 @@ QToolTip {
     font-size: 12px;
 }
 
+/* ── Stat Card (grade de estatísticas, Onda A1) ──────
+   QFrame já pinta o próprio background/borda via QSS (não precisa de
+   WA_StyledBackground, diferente de subclasses de QWidget puro — Onda 0b).
+   Mesma paleta de #continueCard, o "card" mais próximo do styles.py. */
+#statCard {
+    background-color: #161920;
+    border: 1px solid #2d333f;
+    border-radius: 12px;
+    padding: 4px;
+}
+#statCard:hover { border-color: #10b981; }
+
 /* ── Labels de Estatísticas ─────────────────────────── */
 #statValue {
     font-size: 28px;
     font-weight: 700;
     color: #10b981;
+    background: transparent;
+    border: none;
 }
 #statLabel {
     font-size: 11px;
     color: #94a3b8;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    background: transparent;
+    border: none;
 }
 
 /* ── Estatísticas vivas (Tarefa 5.2) ─────────────────── */
@@ -2307,17 +2321,29 @@ QToolTip {
     font-size: 12px;
 }
 
+/* ── Stat Card (grade de estatísticas, Onda A1) ──────
+   Mesma paleta de #continueCard, o "card" mais próximo do styles.py. */
+#statCard {
+    background-color: #ffffff;
+    border: 1px solid #e4e4e7;
+    border-radius: 12px;
+    padding: 4px;
+}
+#statCard:hover { border-color: #059669; }
+
 /* ── Labels de Estatísticas ─────────────────────────── */
 #statValue {
     font-size: 28px;
     font-weight: 700;
     color: #059669;
+    background: transparent;
+    border: none;
 }
 #statLabel {
     font-size: 11px;
     color: #555555;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    background: transparent;
+    border: none;
 }
 
 /* ── Estatísticas vivas (Tarefa 5.2) ─────────────────── */
@@ -4248,17 +4274,29 @@ QToolTip {
     font-size: 12px;
 }
 
+/* ── Stat Card (grade de estatísticas, Onda A1) ──────
+   Mesma paleta de #continueCard, o "card" mais próximo do styles.py. */
+#statCard {
+    background-color: #EADFCA;
+    border: 1px solid #d4cbb8;
+    border-radius: 12px;
+    padding: 4px;
+}
+#statCard:hover { border-color: #8b6c42; }
+
 /* ── Labels de Estatísticas ─────────────────────────── */
 #statValue {
     font-size: 28px;
     font-weight: 700;
     color: #059669;
+    background: transparent;
+    border: none;
 }
 #statLabel {
     font-size: 11px;
     color: #705E4B;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    background: transparent;
+    border: none;
 }
 
 /* ── Estatísticas vivas (Tarefa 5.2) ─────────────────── */

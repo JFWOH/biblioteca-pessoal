@@ -14,18 +14,13 @@ class StatCard(QFrame):
     def __init__(self, value: str, label: str, icon: str = "",
                  color: str = "#818cf8", parent=None):
         super().__init__(parent)
-        self.setStyleSheet(f"""
-            QFrame {{
-                background-color: #18181b;
-                border: 1px solid #27272a;
-                border-radius: 12px;
-                padding: 4px;
-            }}
-            QFrame:hover {{
-                border-color: {color};
-                background-color: #1e1e24;
-            }}
-        """)
+        # Onda A1: era DARK-ONLY (fundo/borda fixos em setStyleSheet inline).
+        # Migrado p/ objectName + regras QSS nos 3 temas (#statCard em
+        # styles.py, mesma paleta de #continueCard). QFrame já pinta o
+        # próprio background/borda via QSS sem precisar de
+        # WA_StyledBackground (esse atributo só é necessário em subclasses
+        # de QWidget puro — lição da Onda 0b, não se aplica aqui).
+        self.setObjectName("statCard")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
@@ -35,7 +30,12 @@ class StatCard(QFrame):
         top_layout = QHBoxLayout()
         if icon:
             icon_lbl = QLabel(icon)
-            icon_lbl.setStyleSheet(f"font-size: 20px; color: {color};")
+            # "background: transparent" é necessário mesmo sem cor de fundo
+            # própria: sem ele, o QLabel herda o `QWidget { background-color }`
+            # global do tema (mais escuro que o #statCard), criando uma caixa
+            # visível atrás do glifo — mesma lição do proactive_insights_panel.
+            icon_lbl.setStyleSheet(
+                f"font-size: 20px; color: {color}; background: transparent; border: none;")
             top_layout.addWidget(icon_lbl)
         top_layout.addStretch()
         layout.addLayout(top_layout)
@@ -47,13 +47,13 @@ class StatCard(QFrame):
         font.setPointSize(22)
         font.setWeight(QFont.Weight.Bold)
         val_lbl.setFont(font)
-        val_lbl.setStyleSheet(f"color: {color}; border: none;")
+        val_lbl.setStyleSheet(f"color: {color}; background: transparent; border: none;")
         layout.addWidget(val_lbl)
 
-        # Label
+        # Label — cor/tamanho vêm de #statLabel (styles.py, 3 temas); antes
+        # era um cinza fixo (#71717a) via setStyleSheet inline, DARK-ONLY.
         lbl = QLabel(label)
         lbl.setObjectName("statLabel")
-        lbl.setStyleSheet("color: #71717a; font-size: 11px; border: none;")
         layout.addWidget(lbl)
 
         self._value_label = val_lbl
