@@ -1719,7 +1719,7 @@ QPushButton#proactiveFooterFlashcardBtn:hover { background-color: #1d4ed8; }
     background-color: #161920;
     border-bottom: 1px solid #2d333f;
 }
-#searchBarIcon { border: none; font-size: 14px; }
+#searchBarIcon { background: transparent; border: none; font-size: 14px; }
 QLineEdit#searchBarInput {
     background: #0f1115;
     border: 1px solid #2d333f;
@@ -1730,6 +1730,7 @@ QLineEdit#searchBarInput {
 }
 QLineEdit#searchBarInput:focus { border-color: #10b981; }
 QLabel#searchCountLabel {
+    background: transparent;
     color: #71717a; font-size: 12px; border: none; min-width: 60px;
 }
 QLabel#searchCountLabel[state="found"] { color: #10b981; }
@@ -1910,7 +1911,7 @@ QPushButton#readerZoomBtn {
     border-radius: 4px; color: #94a3b8; font-size: 16px;
 }
 QPushButton#readerZoomBtn:hover { background: #2d333f; }
-QLabel#readerToolbarSep { color: #2d333f; font-size: 16px; }
+QLabel#readerToolbarSep { background: transparent; color: #2d333f; font-size: 16px; }
 QPushButton#readerSearchBtn {
     background: transparent; border: 1px solid #2d333f;
     border-radius: 6px; font-size: 14px;
@@ -1932,6 +1933,15 @@ QMenu#readerPopupMenu {
 }
 QMenu#readerPopupMenu::item { padding: 6px 24px; border-radius: 4px; }
 QMenu#readerPopupMenu::item:selected { background: #3f3f46; }
+/* Submenus (addMenu) NAO herdam o objectName do pai — sem a regra
+   descendente, cairiam na QMenu global do tema (submenu claro abrindo
+   de menu escuro em light/sepia). */
+QMenu#readerPopupMenu QMenu {
+    background: #1e2227; border: 1px solid #3f3f46;
+    color: #e4e4e7; border-radius: 4px; padding: 4px;
+}
+QMenu#readerPopupMenu QMenu::item { padding: 6px 24px; border-radius: 4px; }
+QMenu#readerPopupMenu QMenu::item:selected { background: #3f3f46; }
 QMenu#readerAiMenu {
     background-color: #161920; border: 1px solid #2d333f;
     border-radius: 6px; padding: 4px; color: #e5e7eb;
@@ -3604,7 +3614,7 @@ QFrame#aiResponseCard {
     border: 1px solid #e4e4e7;
     border-radius: 8px;
 }
-#aiResponseStatusLbl { color: #a5b4fc; font-size: 12px; font-style: italic; }
+#aiResponseStatusLbl { color: #4f46e5; font-size: 12px; font-style: italic; }
 #aiResponseStatusLblError { color: #dc2626; font-size: 12px; }
 #aiResponseBodyLbl { color: #555555; font-size: 12px; }
 QPushButton#aiResponseActionBtn {
@@ -3649,7 +3659,7 @@ QPushButton#proactiveFooterFlashcardBtn:hover { background-color: #1d4ed8; }
     background-color: #f4f4f5;
     border-bottom: 1px solid #e4e4e7;
 }
-#searchBarIcon { border: none; font-size: 14px; }
+#searchBarIcon { background: transparent; border: none; font-size: 14px; }
 QLineEdit#searchBarInput {
     background: #ffffff;
     border: 1px solid #d4d4d8;
@@ -3660,6 +3670,7 @@ QLineEdit#searchBarInput {
 }
 QLineEdit#searchBarInput:focus { border-color: #059669; }
 QLabel#searchCountLabel {
+    background: transparent;
     color: #71717a; font-size: 12px; border: none; min-width: 60px;
 }
 QLabel#searchCountLabel[state="found"] { color: #059669; }
@@ -3840,7 +3851,7 @@ QPushButton#readerZoomBtn {
     border-radius: 4px; color: #94a3b8; font-size: 16px;
 }
 QPushButton#readerZoomBtn:hover { background: #2d333f; }
-QLabel#readerToolbarSep { color: #2d333f; font-size: 16px; }
+QLabel#readerToolbarSep { background: transparent; color: #2d333f; font-size: 16px; }
 QPushButton#readerSearchBtn {
     background: transparent; border: 1px solid #2d333f;
     border-radius: 6px; font-size: 14px;
@@ -3862,6 +3873,15 @@ QMenu#readerPopupMenu {
 }
 QMenu#readerPopupMenu::item { padding: 6px 24px; border-radius: 4px; }
 QMenu#readerPopupMenu::item:selected { background: #3f3f46; }
+/* Submenus (addMenu) NAO herdam o objectName do pai — sem a regra
+   descendente, cairiam na QMenu global do tema (submenu claro abrindo
+   de menu escuro em light/sepia). */
+QMenu#readerPopupMenu QMenu {
+    background: #1e2227; border: 1px solid #3f3f46;
+    color: #e4e4e7; border-radius: 4px; padding: 4px;
+}
+QMenu#readerPopupMenu QMenu::item { padding: 6px 24px; border-radius: 4px; }
+QMenu#readerPopupMenu QMenu::item:selected { background: #3f3f46; }
 QMenu#readerAiMenu {
     background-color: #161920; border: 1px solid #2d333f;
     border-radius: 6px; padding: 4px; color: #e5e7eb;
@@ -5535,7 +5555,7 @@ QFrame#aiResponseCard {
     border: 1px solid #d4cbb8;
     border-radius: 8px;
 }
-#aiResponseStatusLbl { color: #a5b4fc; font-size: 12px; font-style: italic; }
+#aiResponseStatusLbl { color: #4338ca; font-size: 12px; font-style: italic; }
 #aiResponseStatusLblError { color: #b91c1c; font-size: 12px; }
 #aiResponseBodyLbl { color: #705E4B; font-size: 12px; }
 QPushButton#aiResponseActionBtn {
@@ -5580,7 +5600,7 @@ QPushButton#proactiveFooterFlashcardBtn:hover { background-color: #1d4ed8; }
     background-color: #ebe5d9;
     border-bottom: 1px solid #d4cbb8;
 }
-#searchBarIcon { border: none; font-size: 14px; }
+#searchBarIcon { background: transparent; border: none; font-size: 14px; }
 QLineEdit#searchBarInput {
     background: #EADFCA;
     border: 1px solid #d4cbb8;
@@ -5591,6 +5611,7 @@ QLineEdit#searchBarInput {
 }
 QLineEdit#searchBarInput:focus { border-color: #059669; }
 QLabel#searchCountLabel {
+    background: transparent;
     color: #71717a; font-size: 12px; border: none; min-width: 60px;
 }
 QLabel#searchCountLabel[state="found"] { color: #059669; }
@@ -5771,7 +5792,7 @@ QPushButton#readerZoomBtn {
     border-radius: 4px; color: #94a3b8; font-size: 16px;
 }
 QPushButton#readerZoomBtn:hover { background: #2d333f; }
-QLabel#readerToolbarSep { color: #2d333f; font-size: 16px; }
+QLabel#readerToolbarSep { background: transparent; color: #2d333f; font-size: 16px; }
 QPushButton#readerSearchBtn {
     background: transparent; border: 1px solid #2d333f;
     border-radius: 6px; font-size: 14px;
@@ -5793,6 +5814,15 @@ QMenu#readerPopupMenu {
 }
 QMenu#readerPopupMenu::item { padding: 6px 24px; border-radius: 4px; }
 QMenu#readerPopupMenu::item:selected { background: #3f3f46; }
+/* Submenus (addMenu) NAO herdam o objectName do pai — sem a regra
+   descendente, cairiam na QMenu global do tema (submenu claro abrindo
+   de menu escuro em light/sepia). */
+QMenu#readerPopupMenu QMenu {
+    background: #1e2227; border: 1px solid #3f3f46;
+    color: #e4e4e7; border-radius: 4px; padding: 4px;
+}
+QMenu#readerPopupMenu QMenu::item { padding: 6px 24px; border-radius: 4px; }
+QMenu#readerPopupMenu QMenu::item:selected { background: #3f3f46; }
 QMenu#readerAiMenu {
     background-color: #161920; border: 1px solid #2d333f;
     border-radius: 6px; padding: 4px; color: #e5e7eb;
@@ -5901,6 +5931,30 @@ def get_reader_css(
         " }"
     )
     return base + "\n" + override
+
+
+# ── Helper de estado dinâmico (objectName-swap) ────────────────────────
+#
+# CRITÉRIO entre os dois mecanismos de estado dinâmico do QSS central:
+# - objectName-swap (este helper): estado que troca a IDENTIDADE visual
+#   inteira do widget (badge online/offline, status ok/erro) — cada estado
+#   tem bloco de regras próprio (#Foo / #FooError).
+# - property + seletor de atributo (``setProperty`` + ``[state="x"]`` +
+#   unpolish/polish): estado que só VARIA uma regra base compartilhada
+#   (ex.: cor do #searchCountLabel, seleção do #bookCard).
+
+
+def swap_object_name(widget, object_name: str) -> None:
+    """Troca o objectName do *widget* (estado dinâmico) e força o repolish
+    do QSS. No-op se o estado não mudou (evita repolish à toa — lição da
+    auditoria do PR #42). Substitui as cópias hand-rolled do padrão
+    (RAGPanel/AIResponseCard delegam aqui; AnkiExportDialog/OllamaWizard/
+    book_details seguem com cópias locais antigas — débito registrado)."""
+    if widget.objectName() == object_name:
+        return
+    widget.setObjectName(object_name)
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
 
 
 # ── Helper de ícone-emoji ──────────────────────────────────────────────

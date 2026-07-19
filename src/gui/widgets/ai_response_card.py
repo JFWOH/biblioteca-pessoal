@@ -73,13 +73,9 @@ class AIResponseCard(QFrame):
         self._apply_state(self.STATE_IDLE)
 
     def _swap_object_name(self, widget, object_name: str) -> None:
-        """Troca o objectName do widget (estado dinâmico) e força o repolish
-        do QSS — mesmo padrão usado em ``RAGPanel``."""
-        if widget.objectName() == object_name:
-            return  # estado inalterado — evita repolish à toa
-        widget.setObjectName(object_name)
-        widget.style().unpolish(widget)
-        widget.style().polish(widget)
+        """Delegado ao helper compartilhado ``styles.swap_object_name``."""
+        from src.gui.styles import swap_object_name
+        swap_object_name(widget, object_name)
 
     # ── API de estados ────────────────────────────────────────────────
 

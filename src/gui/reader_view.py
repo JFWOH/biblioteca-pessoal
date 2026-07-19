@@ -1309,10 +1309,8 @@ class ReaderView(QWidget):
             self._dock.set_theme(theme)
         if hasattr(self, '_insights_panel'):
             self._insights_panel.set_theme(theme)
-        if hasattr(self, '_search_bar') and hasattr(self._search_bar, 'set_theme'):
-            self._search_bar.set_theme(theme)
-        if hasattr(self, '_proactive_footer') and hasattr(self._proactive_footer, 'set_theme'):
-            self._proactive_footer.set_theme(theme)
+        # search_bar e proactive_footer: 100% QSS central por objectName —
+        # sem set_theme (API morta removida na auditoria da Onda 0b 2/2).
 
         # Apply CSS to current reader if open
         if self._reader and hasattr(self._reader, "set_theme_css"):

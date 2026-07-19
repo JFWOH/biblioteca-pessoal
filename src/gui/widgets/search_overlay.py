@@ -74,12 +74,6 @@ class DocumentSearchBar(QWidget):
         self._close_btn.clicked.connect(self.close_bar)
         layout.addWidget(self._close_btn)
 
-    def set_theme(self, theme: str):
-        """No-op de compat: o tema vem do QSS central da QApplication
-        (styles.py, seletores #documentSearchBar/#searchBar*, Onda 0b 2/2) —
-        nada a propagar por widget. Mantido porque reader_view chama a cada
-        troca de tema."""
-
     def show_bar(self):
         """Exibe a barra de busca e foca no input."""
         self.show()
