@@ -577,12 +577,17 @@ class LibraryView(QWidget):
         suspensos (``setUpdatesEnabled(False)``) — um único repaint ao final,
         em vez de um por card adicionado/removido durante a transição.
 
-        Rodada 4 (perf/gui): RECICLAGEM in-place. Em vez de destruir e recriar
-        TODOS os cards (~1 ms/card), os cards existentes são RECONFIGURADOS por
-        posição (``BookCard.update_book``) e só o DELTA de tamanho é
-        criado/removido. Como a posição do card i é ``(i // cols, i % cols)``,
-        os cards pré-existentes só precisam de re-layout quando ``cols`` muda
-        (reflow no ``resizeEvent``) — nunca são destruídos/recriados por isso.
+        Rodada A4 (perf/gui): RECICLAGEM POR ``book_id``. Antes de reciclar, os
+        cards vivos são CASADOS com a nova lista por id (``_match_cards_by_id``):
+        o card do MESMO livro é reutilizado — em REORDENAÇÃO/filtro ele
+        curto-circuita em ``update_book`` (dict igual) e a CAPA sobrevive, em vez
+        de recarregar do disco como fazia a reciclagem por posição (PR #43). Só
+        os livros sem card correspondente pegam cards órfãos (aí ``update_book``
+        reconstrói para o livro novo) ou cards novos; o excedente é destruído. Os
+        widgets são REPOSICIONADOS no ``QGridLayout`` (remover+re-adicionar não
+        destrói o widget) quando a ORDEM dos cards muda (reordenação) OU o nº de
+        colunas muda (reflow no ``resizeEvent``); recarga na mesma ordem e
+        colunas não mexe no layout.
         """
         self._rendered_books = books
         self.setUpdatesEnabled(False)
@@ -613,37 +618,94 @@ class LibraryView(QWidget):
                 )
 
             cols = max(1, (self.width() - 48) // (CARD_WIDTH + GRID_SPACING))
-            relayout_existing = cols != self._grid_cols
+            cols_changed = cols != self._grid_cols
             self._grid_cols = cols
 
-            # 1) Encolhe: remove só os cards excedentes.
-            while len(self._cards) > len(books):
-                card = self._cards.pop()
-                self._grid_layout.removeWidget(card)
-                card.deleteLater()
+            # Casa os cards vivos com a nova lista por book_id (a capa do mesmo
+            # livro sobrevive à reordenação) e destrói o excedente.
+            old_cards = self._cards
+            new_cards = self._match_cards_by_id(books)
 
-            # 2) Recicla in-place os existentes (posição a posição).
-            for i, card in enumerate(self._cards):
-                card.update_book(books[i])
-
-            # 3) Reposiciona os existentes SÓ se o nº de colunas mudou.
-            if relayout_existing:
-                for i, card in enumerate(self._cards):
+            # Reposiciona SÓ quando a grade muda de fato: nova ORDEM de cards
+            # (reordenação/filtro/delta) ou nº de colunas diferente (reflow no
+            # resize). Recarga na mesma ordem e mesmas colunas não toca o layout.
+            order_changed = (
+                len(new_cards) != len(old_cards)
+                or any(a is not b for a, b in zip(new_cards, old_cards))
+            )
+            if cols_changed or order_changed:
+                for card in old_cards:
                     self._grid_layout.removeWidget(card)
+                for i, card in enumerate(new_cards):
                     self._grid_layout.addWidget(card, i // cols, i % cols)
 
-            # 4) Cresce: cria só o delta.
-            for i in range(len(self._cards), len(books)):
-                card = BookCard(books[i])
-                card.clicked.connect(self._on_card_clicked)
-                card.double_clicked.connect(self.book_open.emit)
-                card.context_action.connect(self._on_card_context_action)
-                self._cards.append(card)
-                self._grid_layout.addWidget(card, i // cols, i % cols)
+            self._cards = new_cards
+
+            # Re-sincroniza o visual de seleção: ``update_book`` zera o visual de
+            # todo card reciclado (premissa: a view limpou ``_selected_ids`` nos
+            # fluxos que trocam o CONJUNTO de livros — load_books/filtro de
+            # quebrados). Quando a view NÃO limpou (reflow no resize, mesmos
+            # livros), o card do MESMO id continua legitimamente selecionado —
+            # re-aplica o visual perdido no reset de ``update_book``.
+            if self._selected_ids:
+                for card in new_cards:
+                    if card._book_id in self._selected_ids and not card.is_selected:
+                        card.set_selected(True)
 
             self._update_bulk_bar()
         finally:
             self.setUpdatesEnabled(True)
+
+    def _match_cards_by_id(self, books: list[dict]) -> list[BookCard]:
+        """Casa os cards existentes com ``books`` por ``book_id`` e devolve a
+        nova lista ordenada de cards (``new_cards[i]`` renderiza ``books[i]``).
+
+        - Card do MESMO id é reutilizado: ``update_book`` curto-circuita quando o
+          dict é igual (reordenação/filtro → CAPA preservada) ou reconfigura
+          barato quando algum campo mudou.
+        - Livro sem card correspondente pega um card ÓRFÃO restante (reconfigura
+          para o livro novo — capa recarregada) ou, se não houver órfão, um card
+          NOVO.
+        - Órfãos excedentes saem do layout e são destruídos (``deleteLater``).
+        """
+        by_id: dict[int, list[BookCard]] = {}
+        for card in self._cards:
+            by_id.setdefault(card._book_id, []).append(card)
+
+        new_cards: list[BookCard] = [None] * len(books)
+        consumed: set[int] = set()
+        unmatched: list[int] = []
+        for i, book in enumerate(books):
+            bucket = by_id.get(book.get("id", 0))
+            if bucket:
+                card = bucket.pop(0)
+                consumed.add(id(card))
+                card.update_book(book)  # dict igual → curto-circuito (capa fica)
+                new_cards[i] = card
+            else:
+                unmatched.append(i)
+
+        # Cards não casados por id, na ordem original — reutilizáveis.
+        orphans = [c for c in self._cards if id(c) not in consumed]
+
+        oi = 0
+        for i in unmatched:
+            if oi < len(orphans):
+                card = orphans[oi]
+                oi += 1
+                card.update_book(books[i])  # livro diferente → reconstrói
+            else:
+                card = BookCard(books[i])
+                card.clicked.connect(self._on_card_clicked)
+                card.double_clicked.connect(self.book_open.emit)
+                card.context_action.connect(self._on_card_context_action)
+            new_cards[i] = card
+
+        for card in orphans[oi:]:
+            self._grid_layout.removeWidget(card)
+            card.deleteLater()
+
+        return new_cards
 
     # ── Seleção ───────────────────────────────────────────────────────────────
 
