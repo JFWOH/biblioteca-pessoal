@@ -164,6 +164,25 @@ def test_updates_reenabled_after_refresh(view):
 
 # ── Filtro de quebrados continua reconstruindo (sem atalho) ────────────────
 
+def test_broken_filter_clears_selection_before_recycling(view):
+    """Auditoria B4: o filtro de quebrados espelha o clear do load_books —
+    sem isso a bulk bar ficaria armada ("Excluir selecionados") apontando
+    para cards reciclados que não parecem selecionados."""
+    books = [
+        _book(1, title="Real"),
+        {"id": 2, "title": "Quebrado", "file_path": "/caminho/fantasma.epub"},
+    ]
+    view.load_books(books)
+    view._toggle_selection(1)
+    assert not view._bulk_bar.isHidden()
+
+    view._on_broken_filter_toggled(True)  # recicla para a lista filtrada
+
+    assert view._selected_ids == set()
+    assert view._bulk_bar.isHidden()
+    assert all(not c.is_selected for c in view._cards)
+
+
 def test_broken_filter_roundtrip_unaffected_by_fast_path(view):
     books = [
         _book(1, title="Real"),

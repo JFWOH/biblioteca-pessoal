@@ -2799,17 +2799,39 @@ class ReaderView(QWidget):
         if hasattr(self, "_act_audio_stop"):
             self._act_audio_stop.setEnabled(False)
 
+    def _audio_worker_signal_pairs(self, worker) -> tuple:
+        """Fonte ÚNICA (auditoria A6) dos pares (sinal, handler) do AudioWorker.
+
+        O connect (``_connect_audio_worker``) e o disconnect
+        (``_disconnect_audio_worker_signals``, usado por retire e teardown)
+        derivam desta lista — a manutenção fica num lugar só.
+        """
+        return (
+            (worker.playback_started, self._on_audio_started),
+            (worker.playback_finished, self._on_audio_finished),
+            (worker.error_occurred, self._on_audio_error),
+            (worker.finished, self._on_audio_worker_finished),
+            (worker.provider_changed, self._on_audio_provider_changed),
+        )
+
     def _connect_audio_worker(self, worker) -> None:
         """Conecta os sinais do AudioWorker aos handlers da GUI.
 
         DRY entre ``_launch_audio_worker`` e ``_play_prepared`` — ambos criam um
         AudioWorker e ligam os MESMOS cinco sinais.
         """
-        worker.playback_started.connect(self._on_audio_started)
-        worker.playback_finished.connect(self._on_audio_finished)
-        worker.error_occurred.connect(self._on_audio_error)
-        worker.finished.connect(self._on_audio_worker_finished)
-        worker.provider_changed.connect(self._on_audio_provider_changed)
+        for sig, slot in self._audio_worker_signal_pairs(worker):
+            sig.connect(slot)
+
+    def _disconnect_audio_worker_signals(self, worker) -> None:
+        """Desconecta TODOS os sinais do worker (retire/teardown, fonte A6)."""
+        for sig, _slot in self._audio_worker_signal_pairs(worker):
+            try:
+                sig.disconnect()
+            except (TypeError, RuntimeError):
+                # TypeError: sinal já sem conexões (fluxo normal do retire);
+                # RuntimeError: objeto C++ já destruído. Ambos benignos aqui.
+                pass
 
     def _retire_current_audio_worker(self) -> None:
         """Sinaliza o worker atual para parar e o move para a aposentadoria.
@@ -2819,46 +2841,52 @@ class ReaderView(QWidget):
         senão a narração antiga encadearia página ou mexeria no botão depois de
         substituída) e reconecta ``finished`` a ``_on_retiring_worker_finished``,
         que só solta/deleteLater quando a thread do SO realmente terminou.
+
+        Corrida coberta (auditoria A2): se ``run()`` retornar entre o
+        ``isRunning()`` e o ``finished.connect``, o sinal é emitido SEM
+        receptor e o worker ficaria preso em ``_retiring_workers`` — por isso
+        o re-check após o connect chama o handler diretamente (idempotente).
         """
         worker = getattr(self, "_audio_worker", None)
         self._audio_worker = None
         if worker is None:
             return
-        for sig_name in ("playback_started", "playback_finished",
-                         "error_occurred", "provider_changed"):
-            try:
-                getattr(worker, sig_name).disconnect()
-            except (TypeError, RuntimeError):
-                pass
-        try:
-            worker.finished.disconnect()
-        except (TypeError, RuntimeError):
-            pass
+        self._disconnect_audio_worker_signals(worker)
         if not worker.isRunning():
             worker.deleteLater()
             return
         self._retiring_workers.append(worker)
-        # Conecta ANTES do stop(): o `finished` só é emitido quando run()
-        # retorna (queued para a thread da GUI), então nunca o perdemos.
+        # Conecta ANTES do stop(): o `finished` é queued para a thread da GUI.
         worker.finished.connect(lambda w=worker: self._on_retiring_worker_finished(w))
         try:
             worker.stop()  # cooperativo: sinaliza cancelamento e para player/router
         except Exception:
-            pass
+            logger.warning("Falha ao sinalizar stop ao worker de áudio aposentado",
+                           exc_info=True)
+        # A2: run() pode ter retornado entre o isRunning() lá em cima e o
+        # connect — o finished já teria sido emitido sem receptor. Re-checa e
+        # trata direto; se o sinal também chegar depois, a segunda chamada do
+        # handler idempotente é no-op.
+        if not worker.isRunning():
+            self._on_retiring_worker_finished(worker)
 
     def _on_retiring_worker_finished(self, worker) -> None:
         """A thread do SO do worker aposentado terminou de fato → solta e destrói.
 
-        Quando o ÚLTIMO worker em drenagem termina, dispara a narração
-        ENFILEIRADA (se houver): garante que só UM ``speak()`` use o TTSRouter
-        compartilhado por vez.
+        IDEMPOTENTE (auditoria A2): pode ser chamado pelo ``finished`` queued E
+        diretamente pelo re-check do retire/watchdog — a segunda chamada
+        encontra o worker fora da lista e retorna. Quando o ÚLTIMO worker em
+        drenagem sai, dispara a narração ENFILEIRADA (se houver): garante que
+        só UM ``speak()`` use o TTSRouter compartilhado por vez.
         """
-        if worker in self._retiring_workers:
-            self._retiring_workers.remove(worker)
+        if worker not in self._retiring_workers:
+            return  # já tratado (corrida connect × finished)
+        self._retiring_workers.remove(worker)
         try:
             worker.deleteLater()
-        except Exception:
-            pass
+        except RuntimeError:
+            # Objeto C++ já destruído (ex.: janela fechando) — nada a liberar.
+            logger.debug("deleteLater em worker de áudio já destruído", exc_info=True)
         if not self._retiring_workers and self._pending_narration is not None:
             self._run_pending_narration()
 
@@ -2880,15 +2908,18 @@ class ReaderView(QWidget):
             launch_fn()
 
     def _arm_pending_safety_timer(self) -> None:
-        """(Re)arma o watchdog que dispara a narração pendente mesmo que o
-        ``finished`` do worker antigo não chegue (degradação graciosa)."""
+        """(Re)arma o watchdog da narração pendente (degradação graciosa).
+
+        O período de 2,5s NÃO é um acoplamento ao join interno de 1s do
+        router (auditoria A3): o timeout nunca lança nada com worker antigo
+        vivo — apenas purga terminados, re-emite o stop e re-arma. O valor é
+        só a cadência de polling da drenagem.
+        """
         from PyQt6.QtCore import QTimer
         self._cancel_pending_safety_timer()
         timer = QTimer(self)
         timer.setSingleShot(True)
         timer.timeout.connect(self._on_pending_safety_timeout)
-        # Teto > (join 1.0s interno do router + drenagem do player). Na prática
-        # o `finished` chega antes; o timer só cobre o caso patológico.
         timer.start(2500)
         self._pending_narration_timer = timer
 
@@ -2898,17 +2929,42 @@ class ReaderView(QWidget):
             try:
                 timer.stop()
                 timer.deleteLater()
-            except Exception:
-                pass
+            except RuntimeError:
+                # Objeto C++ do timer já destruído (janela fechando) — benigno.
+                logger.debug("Watchdog de narração já destruído ao cancelar",
+                             exc_info=True)
             self._pending_narration_timer = None
 
     def _on_pending_safety_timeout(self) -> None:
-        """Watchdog: o worker antigo não sinalizou ``finished`` a tempo. Dispara
-        a narração pendente assim mesmo — o player antigo já foi parado por
-        ``stop()``; a referência ao worker segue viva em ``_retiring_workers``
-        (seu ``finished`` ainda a limpará quando chegar)."""
+        """Watchdog do lançamento adiado (auditoria A3): NUNCA lança um
+        ``speak()`` com worker antigo VIVO — o TTSRouter compartilhado não
+        tolera dois ``speak()`` concorrentes (o novo resetaria o cancel do
+        antigo e clobberaria ``_active_player``; o Parar deixaria de silenciar
+        o áudio velho). No timeout: (i) purga da lista os workers já
+        terminados (handler idempotente — se esvaziar, ele mesmo dispara o
+        pending); (ii) lista vazia → roda o pending; (iii) senão, re-emite o
+        ``stop()`` (idempotente) e RE-ARMA o timer, avisando na statusbar.
+        """
         self._pending_narration_timer = None
-        self._run_pending_narration()
+        for w in list(self._retiring_workers):
+            try:
+                alive = w.isRunning()
+            except RuntimeError:
+                alive = False  # objeto C++ já destruído — não há thread viva
+            if not alive:
+                self._on_retiring_worker_finished(w)
+        if not self._retiring_workers:
+            if self._pending_narration is not None:
+                self._run_pending_narration()
+            return
+        for w in self._retiring_workers:
+            try:
+                w.stop()
+            except Exception:
+                logger.warning("Watchdog: falha ao re-sinalizar stop ao worker",
+                               exc_info=True)
+        self._show_status("⏳ Aguardando a narração anterior encerrar…", 2500)
+        self._arm_pending_safety_timer()
 
     def _run_pending_narration(self) -> None:
         """Dispara o lançamento adiado (se ainda válido)."""
@@ -2943,22 +2999,33 @@ class ReaderView(QWidget):
         if worker is not None:
             workers.append(worker)
         for w in workers:
-            for sig_name in ("playback_started", "playback_finished",
-                             "error_occurred", "provider_changed", "finished"):
-                try:
-                    getattr(w, sig_name).disconnect()
-                except (TypeError, RuntimeError):
-                    pass
+            self._disconnect_audio_worker_signals(w)
             try:
                 if w.isRunning():
                     w.stop()
                     w.wait(2000)
             except Exception:
-                pass
+                logger.warning("Teardown: falha ao parar/esperar worker de áudio",
+                               exc_info=True)
+            try:
+                still_running = w.isRunning()
+            except RuntimeError:
+                still_running = False  # objeto C++ já destruído — nada vivo
+            if still_running:
+                # Auditoria A4: o wait(2000) EXPIROU com a thread do SO ainda
+                # viva — deleteLater aqui é exatamente a classe do SIGABRT do
+                # PR #32. Vazamento CONSCIENTE no teardown: solta a referência
+                # sem destruir (o SO encerra a thread junto com o processo).
+                logger.warning(
+                    "Teardown: worker de áudio não encerrou em 2s; referência "
+                    "abandonada sem deleteLater (vazamento consciente).")
+                continue
             try:
                 w.deleteLater()
-            except Exception:
-                pass
+            except RuntimeError:
+                # Objeto C++ já destruído — nada a liberar.
+                logger.debug("Teardown: worker já destruído no deleteLater",
+                             exc_info=True)
         self._audio_paused = False
 
     def _on_audio_provider_changed(self, provider_name: str):

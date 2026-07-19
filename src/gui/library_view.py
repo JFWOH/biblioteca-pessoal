@@ -699,6 +699,11 @@ class LibraryView(QWidget):
     # ── Filtro de quebrados ───────────────────────────────────────────────────
 
     def _on_broken_filter_toggled(self, checked: bool):
+        # Auditoria B4: espelha o clear do load_books — a reciclagem
+        # (update_book) só reseta o VISUAL de seleção sob a premissa de que a
+        # view limpou _selected_ids; sem isto a bulk bar ficaria armada com
+        # cards que não parecem selecionados.
+        self._selected_ids.clear()
         if checked:
             broken = [b for b in self._all_books
                       if b.get("file_path") and

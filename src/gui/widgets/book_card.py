@@ -28,13 +28,8 @@ class BookCard(QWidget):
 
     def __init__(self, book_data: dict, parent=None):
         super().__init__(parent)
-        self._book = book_data
-        self._book_id = book_data.get("id", 0)
         self._is_selected = False
-
-        # Sanity check: arquivo existe no disco?
-        file_path = book_data.get("file_path", "")
-        self._is_broken = bool(file_path) and not Path(file_path).exists()
+        self._apply_book_state(book_data)
 
         self.setObjectName("bookCard")
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -42,8 +37,19 @@ class BookCard(QWidget):
         self._setup_ui()
         self._apply_shadow()
 
-        if self._is_broken:
-            self.setToolTip(f"⚠️ Arquivo não encontrado:\n{file_path}")
+    def _apply_book_state(self, book_data: dict) -> None:
+        """Deriva o estado do livro (id, broken, tooltip) a partir do dict.
+
+        Fonte única (auditoria B5) compartilhada por ``__init__`` e
+        ``update_book`` — a checagem de arquivo ausente e o tooltip de aviso
+        ficam num lugar só.
+        """
+        self._book = book_data
+        self._book_id = book_data.get("id", 0)
+        file_path = book_data.get("file_path", "")
+        self._is_broken = bool(file_path) and not Path(file_path).exists()
+        self.setToolTip(
+            f"⚠️ Arquivo não encontrado:\n{file_path}" if self._is_broken else "")
 
     def _setup_ui(self):
         self._layout = QVBoxLayout(self)
@@ -64,22 +70,25 @@ class BookCard(QWidget):
         Conteúdo idêntico (ex.: reflow de colunas no ``resizeEvent``) é
         curto-circuitado — nada é reconstruído.
         """
-        if book_data == self._book:
-            self._book = book_data
-            return
-        self._book = book_data
-        self._book_id = book_data.get("id", 0)
-        file_path = book_data.get("file_path", "")
-        self._is_broken = bool(file_path) and not Path(file_path).exists()
-        self.setToolTip(
-            f"⚠️ Arquivo não encontrado:\n{file_path}" if self._is_broken else "")
+        # Auditoria B1: o reset do visual de seleção vem ANTES do curto-
+        # circuito — dict igual + card selecionado deixaria uma seleção
+        # fantasma (a view já limpou _selected_ids). Reset SEM emitir
+        # selected_changed (não é uma ação do usuário).
         if self._is_selected:
-            # Reciclagem reseta o visual de seleção SEM emitir selected_changed
-            # (não é uma ação do usuário; a view já limpou _selected_ids).
             self._is_selected = False
             self.setProperty("selected", False)
             self.style().unpolish(self)
             self.style().polish(self)
+        if book_data == self._book:
+            # Auditoria B2: mesmo conteúdo, mas o DISCO pode ter mudado
+            # (arquivo deletado/restaurado) — na main cada refresh re-checava.
+            # Se o estado broken divergiu, cai no rebuild completo abaixo.
+            file_path = book_data.get("file_path", "")
+            is_broken_now = bool(file_path) and not Path(file_path).exists()
+            if is_broken_now == self._is_broken:
+                self._book = book_data
+                return
+        self._apply_book_state(book_data)
         self._clear_contents()
         self._build_contents()
 
@@ -106,9 +115,18 @@ class BookCard(QWidget):
         """Preenche o layout com o conteúdo do livro atual (``self._book``)."""
         layout = self._layout
 
-        # Capa — reaproveitada quando o estado visual não mudou.
-        cover_key = (self._is_broken,
-                     "" if self._is_broken else self._book.get("cover_path", ""))
+        # Capa — reaproveitada quando o estado visual não mudou. A chave leva
+        # o MTIME do arquivo (auditoria B3): capas são sobrescritas no MESMO
+        # caminho (covers/cover_{book_id}.jpg) e o reuso só por path manteria o
+        # pixmap velho indefinidamente.
+        cover_path = "" if self._is_broken else self._book.get("cover_path", "")
+        cover_mtime = None
+        if cover_path:
+            try:
+                cover_mtime = Path(cover_path).stat().st_mtime_ns
+            except OSError:
+                cover_mtime = None  # capa inexistente/inacessível → placeholder
+        cover_key = (self._is_broken, cover_path, cover_mtime)
         if self._cover_label is None or cover_key != self._cover_key:
             if self._cover_label is not None:
                 self._cover_label.deleteLater()

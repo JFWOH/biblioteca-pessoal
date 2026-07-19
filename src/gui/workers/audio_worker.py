@@ -101,6 +101,14 @@ class AudioWorker(QThread):
             if active != "none":
                 self.provider_changed.emit(active)
 
+            # Rodada 4 (auditoria A1): worker APOSENTADO antes de chegar aqui
+            # não pode prosseguir — router.speak() reseta _is_cancelled do
+            # ROUTER na entrada e apagaria o próprio stop, narrando a página
+            # inteira em background. Checagem imediatamente antes do speak().
+            if self._is_cancelled or self.isInterruptionRequested():
+                logger.info("AUDIO_WORKER: cancelado antes do speak — abortando")
+                return
+
             # Synthesize and play through the router
             chunks_spoken = self._router.speak(
                 self._text,
