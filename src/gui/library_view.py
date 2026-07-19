@@ -144,6 +144,10 @@ class LibraryView(QWidget):
         # jul/2026): base do atalho de ``load_books`` que evita destruir e
         # recriar todos os cards quando NADA mudou desde a última renderização.
         self._rendered_books: list[dict] = []
+        # Nº de colunas da última renderização (perf/gui — reciclagem): a
+        # posição do card i é (i // cols, i % cols), então os cards existentes
+        # só precisam de re-layout quando ``cols`` muda (reflow no resize).
+        self._grid_cols: int = 0
         self._setup_ui()
 
     def _setup_ui(self):
@@ -538,13 +542,19 @@ class LibraryView(QWidget):
         Ajustes pós-teste (jul/2026): a reconstrução acontece com os repaints
         suspensos (``setUpdatesEnabled(False)``) — um único repaint ao final,
         em vez de um por card adicionado/removido durante a transição.
+
+        Rodada 4 (perf/gui): RECICLAGEM in-place. Em vez de destruir e recriar
+        TODOS os cards (~1 ms/card), os cards existentes são RECONFIGURADOS por
+        posição (``BookCard.update_book``) e só o DELTA de tamanho é
+        criado/removido. Como a posição do card i é ``(i // cols, i % cols)``,
+        os cards pré-existentes só precisam de re-layout quando ``cols`` muda
+        (reflow no ``resizeEvent``) — nunca são destruídos/recriados por isso.
         """
         self._rendered_books = books
         self.setUpdatesEnabled(False)
         try:
-            self._clear_grid()
-
             if not books:
+                self._clear_grid()
                 if self._is_search_result:
                     self._empty_widget.hide()
                     self._search_empty_widget.show()
@@ -569,8 +579,28 @@ class LibraryView(QWidget):
                 )
 
             cols = max(1, (self.width() - 48) // (CARD_WIDTH + GRID_SPACING))
-            for i, book in enumerate(books):
-                card = BookCard(book)
+            relayout_existing = cols != self._grid_cols
+            self._grid_cols = cols
+
+            # 1) Encolhe: remove só os cards excedentes.
+            while len(self._cards) > len(books):
+                card = self._cards.pop()
+                self._grid_layout.removeWidget(card)
+                card.deleteLater()
+
+            # 2) Recicla in-place os existentes (posição a posição).
+            for i, card in enumerate(self._cards):
+                card.update_book(books[i])
+
+            # 3) Reposiciona os existentes SÓ se o nº de colunas mudou.
+            if relayout_existing:
+                for i, card in enumerate(self._cards):
+                    self._grid_layout.removeWidget(card)
+                    self._grid_layout.addWidget(card, i // cols, i % cols)
+
+            # 4) Cresce: cria só o delta.
+            for i in range(len(self._cards), len(books)):
+                card = BookCard(books[i])
                 card.clicked.connect(self._on_card_clicked)
                 card.double_clicked.connect(self.book_open.emit)
                 card.context_action.connect(self._on_card_context_action)
@@ -669,6 +699,11 @@ class LibraryView(QWidget):
     # ── Filtro de quebrados ───────────────────────────────────────────────────
 
     def _on_broken_filter_toggled(self, checked: bool):
+        # Auditoria B4: espelha o clear do load_books — a reciclagem
+        # (update_book) só reseta o VISUAL de seleção sob a premissa de que a
+        # view limpou _selected_ids; sem isto a bulk bar ficaria armada com
+        # cards que não parecem selecionados.
+        self._selected_ids.clear()
         if checked:
             broken = [b for b in self._all_books
                       if b.get("file_path") and
