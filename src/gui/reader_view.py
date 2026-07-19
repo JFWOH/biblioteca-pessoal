@@ -448,8 +448,6 @@ class ReaderView(QWidget):
         self._act_double_page.triggered.connect(self._menu_toggle_double_page)
         self._act_highlight = QAction("🖍️ Modo Marca-Texto", self, checkable=True)
         self._act_highlight.triggered.connect(self._menu_toggle_highlight)
-        self._act_tts = QAction("⚙️ Voz / Narração (TTS)", self)
-        self._act_tts.triggered.connect(self._on_tts_settings_clicked)
         # Leitura contínua: narração vira páginas automaticamente até o fim.
         self._act_continuous = QAction("🔁 Leitura Contínua (vira páginas)", self, checkable=True)
         _cfg = getattr(self.window(), "_config", None)
@@ -500,7 +498,6 @@ class ReaderView(QWidget):
         self._act_insights.triggered.connect(lambda: self._show_dock_tab("insights"))
         self._overflow_menu.addAction(self._act_insights)
         self._overflow_menu.addSeparator()
-        self._overflow_menu.addAction(self._act_tts)
         self._overflow_menu.addAction(self._act_continuous)
         self._overflow_menu.addAction(self._act_continuous_translate)
         self._overflow_menu.addAction(self._act_listen_original)
