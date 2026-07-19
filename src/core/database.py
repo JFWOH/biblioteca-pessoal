@@ -335,13 +335,16 @@ class LibraryDB:
     # 4 opções oferecidas na UI (settings_dialog e o novo combo do header da
     # biblioteca); qualquer valor fora da whitelist cai no padrão em vez de
     # propagar texto arbitrário para o SQL.
-    _SORT_COLUMNS = {"date_added", "title", "author", "rating"}
+    # "date_modified" = última atividade (progresso/edição): única forma de
+    # recuperar a ordenação por recência que as visões de status tinham antes
+    # do sort configurável (auditoria do PR #45).
+    _SORT_COLUMNS = {"date_added", "date_modified", "title", "author", "rating"}
     _SORT_ORDERS = {"asc": "ASC", "desc": "DESC"}
 
     def get_all_books(self, sort_by="date_added", sort_order="DESC",
                       limit=None, offset=0) -> list[dict]:
-        column = sort_by if sort_by in self._SORT_COLUMNS else "date_added"
-        order = self._SORT_ORDERS.get(str(sort_order).strip().lower(), "DESC")
+        column, order = self._resolve_sort(
+            sort_by or "date_added", sort_order, "date_added")
         sql = f"SELECT * FROM books ORDER BY {column} {order}"
         if limit:
             sql += f" LIMIT {limit} OFFSET {offset}"
@@ -384,15 +387,40 @@ class LibraryDB:
     def count_books(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM books").fetchone()[0]
 
-    def get_books_by_status(self, status: str) -> list[dict]:
+    def _resolve_sort(self, sort_by: str | None, sort_order: str | None,
+                       default_column: str,
+                       default_order: str = "desc") -> tuple[str, str] | None:
+        """Resolve ``(coluna, direção)`` — fonte ÚNICA da whitelist de sort
+        (``get_all_books`` e as visões filtradas delegam aqui; Tarefa 2.3).
+        ``sort_by=None`` preserva o comportamento anterior do chamador
+        (retorna ``None`` — sem ORDER BY explícito aqui). ``sort_by``
+        INVÁLIDO cai no par default do chamador por inteiro (coluna E
+        direção) — antes herdava a direção genérica "desc" e invertia a
+        ordem legada (ex.: favoritos title ASC virava title DESC)."""
+        if sort_by is None:
+            return None
+        if sort_by in self._SORT_COLUMNS:
+            order = self._SORT_ORDERS.get(
+                str(sort_order or "desc").strip().lower(), "DESC")
+            return sort_by, order
+        return default_column, self._SORT_ORDERS[default_order]
+
+    def get_books_by_status(self, status: str, sort_by: str | None = None,
+                            sort_order: str | None = None) -> list[dict]:
+        resolved = self._resolve_sort(sort_by, sort_order, "date_modified")
+        order_clause = (f"{resolved[0]} {resolved[1]}" if resolved
+                        else "date_modified DESC")
         rows = self.conn.execute(
-            "SELECT * FROM books WHERE read_status = ? ORDER BY date_modified DESC",
+            f"SELECT * FROM books WHERE read_status = ? ORDER BY {order_clause}",
             (status,)).fetchall()
         return [dict(r) for r in rows]
 
-    def get_favorite_books(self) -> list[dict]:
+    def get_favorite_books(self, sort_by: str | None = None,
+                           sort_order: str | None = None) -> list[dict]:
+        resolved = self._resolve_sort(sort_by, sort_order, "title", "asc")
+        order_clause = f"{resolved[0]} {resolved[1]}" if resolved else "title"
         rows = self.conn.execute(
-            "SELECT * FROM books WHERE is_favorite = 1 ORDER BY title").fetchall()
+            f"SELECT * FROM books WHERE is_favorite = 1 ORDER BY {order_clause}").fetchall()
         return [dict(r) for r in rows]
 
     # ── Progresso ──────────────────────────────────────────────────────
@@ -582,10 +610,13 @@ class LibraryDB:
         except sqlite3.IntegrityError:
             pass
 
-    def get_books_in_collection(self, collection_id: int) -> list[dict]:
+    def get_books_in_collection(self, collection_id: int, sort_by: str | None = None,
+                                sort_order: str | None = None) -> list[dict]:
+        resolved = self._resolve_sort(sort_by, sort_order, "title", "asc")
+        order_clause = f"b.{resolved[0]} {resolved[1]}" if resolved else "b.title"
         rows = self.conn.execute(
-            """SELECT b.* FROM books b JOIN book_collections bc ON b.id=bc.book_id
-               WHERE bc.collection_id=? ORDER BY b.title""",
+            f"""SELECT b.* FROM books b JOIN book_collections bc ON b.id=bc.book_id
+               WHERE bc.collection_id=? ORDER BY {order_clause}""",
             (collection_id,)).fetchall()
         return [dict(r) for r in rows]
 

@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QSplitter, QFileDialog, QMessageBox,
     QStatusBar, QApplication,
 )
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, QEvent
 from PyQt6.QtGui import QAction, QKeySequence
 
 from src.core.database import LibraryDB
@@ -421,24 +421,26 @@ class MainWindow(QMainWindow):
 
     def _load_library(self, section: str = "all"):
         """Carrega livros baseado na seção selecionada."""
-        # Ordenação (Tarefa 2.3): mesma chave de config que o settings_dialog
-        # usa (library.sort_by/library.sort_order) — fonte única de verdade.
-        # Só se aplica às chamadas de get_all_books; as demais seções têm
-        # ordenação própria fixa (favoritos por título, status por
-        # modificação, coleção por título) e não foram alteradas aqui.
+        # Ordenação (Tarefa 2.3; débito corrigido — antes só valia em "Todos
+        # os Livros"): mesma chave de config que o settings_dialog usa
+        # (library.sort_by/library.sort_order) — fonte única de verdade,
+        # agora aplicada também nas visões filtradas (favoritos/status/
+        # coleção), reutilizando a MESMA whitelist de get_all_books via
+        # LibraryDB._resolve_sort.
         sort_by = self._config.get("library.sort_by", "date_added")
         sort_order = self._config.get("library.sort_order", "desc")
 
         if section == "all":
             books = self._db.get_all_books(sort_by=sort_by, sort_order=sort_order)
         elif section == "favorites":
-            books = self._db.get_favorite_books()
+            books = self._db.get_favorite_books(sort_by=sort_by, sort_order=sort_order)
         elif section in ("unread", "reading", "read"):
-            books = self._db.get_books_by_status(section)
+            books = self._db.get_books_by_status(section, sort_by=sort_by, sort_order=sort_order)
         elif section.startswith("collection_"):
             try:
                 col_id = int(section.split("_")[1])
-                books = self._db.get_books_in_collection(col_id)
+                books = self._db.get_books_in_collection(
+                    col_id, sort_by=sort_by, sort_order=sort_order)
             except ValueError:
                 books = self._db.get_all_books(sort_by=sort_by, sort_order=sort_order)
         else:
@@ -1828,6 +1830,30 @@ class MainWindow(QMainWindow):
         self._load_library()
 
     # ── Lifecycle ──────────────────────────────────────────────────────
+
+    def changeEvent(self, event):
+        # Limitação 5.2 corrigida: pausa o cronômetro de leitura do
+        # ReaderView quando a janela minimiza, retoma ao restaurar.
+        # WindowStateChange dispara também em maximizar/restaurar sem
+        # minimizar — _pause_reading_timer/_resume_reading_timer (GUI, sem
+        # tocar o core — ADR-006) são idempotentes/no-op fora do caso real,
+        # então chamá-los sempre que o bit Minimized muda de estado é seguro.
+        if event.type() == QEvent.Type.WindowStateChange:
+            # getattr defensivo: showMaximized() em _setup_window roda ANTES
+            # de _setup_ui criar _reader_view, e o WindowStateChange chega
+            # SÍNCRONO durante o __init__ — sem a guarda, todo start com
+            # window.maximized=True abortaria (mesmo hazard documentado em
+            # _is_narration_active).
+            rv = getattr(self, "_reader_view", None)
+            if rv is not None:
+                if self.windowState() & Qt.WindowState.WindowMinimized:
+                    # Narração ativa vira páginas mesmo minimizado (modo
+                    # audiobook) e esse tempo CONTA como leitura — não pausa.
+                    if not rv.is_narrating():
+                        rv._pause_reading_timer()
+                else:
+                    rv._resume_reading_timer()
+        super().changeEvent(event)
 
     def closeEvent(self, event):
         # Para o serviço do grafo (cancel cooperativo)

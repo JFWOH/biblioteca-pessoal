@@ -70,12 +70,16 @@ def test_set_theme_all_modes(qtbot):
 
 
 def test_dismiss_button_present_with_id(qtbot):
+    """O botão de dispensa ("✕") vai como ÍCONE (setIcon), não texto — bug de
+    sobreposição do Windows (débito da Onda 4). Card com id tem 2 botões
+    (dispensar + flashcard); o de dispensar tem texto vazio e ícone."""
     p = ProactiveInsightsPanel()
     qtbot.addWidget(p)
     p.add_observation({"tipo": "X", "texto": "a", "id": 42})
     top = p._list.itemAt(0).widget()
-    labels = [b.text() for b in top.findChildren(QPushButton)]
-    assert "✕" in labels
+    buttons = top.findChildren(QPushButton)
+    assert len(buttons) == 2
+    assert any(b.text() == "" and not b.icon().isNull() for b in buttons)
 
 
 def test_no_dismiss_button_without_id(qtbot):
@@ -83,8 +87,9 @@ def test_no_dismiss_button_without_id(qtbot):
     qtbot.addWidget(p)
     p.add_observation({"tipo": "X", "texto": "a"})
     top = p._list.itemAt(0).widget()
-    labels = [b.text() for b in top.findChildren(QPushButton)]
-    assert "✕" not in labels
+    buttons = top.findChildren(QPushButton)
+    assert len(buttons) == 1  # só o botão de flashcard, sem dispensar
+    assert all(b.text() != "" for b in buttons)
 
 
 def test_empty_text_reflects_agent_inactive_by_default(qtbot):
@@ -110,7 +115,7 @@ def test_dismiss_emits_obs_id_and_removes_card(qtbot):
     p.dismiss_requested.connect(got.append)
     p.add_observation({"tipo": "X", "texto": "a", "id": 42})
     top = p._list.itemAt(0).widget()
-    close_btn = next(b for b in top.findChildren(QPushButton) if b.text() == "✕")
+    close_btn = next(b for b in top.findChildren(QPushButton) if b.text() == "")
     close_btn.click()
     assert got == [42]
     assert p._count == 0

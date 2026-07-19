@@ -1,6 +1,8 @@
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton
 from PyQt6.QtCore import Qt, pyqtSignal
 
+from src.gui.styles import emoji_icon
+
 class ProactiveFooterWidget(QWidget):
     closed = pyqtSignal()
     flashcard_requested = pyqtSignal(str)
@@ -50,14 +52,16 @@ class ProactiveFooterWidget(QWidget):
         main_layout.addWidget(text_container, stretch=1)
 
         # Botão fechar
-        close_btn = QPushButton("✕")
+        close_btn = QPushButton()
+        close_btn.setIcon(emoji_icon("✕", 13))
         close_btn.setFixedSize(24, 24)
         close_btn.setObjectName("proactiveFooterCloseBtn")
         close_btn.clicked.connect(self.hide)
         close_btn.clicked.connect(self.closed.emit)
 
         # Botão Flashcard
-        self.flashcard_btn = QPushButton("🃏 Criar Flashcard")
+        self.flashcard_btn = QPushButton("Criar Flashcard")
+        self.flashcard_btn.setIcon(emoji_icon("🃏"))
         self.flashcard_btn.setObjectName("proactiveFooterFlashcardBtn")
         self.flashcard_btn.clicked.connect(lambda: self.flashcard_requested.emit(self.body_label.text()))
         

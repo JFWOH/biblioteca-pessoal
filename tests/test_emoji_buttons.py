@@ -9,11 +9,20 @@ Cobertura:
 - ``ReaderView``: NÃO pode ser importado depois de existir uma QApplication
   (puxa ``QtWebEngineWidgets``); a suíte já contorna isso com checagem estática
   do fonte (ver ``tests/test_reader_view_guards.py``). Seguimos o mesmo padrão.
+
+Débito da Onda 4 corrigido nesta rodada (Rodada 5): emoji-em-texto
+remanescente em ``collection_dialog.py``, ``import_dialog.py``,
+``dialogs/flashcards_dialog.py`` e vários widgets em ``gui/widgets/``
+(fora do escopo original 0.1, que cobria só book_details+toolbar do
+leitor). Cobertura ao vivo (pytest-qt) na seção final deste arquivo —
+mesmas fixtures ``db``/``_FakeAnkiService`` de ``test_styles_migration.py``.
 """
 import re
 from pathlib import Path
+from unittest.mock import MagicMock
 
-from PyQt6.QtWidgets import QPushButton
+import pytest
+from PyQt6.QtWidgets import QPushButton, QToolButton
 
 from src.gui.book_details import BookDetails
 from src.gui.library_view import LibraryView
@@ -42,6 +51,16 @@ _BOOK_DETAILS_ICON_BTNS = (
 
 def _has_emoji(text: str) -> bool:
     return bool(_EMOJI.search(text or ""))
+
+
+def _assert_no_emoji_buttons(widget) -> None:
+    """Nenhum ``QPushButton``/``QToolButton`` descendente de ``widget``
+    embute emoji no texto. Usado pela cobertura ao vivo da Onda 5 (débito
+    da Onda 4) — QAction de menu e QLabel estão fora do escopo do bug e não
+    são inspecionados aqui."""
+    buttons = widget.findChildren(QPushButton) + widget.findChildren(QToolButton)
+    for btn in buttons:
+        assert not _has_emoji(btn.text()), f"emoji no texto do botão: {btn.text()!r}"
 
 
 # ── BookDetails (widget ao vivo) ───────────────────────────────────────
@@ -105,3 +124,232 @@ def test_reader_view_buttons_have_no_emoji_in_text():
         if _has_emoji(m.group(2)):
             offenders.append(f"setText: {m.group(2)!r}")
     assert not offenders, "emoji no texto de botões do reader_view:\n" + "\n".join(offenders)
+
+
+# ── Onda 5 (débito da Onda 4): collection_dialog / import_dialog /
+# flashcards_dialog / widgets diversos — cobertura ao vivo (pytest-qt) ──────
+
+class _FakeAnkiService:
+    """Stub mínimo (mesmo de test_styles_migration.py): Anki "fechado"."""
+
+    def is_available(self) -> bool:
+        return False
+
+    def count_pending_fallback(self) -> int:
+        return 0
+
+
+@pytest.fixture
+def db(tmp_path):
+    from src.core.database import LibraryDB
+    database = LibraryDB(tmp_path / "lib.db")
+    yield database
+    database.close()
+
+
+def test_collection_dialog_buttons_have_no_emoji_in_text(qtbot, db):
+    from src.gui.collection_dialog import CollectionDialog
+    dlg = CollectionDialog(db)
+    qtbot.addWidget(dlg)
+    _assert_no_emoji_buttons(dlg)
+    assert not dlg._rename_btn.icon().isNull()
+    assert not dlg._delete_btn.icon().isNull()
+
+
+def test_add_to_collection_dialog_buttons_have_no_emoji_in_text(qtbot, db):
+    from src.gui.collection_dialog import AddToCollectionDialog
+    bid = db.add_book(title="Livro", file_path="/x.pdf", file_format="pdf")
+    dlg = AddToCollectionDialog(db, bid)
+    qtbot.addWidget(dlg)
+    _assert_no_emoji_buttons(dlg)
+
+
+def test_import_dialog_buttons_have_no_emoji_in_text(qtbot):
+    from src.gui.import_dialog import ImportDialog
+    dlg = ImportDialog(MagicMock())
+    qtbot.addWidget(dlg)
+    _assert_no_emoji_buttons(dlg)
+    assert not dlg._import_btn.icon().isNull()
+
+
+def test_flashcards_dialog_buttons_have_no_emoji_in_text(qtbot, db):
+    from src.gui.dialogs.flashcards_dialog import FlashcardsDialog
+    bid = db.add_book(title="Livro", file_path="/x.pdf", file_format="pdf")
+    db.add_flashcard(front="Q1", back="A1", book_id=bid)
+    dlg = FlashcardsDialog(db, current_book_id=bid)
+    qtbot.addWidget(dlg)
+    _assert_no_emoji_buttons(dlg)  # inclui o "✕" do _FlashcardCard na lista
+
+
+def test_word_wise_popover_close_button_has_no_emoji_in_text(qtbot):
+    from src.gui.widgets.word_wise_popover import WordWisePopover
+    popover = WordWisePopover()
+    qtbot.addWidget(popover)
+    for state in ("loading", "definition", "error"):
+        if state == "loading":
+            popover.show_loading("termo", popover.pos())
+        elif state == "definition":
+            popover.show_definition("termo", "definição")
+        else:
+            popover.show_error()
+        _assert_no_emoji_buttons(popover)
+    assert not popover._close_btn.icon().isNull()
+
+
+def test_tag_manager_buttons_have_no_emoji_in_text(qtbot, db):
+    from src.gui.widgets.tag_manager import TagManager, AddTagDialog
+    bid = db.add_book(title="Livro", file_path="/x.pdf", file_format="pdf")
+    tag_id = db.create_tag("Ficção", "#6366f1")
+    db.add_tag_to_book(bid, tag_id)
+
+    manager = TagManager(db)
+    qtbot.addWidget(manager)
+    manager.set_book(bid)  # popula TagBadge com botão remover ("✕")
+    _assert_no_emoji_buttons(manager)
+
+    dlg = AddTagDialog(db, bid)
+    qtbot.addWidget(dlg)
+    _assert_no_emoji_buttons(dlg)
+
+
+def test_tag_badge_remove_button_has_no_emoji_in_text(qtbot):
+    from src.gui.widgets.tag_manager import TagBadge
+    badge = TagBadge({"id": 1, "name": "Ficção", "color": "#6366f1"}, removable=True)
+    qtbot.addWidget(badge)
+    _assert_no_emoji_buttons(badge)
+
+
+def test_search_overlay_close_button_has_no_emoji_in_text(qtbot):
+    from src.gui.widgets.search_overlay import DocumentSearchBar
+    bar = DocumentSearchBar()
+    qtbot.addWidget(bar)
+    _assert_no_emoji_buttons(bar)
+    assert not bar._close_btn.icon().isNull()
+
+
+def test_reader_typography_popover_close_button_has_no_emoji_in_text(qtbot):
+    from src.gui.widgets.reader_typography_popover import ReaderTypographyPopover
+    popover = ReaderTypographyPopover()
+    qtbot.addWidget(popover)
+    _assert_no_emoji_buttons(popover)
+
+
+def test_reader_dock_close_button_has_no_emoji_in_text(qtbot):
+    from PyQt6.QtWidgets import QLabel
+    from src.gui.widgets.reader_dock import ReaderDock
+    dock = ReaderDock()
+    qtbot.addWidget(dock)
+    # add_tab(icon=...): o emoji vai pro ícone do botão da aba, nunca no texto
+    # (débito da Onda 4 — os 3 call sites de reader_view.py embutiam o emoji
+    # em label antes desta rodada).
+    dock.add_tab("annotations", "Anotações", QLabel("a"), icon="📝")
+    _assert_no_emoji_buttons(dock)
+    assert not dock._tab_buttons["annotations"].icon().isNull()
+    assert not dock._close_btn.icon().isNull()
+
+
+def test_rag_panel_buttons_have_no_emoji_in_text_across_states(qtbot):
+    """Exercita os principais estados dinâmicos do RAGPanel (débito da Onda
+    4) — vários botões trocam de texto/ícone em runtime (feedback,
+    salvar nota, aplicar modelo) e cada transição precisa continuar limpa."""
+    from src.gui.widgets.rag_panel import RAGPanel
+    panel = RAGPanel()
+    qtbot.addWidget(panel)
+    _assert_no_emoji_buttons(panel)  # estado inicial
+
+    # Resposta com contexto de livro: mostra salvar-nota + flashcard + 👍/👎.
+    panel.set_reading_context(1, "Livro", 1, "texto")
+    panel._last_query = "pergunta"
+    panel.on_answer_complete("uma resposta qualquer")
+    _assert_no_emoji_buttons(panel)
+
+    # 👍 — confirmação "Obrigado!" (ícone muda de 👍 para ✅).
+    panel._thumbs_up_btn.click()
+    _assert_no_emoji_buttons(panel)
+
+    # Nova resposta + 👎 com motivo — confirmação "Obrigado!" no botão down.
+    panel._feedback_given = False
+    panel.on_answer_complete("outra resposta")
+    panel._thumbs_down_btn.click()
+    panel._on_reason_chosen("incompleta")
+    _assert_no_emoji_buttons(panel)
+
+    # Salvar como anotação — "Salvo!" (ícone muda de 💾 para ✅).
+    panel._on_save_note_clicked()
+    _assert_no_emoji_buttons(panel)
+
+    # Seletor de modelo: instalado vs. não instalado.
+    panel._installed_models = {panel._MODEL_CATALOG[0][0]}
+    panel._on_model_combo_changed(0)
+    _assert_no_emoji_buttons(panel)
+    panel._installed_models = set()
+    panel._on_model_combo_changed(0)
+    _assert_no_emoji_buttons(panel)
+
+    # Conclusão do download (sem worker real — chamado direto).
+    panel._on_pull_complete(True, panel._MODEL_CATALOG[0][0])
+    _assert_no_emoji_buttons(panel)
+
+
+def test_proactive_insights_panel_buttons_have_no_emoji_in_text(qtbot):
+    from src.gui.widgets.proactive_insights_panel import ProactiveInsightsPanel
+    panel = ProactiveInsightsPanel()
+    qtbot.addWidget(panel)
+    panel.add_observation({"id": 1, "tipo": "Conexão", "confianca": "Alta", "texto": "obs"})
+    _assert_no_emoji_buttons(panel)
+
+
+def test_proactive_footer_buttons_have_no_emoji_in_text(qtbot):
+    from src.gui.widgets.proactive_footer import ProactiveFooterWidget
+    footer = ProactiveFooterWidget()
+    qtbot.addWidget(footer)
+    footer.set_observation({"tipo": "Conexão", "confianca": "Alta", "texto": "obs"})
+    _assert_no_emoji_buttons(footer)
+
+
+def test_bookmarks_panel_remove_button_has_no_emoji_in_text(qtbot):
+    from src.gui.widgets.bookmarks_panel import BookmarksPanel
+    panel = BookmarksPanel()
+    qtbot.addWidget(panel)
+    panel.set_bookmarks([{"page_number": 0, "label": "Capítulo 1"}])
+    _assert_no_emoji_buttons(panel)
+
+
+def test_annotation_panel_and_item_buttons_have_no_emoji_in_text(qtbot):
+    from src.gui.widgets.annotation_panel import AnnotationPanel, AnnotationItem
+    panel = AnnotationPanel()
+    qtbot.addWidget(panel)
+    _assert_no_emoji_buttons(panel)  # "+ Nota" e o botão de marcador
+
+    item = AnnotationItem(
+        {"annotation_type": "note", "content": "corpo", "title": "T", "page_number": 1})
+    qtbot.addWidget(item)
+    _assert_no_emoji_buttons(item)  # renomear ("✏️") e excluir ("✕")
+
+
+def test_anki_export_dialog_buttons_have_no_emoji_in_text(qtbot):
+    from src.gui.widgets.anki_export_dialog import AnkiExportDialog
+    dlg = AnkiExportDialog(_FakeAnkiService())
+    qtbot.addWidget(dlg)
+    _assert_no_emoji_buttons(dlg)
+    assert not dlg.save_btn.icon().isNull()
+
+    # Fila com pendências: flush_btn fica visível com texto dinâmico
+    # ("↩️ Reenviar N flashcard(s)…" antes desta rodada).
+    from unittest.mock import patch
+    with patch.object(dlg.service, "count_pending_fallback", return_value=3):
+        dlg._refresh_pending_button()
+    _assert_no_emoji_buttons(dlg)
+    assert not dlg.flush_btn.icon().isNull()
+
+
+def test_ai_response_card_buttons_have_no_emoji_in_text(qtbot):
+    from src.gui.widgets.ai_response_card import AIResponseCard
+    card = AIResponseCard()
+    qtbot.addWidget(card)
+    card.start()
+    _assert_no_emoji_buttons(card)
+    card.fail("erro")
+    _assert_no_emoji_buttons(card)
+    assert not card._stop_btn.icon().isNull()
+    assert not card._retry_btn.icon().isNull()

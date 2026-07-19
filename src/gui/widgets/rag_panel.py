@@ -17,6 +17,8 @@ from PyQt6.QtWidgets import (
     QProgressBar, QFrame, QSplitter, QComboBox,
 )
 
+from src.gui.styles import emoji_icon
+
 logger = logging.getLogger(__name__)
 
 
@@ -136,7 +138,8 @@ class RAGPanel(QWidget):
         h_layout.addWidget(self._sidebar_toggle_btn)
 
         # Botão Fechar (Escape Hatch)
-        self._close_btn = QPushButton("✕")
+        self._close_btn = QPushButton()
+        self._close_btn.setIcon(emoji_icon("✕", 14))
         self._close_btn.setFixedSize(28, 28)
         self._close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._close_btn.setObjectName("ragCloseBtn")
@@ -200,14 +203,16 @@ class RAGPanel(QWidget):
         action_btns_layout.addStretch()
 
         # Botão de Flashcard
-        self._flashcard_btn = QPushButton("🃏 Criar Flashcard")
+        self._flashcard_btn = QPushButton("Criar Flashcard")
+        self._flashcard_btn.setIcon(emoji_icon("🃏"))
         self._flashcard_btn.setVisible(False)
         self._flashcard_btn.setObjectName("ragFlashcardBtn")
         self._flashcard_btn.clicked.connect(self._on_flashcard_clicked)
         action_btns_layout.addWidget(self._flashcard_btn)
 
         # Botão de Salvar Anotação Manual (Human-in-the-Loop)
-        self._save_note_btn = QPushButton("💾 Salvar como Anotação")
+        self._save_note_btn = QPushButton("Salvar como Anotação")
+        self._save_note_btn.setIcon(emoji_icon("💾"))
         self._save_note_btn.setVisible(False)
         self._save_note_btn.setObjectName("ragSaveNoteBtn")
         self._save_note_btn.clicked.connect(self._on_save_note_clicked)
@@ -217,13 +222,15 @@ class RAGPanel(QWidget):
         # Estilo "ghost" discreto, espelhando selection_popover. objectName
         # compartilhado entre os dois botões (mesmo papel visual — padrão já
         # usado em flashcardItem/tagBadge para widgets repetidos).
-        self._thumbs_up_btn = QPushButton("👍 Útil")
+        self._thumbs_up_btn = QPushButton("Útil")
+        self._thumbs_up_btn.setIcon(emoji_icon("👍"))
         self._thumbs_up_btn.setVisible(False)
         self._thumbs_up_btn.setObjectName("ragFeedbackBtn")
         self._thumbs_up_btn.clicked.connect(lambda: self._on_feedback_clicked(1))
         action_btns_layout.addWidget(self._thumbs_up_btn)
 
-        self._thumbs_down_btn = QPushButton("👎 Não ajudou")
+        self._thumbs_down_btn = QPushButton("Não ajudou")
+        self._thumbs_down_btn.setIcon(emoji_icon("👎"))
         self._thumbs_down_btn.setVisible(False)
         self._thumbs_down_btn.setObjectName("ragFeedbackBtn")
         self._thumbs_down_btn.clicked.connect(lambda: self._on_feedback_clicked(-1))
@@ -274,7 +281,8 @@ class RAGPanel(QWidget):
         # "Responder de novo considerando isto" (Tarefa 3.8): aparece assim
         # que o motivo do 👎 é registrado — reenvia a última pergunta com o
         # motivo anexado ao prompt (consulta RAG normal, com thinking).
-        self._retry_btn = QPushButton("🔁 Responder de novo considerando isto")
+        self._retry_btn = QPushButton("Responder de novo considerando isto")
+        self._retry_btn.setIcon(emoji_icon("🔁"))
         self._retry_btn.setObjectName("RagRetryWithReasonButton")
         self._retry_btn.setVisible(False)
         self._retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -316,14 +324,16 @@ class RAGPanel(QWidget):
         # objectName próprio (não o "primaryBtn" genérico): o CTA de enviar
         # pergunta tem um visual distinto (gradiente + estado disabled) do
         # botão primário padrão usado em diálogos.
-        self._send_btn = QPushButton("✨ Perguntar")
+        self._send_btn = QPushButton("Perguntar")
+        self._send_btn.setIcon(emoji_icon("✨"))
         self._send_btn.setObjectName("ragSendBtn")
         self._send_btn.setFixedHeight(38)
         self._send_btn.setMinimumWidth(110)
         self._send_btn.clicked.connect(self._on_send)
         input_layout.addWidget(self._send_btn)
 
-        self._stop_btn = QPushButton("⛔ Parar")
+        self._stop_btn = QPushButton("Parar")
+        self._stop_btn.setIcon(emoji_icon("⛔"))
         self._stop_btn.setFixedHeight(38)
         self._stop_btn.setMinimumWidth(80)
         self._stop_btn.setVisible(False)
@@ -359,7 +369,8 @@ class RAGPanel(QWidget):
         self._indexed_count_lbl.setObjectName("ragIndexedCountLbl")
         idx_layout.addWidget(self._indexed_count_lbl)
 
-        self._index_btn = QPushButton("🔄 Reindexar Biblioteca")
+        self._index_btn = QPushButton("Reindexar Biblioteca")
+        self._index_btn.setIcon(emoji_icon("🔄"))
         self._index_btn.setObjectName("ragIndexBtn")
         self._index_btn.clicked.connect(self._on_index_all)
         idx_layout.addWidget(self._index_btn)
@@ -415,7 +426,8 @@ class RAGPanel(QWidget):
         self._pull_progress.setObjectName("ragPullProgress")
         model_layout.addWidget(self._pull_progress)
 
-        self._model_apply_btn = QPushButton("✅ Usar este Modelo")
+        self._model_apply_btn = QPushButton("Usar este Modelo")
+        self._model_apply_btn.setIcon(emoji_icon("✅"))
         self._model_apply_btn.setObjectName("ragModelApplyBtn")
         self._model_apply_btn.clicked.connect(self._on_model_apply)
         model_layout.addWidget(self._model_apply_btn)
@@ -457,7 +469,8 @@ class RAGPanel(QWidget):
         sb_layout.addStretch()
 
         # Botão limpar chat
-        self._clear_btn = QPushButton("🗑️ Limpar Conversa")
+        self._clear_btn = QPushButton("Limpar Conversa")
+        self._clear_btn.setIcon(emoji_icon("🗑️"))
         self._clear_btn.setObjectName("ragClearBtn")
         self._clear_btn.clicked.connect(self._clear_chat)
         sb_layout.addWidget(self._clear_btn)
@@ -676,7 +689,8 @@ class RAGPanel(QWidget):
         # Human-in-the-loop: Mostrar botão de salvar anotação se houver contexto de livro
         is_global = getattr(self, "_is_standalone", False)
         if self._reading_context and not is_global and self._reading_context.get("book_id", 0) > 0 and full_answer.strip():
-            self._save_note_btn.setText("💾 Salvar como Anotação")
+            self._save_note_btn.setIcon(emoji_icon("💾"))
+            self._save_note_btn.setText("Salvar como Anotação")
             self._save_note_btn.setEnabled(True)
             self._save_note_btn.setVisible(True)
             self._flashcard_btn.setVisible(True)
@@ -689,10 +703,11 @@ class RAGPanel(QWidget):
             self._show_feedback_buttons()
 
     def _show_feedback_buttons(self) -> None:
-        for btn, label in (
-            (self._thumbs_up_btn, "👍 Útil"),
-            (self._thumbs_down_btn, "👎 Não ajudou"),
+        for btn, icon, label in (
+            (self._thumbs_up_btn, "👍", "Útil"),
+            (self._thumbs_down_btn, "👎", "Não ajudou"),
         ):
+            btn.setIcon(emoji_icon(icon))
             btn.setText(label)
             btn.setEnabled(True)
             btn.setVisible(True)
@@ -733,7 +748,8 @@ class RAGPanel(QWidget):
         self._thumbs_down_btn.setEnabled(False)
         if rating > 0:
             # 👍 — confirmação imediata no mesmo lugar de hoje.
-            self._thumbs_up_btn.setText("✅ Obrigado!")
+            self._thumbs_up_btn.setIcon(emoji_icon("✅"))
+            self._thumbs_up_btn.setText("Obrigado!")
         else:
             # 👎 — voto já emitido; abre os chips de motivo (opcional).
             self._thumbs_up_btn.setVisible(False)
@@ -811,7 +827,8 @@ class RAGPanel(QWidget):
             # Persistência ainda não confirmou o id — guarda para emitir depois.
             self._pending_reason = reason
         # Confirmação visual no mesmo lugar de hoje.
-        self._thumbs_down_btn.setText("✅ Obrigado!")
+        self._thumbs_down_btn.setIcon(emoji_icon("✅"))
+        self._thumbs_down_btn.setText("Obrigado!")
         self._thumbs_down_btn.setEnabled(False)
         self._thumbs_down_btn.setVisible(True)
         self._last_reason_for_retry = reason
@@ -857,7 +874,8 @@ class RAGPanel(QWidget):
         content = self._full_answer.strip()
         
         # Feedback visual imediato
-        self._save_note_btn.setText("✅ Salvo!")
+        self._save_note_btn.setIcon(emoji_icon("✅"))
+        self._save_note_btn.setText("Salvo!")
         self._save_note_btn.setEnabled(False)
         
         # Emite sinal para o MainWindow persistir no banco
@@ -1210,11 +1228,13 @@ class RAGPanel(QWidget):
         if model_id in installed:
             self._model_badge.setText("✅ Instalado")
             self._swap_object_name(self._model_badge, "ragModelBadgeInstalled")
-            self._model_apply_btn.setText("✅ Usar este Modelo")
+            self._model_apply_btn.setIcon(emoji_icon("✅"))
+            self._model_apply_btn.setText("Usar este Modelo")
         else:
             self._model_badge.setText("⬇️  Não instalado")
             self._swap_object_name(self._model_badge, "ragModelBadgeMissing")
-            self._model_apply_btn.setText("⬇️  Baixar e Usar Modelo")
+            self._model_apply_btn.setIcon(emoji_icon("⬇️"))
+            self._model_apply_btn.setText("Baixar e Usar Modelo")
 
     def _on_model_apply(self) -> None:
         """Aplica o modelo selecionado ou inicia o pull se não instalado."""
@@ -1273,7 +1293,8 @@ class RAGPanel(QWidget):
             self._installed_models.add(model_id)
             self._model_badge.setText("✅ Instalado")
             self._swap_object_name(self._model_badge, "ragModelBadgeInstalled")
-            self._model_apply_btn.setText("✅ Usar este Modelo")
+            self._model_apply_btn.setIcon(emoji_icon("✅"))
+            self._model_apply_btn.setText("Usar este Modelo")
             self.model_changed.emit(model_id)
         else:
             self._model_badge.setText("❌ Falha no download")

@@ -122,6 +122,7 @@ class SettingsDialog(QDialog):
         sort_row.addWidget(QLabel("Ordenar por:"))
         self._sort_combo = QComboBox()
         self._sort_combo.addItem("Data de adição", "date_added")
+        self._sort_combo.addItem("Última atividade", "date_modified")
         self._sort_combo.addItem("Título", "title")
         self._sort_combo.addItem("Autor", "author")
         self._sort_combo.addItem("Avaliação", "rating")

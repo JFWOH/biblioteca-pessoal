@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
+from src.gui.styles import emoji_icon
+
 
 class ReaderDock(QWidget):
     closed = pyqtSignal()
@@ -36,7 +38,8 @@ class ReaderDock(QWidget):
         self._tabs_row = QHBoxLayout()
         self._tabs_row.setSpacing(4)
         h.addLayout(self._tabs_row, 1)
-        self._close_btn = QPushButton("✕")
+        self._close_btn = QPushButton()
+        self._close_btn.setIcon(emoji_icon("✕", 13))
         self._close_btn.setFixedSize(26, 26)
         self._close_btn.setToolTip("Recolher painel")
         self._close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -51,8 +54,16 @@ class ReaderDock(QWidget):
 
     # ── Gestão de abas ────────────────────────────────────────────────
 
-    def add_tab(self, key: str, label: str, widget: QWidget) -> None:
-        """Registra um widget como aba. Idempotente por chave."""
+    def add_tab(self, key: str, label: str, widget: QWidget,
+               icon: str | None = None) -> None:
+        """Registra um widget como aba. Idempotente por chave.
+
+        ``icon`` (opcional): emoji exibido como ÍCONE do botão da aba
+        (``setIcon(emoji_icon(...))``) — nunca embutido em ``label``, senão
+        reproduz o bug de sobreposição do Windows (débito da Onda 4). Os
+        chamadores devem passar ``label`` SEM emoji e o emoji separadamente
+        em ``icon``.
+        """
         if key in self._widgets:
             return
         self._keys.append(key)
@@ -61,6 +72,8 @@ class ReaderDock(QWidget):
         self._stack.addWidget(widget)
 
         btn = QPushButton(label)
+        if icon:
+            btn.setIcon(emoji_icon(icon, 14))
         btn.setCheckable(True)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.clicked.connect(lambda _checked=False, k=key: self.show_tab(k))

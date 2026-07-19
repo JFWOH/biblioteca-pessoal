@@ -15,6 +15,8 @@ tema — cobre os 3 temas do app).
 from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 from PyQt6.QtCore import Qt
 
+from src.gui.styles import emoji_icon
+
 
 class WordWisePopover(QFrame):
     """Pequeno cartão com a definição rápida de um termo selecionado."""
@@ -40,7 +42,8 @@ class WordWisePopover(QFrame):
         self._term_label.setObjectName("WordWiseTerm")
         header_row.addWidget(self._term_label, 1)
 
-        self._close_btn = QPushButton("✕")
+        self._close_btn = QPushButton()
+        self._close_btn.setIcon(emoji_icon("✕", 12))
         self._close_btn.setObjectName("WordWiseClose")
         self._close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._close_btn.setFixedSize(18, 18)

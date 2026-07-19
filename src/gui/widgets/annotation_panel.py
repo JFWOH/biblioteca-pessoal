@@ -7,6 +7,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
+from src.gui.styles import emoji_icon
+
 
 class AnnotationItem(QFrame):
     """Widget individual de anotação."""
@@ -88,14 +90,16 @@ class AnnotationItem(QFrame):
         footer.addStretch()
 
         # Renomear (título) — vale para notas, destaques e notas da IA.
-        self._rename_btn = QPushButton("✏️")
+        self._rename_btn = QPushButton()
+        self._rename_btn.setIcon(emoji_icon("✏️", 12))
         self._rename_btn.setFixedSize(20, 20)
         self._rename_btn.setToolTip("Renomear título")
         self._rename_btn.setObjectName("annotationItemRenameBtn")
         self._rename_btn.clicked.connect(self._on_rename_clicked)
         footer.addWidget(self._rename_btn)
 
-        self._del_btn = QPushButton("✕")
+        self._del_btn = QPushButton()
+        self._del_btn.setIcon(emoji_icon("✕", 12))
         self._del_btn.setFixedSize(20, 20)
         self._del_btn.setObjectName("annotationItemDelBtn")
         self._del_btn.clicked.connect(
@@ -221,7 +225,8 @@ class AnnotationPanel(QWidget):
         actions.addWidget(self._add_note_btn)
 
         # Botão marcador
-        self._bookmark_btn = QPushButton("🔖")
+        self._bookmark_btn = QPushButton()
+        self._bookmark_btn.setIcon(emoji_icon("🔖", 15))
         self._bookmark_btn.setFixedSize(28, 28)
         self._bookmark_btn.setToolTip("Adicionar marcador nesta página")
         self._bookmark_btn.setObjectName("annotationBookmarkBtn")

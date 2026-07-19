@@ -12,6 +12,7 @@ from PyQt6.QtGui import QFont
 
 from src.utils.constants import FILE_FILTER
 from src.utils.file_utils import format_file_size, get_file_extension
+from src.gui.styles import emoji_icon
 
 
 class ImportWorker(QThread):
@@ -94,12 +95,14 @@ class ImportDialog(QDialog):
         # Botões de seleção
         select_layout = QHBoxLayout()
 
-        files_btn = QPushButton("📄  Selecionar Arquivos")
+        files_btn = QPushButton("Selecionar Arquivos")
+        files_btn.setIcon(emoji_icon("📄"))
         files_btn.setObjectName("primaryBtn")
         files_btn.clicked.connect(self._select_files)
         select_layout.addWidget(files_btn)
 
-        folder_btn = QPushButton("📁  Selecionar Pasta")
+        folder_btn = QPushButton("Selecionar Pasta")
+        folder_btn.setIcon(emoji_icon("📁"))
         folder_btn.setObjectName("secondaryBtn")
         folder_btn.clicked.connect(self._select_folder)
         select_layout.addWidget(folder_btn)
@@ -170,7 +173,8 @@ class ImportDialog(QDialog):
         self._cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self._cancel_btn)
 
-        self._import_btn = QPushButton("🚀  Importar")
+        self._import_btn = QPushButton("Importar")
+        self._import_btn.setIcon(emoji_icon("🚀"))
         self._import_btn.setObjectName("primaryBtn")
         self._import_btn.setEnabled(False)
         self._import_btn.clicked.connect(self._start_import)

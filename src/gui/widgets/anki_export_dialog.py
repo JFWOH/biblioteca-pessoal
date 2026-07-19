@@ -1,7 +1,9 @@
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTextEdit, QComboBox, QMessageBox
 )
+
+from src.gui.styles import emoji_icon
 
 class AnkiExportDialog(QDialog):
     """
@@ -67,6 +69,7 @@ class AnkiExportDialog(QDialog):
 
         # Reenvio da fila de fallback (só aparece quando há pendências e o Anki está online)
         self.flush_btn = QPushButton()
+        self.flush_btn.setIcon(emoji_icon("↩️", 14))
         self.flush_btn.setVisible(False)
         self.flush_btn.clicked.connect(self._on_flush_pending)
         layout.addWidget(self.flush_btn)
@@ -76,7 +79,8 @@ class AnkiExportDialog(QDialog):
         self.cancel_btn = QPushButton("Cancelar")
         self.cancel_btn.clicked.connect(self.reject)
         
-        self.save_btn = QPushButton("💾 Salvar no Anki")
+        self.save_btn = QPushButton("Salvar no Anki")
+        self.save_btn.setIcon(emoji_icon("💾"))
         self.save_btn.setObjectName("ankiSaveBtn")
         self.save_btn.clicked.connect(self._on_save)
         
@@ -119,7 +123,7 @@ class AnkiExportDialog(QDialog):
         except Exception:
             pending = 0
         if pending > 0:
-            self.flush_btn.setText(f"↩️ Reenviar {pending} flashcard(s) da fila para o Anki")
+            self.flush_btn.setText(f"Reenviar {pending} flashcard(s) da fila para o Anki")
             self.flush_btn.setVisible(True)
         else:
             self.flush_btn.setVisible(False)
