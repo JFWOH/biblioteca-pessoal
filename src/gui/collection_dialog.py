@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QFont
 
 from src.core.database import LibraryDB
+from src.gui.styles import emoji_icon
 
 
 class CollectionDialog(QDialog):
@@ -74,12 +75,14 @@ class CollectionDialog(QDialog):
         # Botões de ação
         actions = QHBoxLayout()
 
-        self._rename_btn = QPushButton("✏️ Renomear")
+        self._rename_btn = QPushButton("Renomear")
+        self._rename_btn.setIcon(emoji_icon("✏️"))
         self._rename_btn.setObjectName("secondaryBtn")
         self._rename_btn.clicked.connect(self._rename_collection)
         actions.addWidget(self._rename_btn)
 
-        self._delete_btn = QPushButton("🗑 Excluir")
+        self._delete_btn = QPushButton("Excluir")
+        self._delete_btn.setIcon(emoji_icon("🗑"))
         self._delete_btn.setObjectName("dangerBtnSmall")
         self._delete_btn.clicked.connect(self._delete_collection)
         actions.addWidget(self._delete_btn)
@@ -212,7 +215,8 @@ class AddToCollectionDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
 
-        save_btn = QPushButton("💾 Salvar")
+        save_btn = QPushButton("Salvar")
+        save_btn.setIcon(emoji_icon("💾"))
         save_btn.setObjectName("primaryBtn")
         save_btn.clicked.connect(self._save)
         btn_layout.addWidget(save_btn)

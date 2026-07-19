@@ -115,7 +115,10 @@ def test_thumbs_down_shows_reason_chips(qtbot):
 
 
 def test_thumbs_up_no_reason_chips(qtbot):
-    """👍 mantém o fluxo de zero fricção: '✅ Obrigado!' e nenhum chip."""
+    """👍 mantém o fluxo de zero fricção: 'Obrigado!' (ícone ✅) e nenhum chip.
+
+    O emoji vai como setIcon, não texto (débito da Onda 4 — bug de
+    sobreposição do Windows)."""
     panel = RAGPanel()
     qtbot.addWidget(panel)
     panel.on_answer_complete("resposta")
@@ -123,7 +126,8 @@ def test_thumbs_up_no_reason_chips(qtbot):
     panel._thumbs_up_btn.click()
 
     assert not panel._reason_container.isVisibleTo(panel)
-    assert panel._thumbs_up_btn.text() == "✅ Obrigado!"
+    assert panel._thumbs_up_btn.text() == "Obrigado!"
+    assert not panel._thumbs_up_btn.icon().isNull()
 
 
 def test_reason_chip_after_persist_emits_key(qtbot):
@@ -141,7 +145,8 @@ def test_reason_chip_after_persist_emits_key(qtbot):
 
     assert got == [(42, "incompleta")]
     assert not panel._reason_container.isVisibleTo(panel)
-    assert panel._thumbs_down_btn.text() == "✅ Obrigado!"
+    assert panel._thumbs_down_btn.text() == "Obrigado!"
+    assert not panel._thumbs_down_btn.icon().isNull()
 
 
 def test_reason_chip_before_persist_emits_when_id_arrives(qtbot):

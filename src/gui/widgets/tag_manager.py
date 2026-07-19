@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QFont
 
 from src.core.database import LibraryDB
+from src.gui.styles import emoji_icon
 
 TAG_COLORS = [
     "#ef4444", "#f97316", "#fbbf24", "#34d399",
@@ -37,7 +38,8 @@ class TagBadge(QFrame):
         name.setStyleSheet(f"color:{color};font-size:11px;font-weight:600;border:none;")
         lay.addWidget(name)
         if removable:
-            x = QPushButton("✕")
+            x = QPushButton()
+            x.setIcon(emoji_icon("✕", 10))
             x.setFixedSize(16, 16)
             x.setStyleSheet(f"background:transparent;border:none;color:{color}88;font-size:10px;")
             x.clicked.connect(lambda: self.remove_requested.emit(tag.get("id", 0)))
@@ -165,7 +167,8 @@ class AddTagDialog(QDialog):
         cancel.setObjectName("secondaryBtn")
         cancel.clicked.connect(self.reject)
         btns.addWidget(cancel)
-        create = QPushButton("✨ Criar")
+        create = QPushButton("Criar")
+        create.setIcon(emoji_icon("✨"))
         create.setObjectName("primaryBtn")
         create.clicked.connect(self._create)
         btns.addWidget(create)

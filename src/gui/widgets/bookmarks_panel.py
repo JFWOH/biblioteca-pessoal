@@ -14,6 +14,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
+from src.gui.styles import emoji_icon
+
 
 class BookmarksPanel(QWidget):
     """Lista de marcadores de página do livro atual.
@@ -93,7 +95,8 @@ class BookmarksPanel(QWidget):
         goto.clicked.connect(lambda _checked=False, p=page: self.bookmark_selected.emit(p))
         h.addWidget(goto, stretch=1)
 
-        remove = QPushButton("✕")
+        remove = QPushButton()
+        remove.setIcon(emoji_icon("✕", 12))
         remove.setObjectName("bookmarkRemoveBtn")
         remove.setFixedSize(24, 24)
         remove.setCursor(Qt.CursorShape.PointingHandCursor)

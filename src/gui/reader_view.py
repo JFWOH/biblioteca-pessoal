@@ -641,14 +641,14 @@ class ReaderView(QWidget):
         # Dock único à direita: abas recolhíveis (Anotações / Assistente),
         # exibindo um painel por vez para maximizar o espaço de leitura.
         self._dock = ReaderDock()
-        self._dock.add_tab("annotations", "📝 Anotações", self._annotation_panel)
+        self._dock.add_tab("annotations", "Anotações", self._annotation_panel, icon="📝")
         # Insights do agente proativo: registro persistente das observações da sessão.
         self._insights_panel = ProactiveInsightsPanel()
         self._insights_panel.flashcard_requested.connect(
             lambda text: self.ai_action_requested.emit("flashcard_qa", text)
         )
         self._insights_panel.dismiss_requested.connect(self._on_observation_dismissed)
-        self._dock.add_tab("insights", "💡 Insights", self._insights_panel)
+        self._dock.add_tab("insights", "Insights", self._insights_panel, icon="💡")
         self._dock.closed.connect(self.hide_dock)
         self._dock.tab_changed.connect(lambda _k: self._sync_dock_buttons())
         self._main_splitter.addWidget(self._dock)
@@ -1659,7 +1659,7 @@ class ReaderView(QWidget):
             return  # Já injetado
 
         self._ai_panel_container = ai_panel
-        self._dock.add_tab("assistant", "💬 Assistente", ai_panel)
+        self._dock.add_tab("assistant", "Assistente", ai_panel, icon="💬")
         # Mantém Anotações como aba padrão ao injetar (não rouba foco).
         if self._dock.has_tab("annotations"):
             self._dock.show_tab("annotations")

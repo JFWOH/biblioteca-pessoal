@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
+from src.gui.styles import emoji_icon
 from src.utils.constants import (
     MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_FONT_SIZE,
     DEFAULT_FONT_FAMILY, DEFAULT_LINE_HEIGHT,
@@ -63,7 +64,8 @@ class ReaderTypographyPopover(QDialog):
         title.setObjectName("readerTypographyTitle")
         header.addWidget(title)
         header.addStretch()
-        close_btn = QPushButton("✕")
+        close_btn = QPushButton()
+        close_btn.setIcon(emoji_icon("✕", 12))
         close_btn.setObjectName("readerTypographyClose")
         close_btn.setFixedSize(24, 24)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)

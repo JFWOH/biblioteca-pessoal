@@ -12,6 +12,8 @@ from PyQt6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
 )
 
+from src.gui.styles import emoji_icon
+
 
 class AIResponseCard(QFrame):
     """Estados: idle → thinking → streaming → done | error.
@@ -50,13 +52,15 @@ class AIResponseCard(QFrame):
         self._status_lbl.setObjectName("aiResponseStatusLbl")
         header.addWidget(self._status_lbl, stretch=1)
 
-        self._stop_btn = QPushButton("⏹ Parar")
+        self._stop_btn = QPushButton("Parar")
+        self._stop_btn.setIcon(emoji_icon("⏹"))
         self._stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._stop_btn.setObjectName("aiResponseActionBtn")
         self._stop_btn.clicked.connect(self.stop_requested.emit)
         header.addWidget(self._stop_btn)
 
-        self._retry_btn = QPushButton("🔄 Tentar de novo")
+        self._retry_btn = QPushButton("Tentar de novo")
+        self._retry_btn.setIcon(emoji_icon("🔄"))
         self._retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._retry_btn.setObjectName("aiResponseActionBtn")
         self._retry_btn.clicked.connect(self.retry_requested.emit)

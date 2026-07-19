@@ -5,6 +5,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
+from src.gui.styles import emoji_icon
+
 
 class DocumentSearchBar(QWidget):
     """Barra de busca overlay para buscar dentro do documento aberto."""
@@ -68,7 +70,8 @@ class DocumentSearchBar(QWidget):
         layout.addWidget(self._next_btn)
 
         # Fechar
-        self._close_btn = QPushButton("✕")
+        self._close_btn = QPushButton()
+        self._close_btn.setIcon(emoji_icon("✕", 14))
         self._close_btn.setFixedSize(28, 28)
         self._close_btn.setObjectName("searchBarCloseBtn")
         self._close_btn.clicked.connect(self.close_bar)

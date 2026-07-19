@@ -9,6 +9,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
+from src.gui.styles import emoji_icon
+
 
 class ProactiveInsightsPanel(QWidget):
     flashcard_requested = pyqtSignal(str)
@@ -132,7 +134,8 @@ class ProactiveInsightsPanel(QWidget):
         header_row.addStretch()
         # ✕ de dispensa: só para observações persistidas (com id).
         if obs_id is not None:
-            close_btn = QPushButton("✕")
+            close_btn = QPushButton()
+            close_btn.setIcon(emoji_icon("✕", 11))
             close_btn.setFixedSize(18, 18)
             close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             close_btn.setStyleSheet(
@@ -150,7 +153,8 @@ class ProactiveInsightsPanel(QWidget):
         lay.addWidget(body)
 
         if with_flashcard and (body_text or "").strip():
-            fc = QPushButton("🃏 Flashcard")
+            fc = QPushButton("Flashcard")
+            fc.setIcon(emoji_icon("🃏", 14))
             fc.setCursor(Qt.CursorShape.PointingHandCursor)
             fc.setStyleSheet(
                 "QPushButton { background: transparent; color: #3b82f6; border: 1px solid #2563eb;"
