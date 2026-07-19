@@ -1280,6 +1280,370 @@ QLabel#ragThinkingIndicator {
     font-size: 12px;
     font-weight: 700;
 }
+
+/* ── Painel do Assistente (RAG) ───────────────────────
+   Onda 0b: estilos que antes viviam em rag_panel.py::set_theme (montado por
+   f-string a cada troca de tema) — mesmos valores, fonte central agora. */
+#ragHeader {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #161920, stop:1 #20242d);
+    border-bottom: 1px solid #2d333f;
+    padding: 0;
+}
+#ragTitleLbl { color: #e5e7eb; font-size: 15px; font-weight: 700; }
+#ragSubLbl { color: #cbd5e1; font-size: 11px; }
+#ragChatWidget { background-color: #0f1115; }
+#ragResponseLabel {
+    color: #cbd5e1; font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase;
+}
+QTextEdit#responseArea {
+    background-color: #161920;
+    border: 1px solid #2d333f;
+    border-radius: 12px;
+    padding: 16px;
+    color: #e5e7eb;
+    font-size: 14px;
+    line-height: 1.6;
+    selection-background-color: #10b981;
+}
+QTextEdit#responseArea:focus { border-color: #10b981; }
+QProgressBar#ragProgressBar {
+    background-color: #2d333f;
+    border-radius: 3px;
+    max-height: 6px;
+}
+QProgressBar#ragProgressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #059669, stop:1 #10b981);
+    border-radius: 3px;
+}
+#ragGenStatus { color: #cbd5e1; font-size: 11px; }
+QFrame#ragInputFrame {
+    background-color: #161920;
+    border: 1px solid #2d333f;
+    border-radius: 12px;
+}
+QFrame#ragInputFrame:focus-within { border-color: #10b981; }
+QLineEdit#ragInput {
+    background: transparent;
+    border: none;
+    color: #e5e7eb;
+    font-size: 14px;
+    padding: 6px 4px;
+}
+#ragSidebarWidget { background-color: #161920; border-left: 1px solid #2d333f; }
+QFrame#ragIdxFrame {
+    background-color: #161920;
+    border: 1px solid #2d333f;
+    border-radius: 10px;
+    padding: 4px;
+}
+#ragIndexedCountLbl { color: #cbd5e1; font-size: 11px; }
+QPushButton#ragIndexBtn {
+    background-color: #0f1115;
+    color: #10b981;
+    border: 1px solid #2d333f;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+}
+QPushButton#ragIndexBtn:hover { background-color: #161920; border-color: #10b981; }
+QPushButton#ragIndexBtn:pressed { background-color: #047857; color: white; }
+QFrame#ragModelFrame {
+    background-color: #161920;
+    border: 1px solid #2d333f;
+    border-radius: 10px;
+    padding: 4px;
+}
+QComboBox#ragModelCombo {
+    background-color: #0f1115; color: #e5e7eb;
+    border: 1px solid #2d333f; border-radius: 6px;
+    padding: 5px 10px; font-size: 12px;
+}
+QComboBox#ragModelCombo::drop-down { border: none; width: 24px; }
+QComboBox#ragModelCombo QAbstractItemView {
+    background: #0f1115; color: #e5e7eb;
+    border: 1px solid #2d333f; selection-background-color: #161920;
+}
+QListWidget#ragSourcesList {
+    background-color: #161920;
+    border: 1px solid #2d333f;
+    border-radius: 8px;
+    padding: 4px;
+    color: #cbd5e1;
+    font-size: 12px;
+}
+QListWidget#ragSourcesList::item {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border-bottom: 1px solid #2d333f;
+}
+QListWidget#ragSourcesList::item:hover { background-color: #0f1115; color: #e5e7eb; }
+QListWidget#ragSourcesList::item:selected { background-color: rgba(16,185,129,0.15); color: #10b981; }
+QFrame#ragTipsFrame {
+    background-color: rgba(16, 185, 129, 0.05);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+    border-radius: 8px;
+}
+#ragTipsText { color: #10b981; font-size: 10px; line-height: 1.5; }
+QPushButton#ragClearBtn {
+    background: transparent;
+    color: #cbd5e1;
+    border: 1px solid #2d333f;
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 11px;
+}
+QPushButton#ragClearBtn:hover { color: #f87171; border-color: #7f1d1d; }
+
+/* Elementos estáticos do painel do Assistente (mesmo valor nos 3 temas —
+   já eram hardcoded fora do bloco condicional de set_theme). */
+QPushButton#ragBackBtn {
+    background: transparent;
+    color: #10b981;
+    border: none;
+    font-weight: 500;
+    font-size: 13px;
+    padding-right: 12px;
+}
+QPushButton#ragBackBtn:hover { color: #34d399; }
+QPushButton#ragSidebarToggleBtn {
+    background: transparent; color: #a1a1aa; border: none;
+    border-radius: 4px; font-size: 15px; font-weight: bold;
+}
+QPushButton#ragSidebarToggleBtn:hover { background: #3f3f46; color: white; }
+QPushButton#ragSidebarToggleBtn:checked { color: #10b981; }
+QPushButton#ragCloseBtn {
+    background: transparent;
+    color: #a1a1aa;
+    border: none;
+    border-radius: 4px;
+    font-size: 16px;
+    font-weight: bold;
+}
+QPushButton#ragCloseBtn:hover {
+    background: #ef4444;
+    color: white;
+}
+QSplitter#ragSplitter::handle { background: #27272a; }
+QPushButton#ragFlashcardBtn {
+    background-color: rgba(37, 99, 235, 0.15);
+    color: #3b82f6;
+    border: 1px solid #2563eb;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-weight: bold;
+    font-size: 12px;
+}
+QPushButton#ragFlashcardBtn:hover {
+    background-color: rgba(37, 99, 235, 0.25);
+}
+QPushButton#ragSaveNoteBtn {
+    background-color: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid #059669;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-weight: bold;
+    font-size: 12px;
+}
+QPushButton#ragSaveNoteBtn:hover {
+    background-color: rgba(16, 185, 129, 0.25);
+}
+QPushButton#ragSaveNoteBtn:disabled {
+    background-color: rgba(39, 39, 42, 0.5);
+    color: #52525b;
+    border: 1px solid #3f3f46;
+}
+QPushButton#ragFeedbackBtn {
+    background: transparent;
+    border: 1px solid #3f3f46;
+    border-radius: 8px;
+    color: #9ca3af;
+    padding: 8px 12px;
+    font-size: 12px;
+}
+QPushButton#ragFeedbackBtn:hover { background: rgba(16, 185, 129, 0.12); color: #10b981; }
+QPushButton#ragFeedbackBtn:disabled { color: #52525b; border-color: #2a2a2e; }
+#ragReasonLabel { color: #6b7280; font-size: 11px; }
+QPushButton#ragReasonChipBtn {
+    background: transparent;
+    border: 1px solid #3f3f46;
+    border-radius: 8px;
+    color: #9ca3af;
+    padding: 4px 10px;
+    font-size: 11px;
+}
+QPushButton#ragReasonChipBtn:hover { background: rgba(16, 185, 129, 0.12);
+                        color: #10b981; border-color: #10b981; }
+QLineEdit#ragReasonEdit {
+    background: transparent; border: 1px solid #3f3f46;
+    border-radius: 8px; color: #e5e7eb;
+    padding: 4px 10px; font-size: 11px;
+}
+QLineEdit#ragReasonEdit:focus { border-color: #10b981; }
+QPushButton#RagRetryWithReasonButton {
+    background: transparent;
+    border: 1px solid #6366f1;
+    border-radius: 8px;
+    color: #818cf8;
+    padding: 8px 12px;
+    font-size: 12px;
+}
+QPushButton#RagRetryWithReasonButton:hover { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; }
+QPushButton#RagRetryWithReasonButton:disabled { color: #52525b; border-color: #3f3f46; }
+QPushButton#ragSendBtn {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #059669, stop:1 #10b981);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0 16px;
+    font-weight: 600;
+    font-size: 13px;
+}
+QPushButton#ragSendBtn:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #10b981, stop:1 #34d399);
+}
+QPushButton#ragSendBtn:pressed { background: #047857; }
+QPushButton#ragSendBtn:disabled { background: #27272a; color: #52525b; }
+QPushButton#ragStopBtn {
+    background: #3f1f1f;
+    color: #f87171;
+    border: 1px solid #7f1d1d;
+    border-radius: 8px;
+    padding: 0 12px;
+    font-weight: 600;
+    font-size: 13px;
+}
+QPushButton#ragStopBtn:hover { background: #7f1d1d; color: white; }
+#ragIdxTitle { color: #10b981; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
+#ragModelTitle { color: #6ee7b7; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
+QProgressBar#ragPullProgress { background: #374151; border-radius: 2px; }
+QProgressBar#ragPullProgress::chunk {
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #10b981, stop:1 #6ee7b7);
+    border-radius: 2px;
+}
+QPushButton#ragModelApplyBtn {
+    background: #064e3b; color: #6ee7b7;
+    border: 1px solid #065f46; border-radius: 6px;
+    padding: 6px; font-size: 11px; font-weight: 600;
+}
+QPushButton#ragModelApplyBtn:hover { background: #065f46; }
+QPushButton#ragModelApplyBtn:disabled { background: #1f2937; color: #374151;
+                       border-color: #374151; }
+#ragSourcesTitle { color: #52525b; font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase; }
+#ragTipsTitle { color: #4ade80; font-size: 11px; font-weight: 700; }
+
+/* Badges de estado dinâmico do painel do Assistente (objectName-swap) */
+#ragStatusChecking {
+    background: #27272a; color: #a1a1aa; border-radius: 10px;
+    padding: 4px 12px; font-size: 11px; font-weight: 600;
+}
+#ragStatusOnline {
+    background: #052e16; color: #4ade80; border-radius: 10px;
+    padding: 4px 12px; font-size: 11px; font-weight: 600;
+}
+#ragStatusOffline {
+    background: #3f1f1f; color: #f87171; border-radius: 10px;
+    padding: 4px 12px; font-size: 11px; font-weight: 600;
+}
+#ragModelBadgeChecking { color: #6b7280; font-size: 10px; }
+#ragModelBadgeInstalled { color: #4ade80; font-size: 10px; font-weight: 600; }
+#ragModelBadgeMissing { color: #f59e0b; font-size: 10px; font-weight: 600; }
+#ragModelBadgeError { color: #f87171; font-size: 10px; }
+
+/* ── Painel de Anotações ──────────────────────────────
+   Onda 0b: estilos que antes viviam em annotation_panel.py::set_theme.
+   Exceção de DADO (permanece inline no .py): cor do destaque (color_bar)
+   e swatches da paleta — a cor vem do registro/paleta, não do tema. */
+#annotationPanel { background-color: #0f1115; }
+/* O setStyleSheet antigo cascateava o bg aos descendentes; a regra por id
+   não — sem transparência, o viewport do scroll ficaria com o bg global. */
+#annotationPanel QScrollArea { background: transparent; }
+#annotationPanel QScrollArea > QWidget > QWidget { background: transparent; }
+#annotationPanelTitle { color: #e5e7eb; }
+QComboBox#annotationTypeFilter {
+    background-color: #0f1115; border: 1px solid #2d333f;
+    border-radius: 6px; padding: 6px 10px; color: #e5e7eb;
+    font-size: 12px;
+}
+QComboBox#annotationTypeFilter::drop-down { border: none; }
+QComboBox#annotationTypeFilter QAbstractItemView {
+    background-color: #0f1115; border: 1px solid #2d333f;
+    selection-background-color: #161920;
+    color: #e5e7eb;
+}
+QFrame#annotationAddFrame {
+    background-color: #20242d;
+    border: 1px solid #2d333f;
+    border-radius: 8px;
+}
+QLineEdit#annotationTitleInput {
+    background: #161920; border: 1px solid #2d333f;
+    border-radius: 6px; padding: 5px 6px; color: #e5e7eb;
+    font-size: 12px;
+}
+QLineEdit#annotationTitleInput:focus { border-color: #10b981; }
+QTextEdit#annotationNoteInput {
+    background: #161920; border: 1px solid #2d333f;
+    border-radius: 6px; padding: 6px; color: #e5e7eb;
+    font-size: 12px;
+}
+QTextEdit#annotationNoteInput:focus { border-color: #10b981; }
+QPushButton#annotationAddNoteBtn {
+    background: #10b981; border: none; border-radius: 4px;
+    padding: 4px 12px; color: white; font-size: 11px; font-weight: 600;
+}
+QPushButton#annotationAddNoteBtn:hover { background: #059669; }
+QPushButton#annotationBookmarkBtn {
+    background: #2d333f; border: none; border-radius: 4px;
+    color: #e5e7eb;
+    font-size: 14px;
+}
+QPushButton#annotationBookmarkBtn:hover { background: #475569; }
+#annotationCountLabel { color: #cbd5e1; font-size: 11px; }
+
+/* Item individual de anotação (labels com background transparente para o
+   hover do frame aparecer por baixo — antes garantido pelo QSS inline) */
+QFrame#annotationItem {
+    background-color: #20242d;
+    border: 1px solid #2d333f;
+    border-radius: 8px;
+    padding: 2px;
+}
+QFrame#annotationItem:hover {
+    border-color: #475569;
+    background-color: #2a3241;
+}
+#annotationItemType { color: #10b981; font-size: 11px; font-weight: 600;
+    background: transparent; border: none; }
+QPushButton#annotationItemPageBtn {
+    background: rgba(16, 185, 129, 0.15);
+    border: none; border-radius: 4px;
+    padding: 2px 8px; color: #10b981;
+    font-size: 11px;
+}
+QPushButton#annotationItemPageBtn:hover { background: rgba(16, 185, 129, 0.3); }
+#annotationItemTitle { color: #cbd5e1; font-size: 13px; font-weight: 600;
+    background: transparent; border: none; }
+#annotationItemContent { color: #cbd5e1; font-size: 12px; line-height: 1.5;
+    background: transparent; border: none; }
+#annotationItemDate { color: #94a3b8; font-size: 10px;
+    background: transparent; border: none; }
+QPushButton#annotationItemRenameBtn {
+    background: transparent; border: none;
+    color: #94a3b8; font-size: 12px;
+}
+QPushButton#annotationItemRenameBtn:hover { color: #10b981; }
+QPushButton#annotationItemDelBtn {
+    background: transparent; border: none;
+    color: #94a3b8; font-size: 12px;
+}
+QPushButton#annotationItemDelBtn:hover { color: #ef4444; }
 """
 
 LIGHT_THEME = """
@@ -2554,6 +2918,368 @@ QLabel#ragThinkingIndicator {
     font-size: 12px;
     font-weight: 700;
 }
+
+/* ── Painel do Assistente (RAG) ───────────────────────
+   Onda 0b: estilos que antes viviam em rag_panel.py::set_theme (montado por
+   f-string a cada troca de tema) — mesmos valores, fonte central agora. */
+#ragHeader {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #f4f4f5, stop:1 #e4e4e7);
+    border-bottom: 1px solid #d4d4d8;
+    padding: 0;
+}
+#ragTitleLbl { color: #1A1A1A; font-size: 15px; font-weight: 700; }
+#ragSubLbl { color: #555555; font-size: 11px; }
+#ragChatWidget { background-color: #FFFFFF; }
+#ragResponseLabel {
+    color: #555555; font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase;
+}
+QTextEdit#responseArea {
+    background-color: #f4f4f5;
+    border: 1px solid #d4d4d8;
+    border-radius: 12px;
+    padding: 16px;
+    color: #1A1A1A;
+    font-size: 14px;
+    line-height: 1.6;
+    selection-background-color: #10b981;
+}
+QTextEdit#responseArea:focus { border-color: #10b981; }
+QProgressBar#ragProgressBar {
+    background-color: #d4d4d8;
+    border-radius: 3px;
+    max-height: 6px;
+}
+QProgressBar#ragProgressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #059669, stop:1 #10b981);
+    border-radius: 3px;
+}
+#ragGenStatus { color: #555555; font-size: 11px; }
+QFrame#ragInputFrame {
+    background-color: #f4f4f5;
+    border: 1px solid #d4d4d8;
+    border-radius: 12px;
+}
+QFrame#ragInputFrame:focus-within { border-color: #10b981; }
+QLineEdit#ragInput {
+    background: transparent;
+    border: none;
+    color: #1A1A1A;
+    font-size: 14px;
+    padding: 6px 4px;
+}
+#ragSidebarWidget { background-color: #f4f4f5; border-left: 1px solid #e4e4e7; }
+QFrame#ragIdxFrame {
+    background-color: #f4f4f5;
+    border: 1px solid #d4d4d8;
+    border-radius: 10px;
+    padding: 4px;
+}
+#ragIndexedCountLbl { color: #555555; font-size: 11px; }
+QPushButton#ragIndexBtn {
+    background-color: #FFFFFF;
+    color: #10b981;
+    border: 1px solid #d4d4d8;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+}
+QPushButton#ragIndexBtn:hover { background-color: #f4f4f5; border-color: #10b981; }
+QPushButton#ragIndexBtn:pressed { background-color: #047857; color: white; }
+QFrame#ragModelFrame {
+    background-color: #f4f4f5;
+    border: 1px solid #d4d4d8;
+    border-radius: 10px;
+    padding: 4px;
+}
+QComboBox#ragModelCombo {
+    background-color: #FFFFFF; color: #1A1A1A;
+    border: 1px solid #d4d4d8; border-radius: 6px;
+    padding: 5px 10px; font-size: 12px;
+}
+QComboBox#ragModelCombo::drop-down { border: none; width: 24px; }
+QComboBox#ragModelCombo QAbstractItemView {
+    background: #FFFFFF; color: #1A1A1A;
+    border: 1px solid #d4d4d8; selection-background-color: #f4f4f5;
+}
+QListWidget#ragSourcesList {
+    background-color: #f4f4f5;
+    border: 1px solid #d4d4d8;
+    border-radius: 8px;
+    padding: 4px;
+    color: #555555;
+    font-size: 12px;
+}
+QListWidget#ragSourcesList::item {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border-bottom: 1px solid #d4d4d8;
+}
+QListWidget#ragSourcesList::item:hover { background-color: #FFFFFF; color: #1A1A1A; }
+QListWidget#ragSourcesList::item:selected { background-color: rgba(16,185,129,0.15); color: #10b981; }
+QFrame#ragTipsFrame {
+    background-color: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 8px;
+}
+#ragTipsText { color: #166534; font-size: 10px; line-height: 1.5; }
+QPushButton#ragClearBtn {
+    background: transparent;
+    color: #555555;
+    border: 1px solid #d4d4d8;
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 11px;
+}
+QPushButton#ragClearBtn:hover { color: #f87171; border-color: #7f1d1d; }
+
+/* Elementos estáticos do painel do Assistente (mesmo valor nos 3 temas —
+   já eram hardcoded fora do bloco condicional de set_theme). */
+QPushButton#ragBackBtn {
+    background: transparent;
+    color: #10b981;
+    border: none;
+    font-weight: 500;
+    font-size: 13px;
+    padding-right: 12px;
+}
+QPushButton#ragBackBtn:hover { color: #34d399; }
+QPushButton#ragSidebarToggleBtn {
+    background: transparent; color: #a1a1aa; border: none;
+    border-radius: 4px; font-size: 15px; font-weight: bold;
+}
+QPushButton#ragSidebarToggleBtn:hover { background: #3f3f46; color: white; }
+QPushButton#ragSidebarToggleBtn:checked { color: #10b981; }
+QPushButton#ragCloseBtn {
+    background: transparent;
+    color: #a1a1aa;
+    border: none;
+    border-radius: 4px;
+    font-size: 16px;
+    font-weight: bold;
+}
+QPushButton#ragCloseBtn:hover {
+    background: #ef4444;
+    color: white;
+}
+QSplitter#ragSplitter::handle { background: #27272a; }
+QPushButton#ragFlashcardBtn {
+    background-color: rgba(37, 99, 235, 0.15);
+    color: #3b82f6;
+    border: 1px solid #2563eb;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-weight: bold;
+    font-size: 12px;
+}
+QPushButton#ragFlashcardBtn:hover {
+    background-color: rgba(37, 99, 235, 0.25);
+}
+QPushButton#ragSaveNoteBtn {
+    background-color: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid #059669;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-weight: bold;
+    font-size: 12px;
+}
+QPushButton#ragSaveNoteBtn:hover {
+    background-color: rgba(16, 185, 129, 0.25);
+}
+QPushButton#ragSaveNoteBtn:disabled {
+    background-color: rgba(39, 39, 42, 0.5);
+    color: #52525b;
+    border: 1px solid #3f3f46;
+}
+QPushButton#ragFeedbackBtn {
+    background: transparent;
+    border: 1px solid #3f3f46;
+    border-radius: 8px;
+    color: #9ca3af;
+    padding: 8px 12px;
+    font-size: 12px;
+}
+QPushButton#ragFeedbackBtn:hover { background: rgba(16, 185, 129, 0.12); color: #10b981; }
+QPushButton#ragFeedbackBtn:disabled { color: #52525b; border-color: #2a2a2e; }
+#ragReasonLabel { color: #6b7280; font-size: 11px; }
+QPushButton#ragReasonChipBtn {
+    background: transparent;
+    border: 1px solid #3f3f46;
+    border-radius: 8px;
+    color: #9ca3af;
+    padding: 4px 10px;
+    font-size: 11px;
+}
+QPushButton#ragReasonChipBtn:hover { background: rgba(16, 185, 129, 0.12);
+                        color: #10b981; border-color: #10b981; }
+QLineEdit#ragReasonEdit {
+    background: transparent; border: 1px solid #d4d4d8;
+    border-radius: 8px; color: #1A1A1A;
+    padding: 4px 10px; font-size: 11px;
+}
+QLineEdit#ragReasonEdit:focus { border-color: #10b981; }
+QPushButton#RagRetryWithReasonButton {
+    background: transparent;
+    border: 1px solid #6366f1;
+    border-radius: 8px;
+    color: #818cf8;
+    padding: 8px 12px;
+    font-size: 12px;
+}
+QPushButton#RagRetryWithReasonButton:hover { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; }
+QPushButton#RagRetryWithReasonButton:disabled { color: #52525b; border-color: #3f3f46; }
+QPushButton#ragSendBtn {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #059669, stop:1 #10b981);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0 16px;
+    font-weight: 600;
+    font-size: 13px;
+}
+QPushButton#ragSendBtn:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #10b981, stop:1 #34d399);
+}
+QPushButton#ragSendBtn:pressed { background: #047857; }
+QPushButton#ragSendBtn:disabled { background: #27272a; color: #52525b; }
+QPushButton#ragStopBtn {
+    background: #3f1f1f;
+    color: #f87171;
+    border: 1px solid #7f1d1d;
+    border-radius: 8px;
+    padding: 0 12px;
+    font-weight: 600;
+    font-size: 13px;
+}
+QPushButton#ragStopBtn:hover { background: #7f1d1d; color: white; }
+#ragIdxTitle { color: #10b981; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
+#ragModelTitle { color: #6ee7b7; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
+QProgressBar#ragPullProgress { background: #374151; border-radius: 2px; }
+QProgressBar#ragPullProgress::chunk {
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #10b981, stop:1 #6ee7b7);
+    border-radius: 2px;
+}
+QPushButton#ragModelApplyBtn {
+    background: #064e3b; color: #6ee7b7;
+    border: 1px solid #065f46; border-radius: 6px;
+    padding: 6px; font-size: 11px; font-weight: 600;
+}
+QPushButton#ragModelApplyBtn:hover { background: #065f46; }
+QPushButton#ragModelApplyBtn:disabled { background: #1f2937; color: #374151;
+                       border-color: #374151; }
+#ragSourcesTitle { color: #52525b; font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase; }
+#ragTipsTitle { color: #4ade80; font-size: 11px; font-weight: 700; }
+
+/* Badges de estado dinâmico do painel do Assistente (objectName-swap) */
+#ragStatusChecking {
+    background: #27272a; color: #a1a1aa; border-radius: 10px;
+    padding: 4px 12px; font-size: 11px; font-weight: 600;
+}
+#ragStatusOnline {
+    background: #052e16; color: #4ade80; border-radius: 10px;
+    padding: 4px 12px; font-size: 11px; font-weight: 600;
+}
+#ragStatusOffline {
+    background: #3f1f1f; color: #f87171; border-radius: 10px;
+    padding: 4px 12px; font-size: 11px; font-weight: 600;
+}
+#ragModelBadgeChecking { color: #6b7280; font-size: 10px; }
+#ragModelBadgeInstalled { color: #4ade80; font-size: 10px; font-weight: 600; }
+#ragModelBadgeMissing { color: #f59e0b; font-size: 10px; font-weight: 600; }
+#ragModelBadgeError { color: #f87171; font-size: 10px; }
+
+/* ── Painel de Anotações ──────────────────────────────
+   Onda 0b: estilos que antes viviam em annotation_panel.py::set_theme.
+   Exceção de DADO (permanece inline no .py): cor do destaque (color_bar)
+   e swatches da paleta — a cor vem do registro/paleta, não do tema. */
+#annotationPanel { background-color: #ffffff; }
+#annotationPanel QScrollArea { background: transparent; }
+#annotationPanel QScrollArea > QWidget > QWidget { background: transparent; }
+#annotationPanelTitle { color: #1A1A1A; }
+QComboBox#annotationTypeFilter {
+    background-color: #ffffff; border: 1px solid #d4d4d8;
+    border-radius: 6px; padding: 6px 10px; color: #1A1A1A;
+    font-size: 12px;
+}
+QComboBox#annotationTypeFilter::drop-down { border: none; }
+QComboBox#annotationTypeFilter QAbstractItemView {
+    background-color: #ffffff; border: 1px solid #d4d4d8;
+    selection-background-color: #f4f4f5;
+    color: #1A1A1A;
+}
+QFrame#annotationAddFrame {
+    background-color: #f4f4f5;
+    border: 1px solid #d4d4d8;
+    border-radius: 8px;
+}
+QLineEdit#annotationTitleInput {
+    background: #f4f4f5; border: 1px solid #d4d4d8;
+    border-radius: 6px; padding: 5px 6px; color: #1A1A1A;
+    font-size: 12px;
+}
+QLineEdit#annotationTitleInput:focus { border-color: #059669; }
+QTextEdit#annotationNoteInput {
+    background: #f4f4f5; border: 1px solid #d4d4d8;
+    border-radius: 6px; padding: 6px; color: #1A1A1A;
+    font-size: 12px;
+}
+QTextEdit#annotationNoteInput:focus { border-color: #059669; }
+QPushButton#annotationAddNoteBtn {
+    background: #059669; border: none; border-radius: 4px;
+    padding: 4px 12px; color: white; font-size: 11px; font-weight: 600;
+}
+QPushButton#annotationAddNoteBtn:hover { background: #10b981; }
+QPushButton#annotationBookmarkBtn {
+    background: #e4e4e7; border: none; border-radius: 4px;
+    color: #1A1A1A;
+    font-size: 14px;
+}
+QPushButton#annotationBookmarkBtn:hover { background: #d4d4d8; }
+#annotationCountLabel { color: #71717a; font-size: 11px; }
+
+/* Item individual de anotação (labels com background transparente para o
+   hover do frame aparecer por baixo — antes garantido pelo QSS inline) */
+QFrame#annotationItem {
+    background-color: #ffffff;
+    border: 1px solid #e4e4e7;
+    border-radius: 8px;
+    padding: 2px;
+}
+QFrame#annotationItem:hover {
+    border-color: #a1a1aa;
+    background-color: #f4f4f5;
+}
+#annotationItemType { color: #059669; font-size: 11px; font-weight: 600;
+    background: transparent; border: none; }
+QPushButton#annotationItemPageBtn {
+    background: rgba(16, 185, 129, 0.1);
+    border: none; border-radius: 4px;
+    padding: 2px 8px; color: #059669;
+    font-size: 11px;
+}
+QPushButton#annotationItemPageBtn:hover { background: rgba(16, 185, 129, 0.2); }
+#annotationItemTitle { color: #1A1A1A; font-size: 13px; font-weight: 600;
+    background: transparent; border: none; }
+#annotationItemContent { color: #1A1A1A; font-size: 12px; line-height: 1.5;
+    background: transparent; border: none; }
+#annotationItemDate { color: #71717a; font-size: 10px;
+    background: transparent; border: none; }
+QPushButton#annotationItemRenameBtn {
+    background: transparent; border: none;
+    color: #71717a; font-size: 12px;
+}
+QPushButton#annotationItemRenameBtn:hover { color: #10b981; }
+QPushButton#annotationItemDelBtn {
+    background: transparent; border: none;
+    color: #71717a; font-size: 12px;
+}
+QPushButton#annotationItemDelBtn:hover { color: #ef4444; }
 """
 
 SEPIA_THEME = """
@@ -3829,6 +4555,368 @@ QLabel#ragThinkingIndicator {
     font-size: 12px;
     font-weight: 700;
 }
+
+/* ── Painel do Assistente (RAG) ───────────────────────
+   Onda 0b: estilos que antes viviam em rag_panel.py::set_theme (montado por
+   f-string a cada troca de tema) — mesmos valores, fonte central agora. */
+#ragHeader {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #EADFCA, stop:1 #dfd8c8);
+    border-bottom: 1px solid #d4cbb8;
+    padding: 0;
+}
+#ragTitleLbl { color: #433422; font-size: 15px; font-weight: 700; }
+#ragSubLbl { color: #705E4B; font-size: 11px; }
+#ragChatWidget { background-color: #F4ECD8; }
+#ragResponseLabel {
+    color: #705E4B; font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase;
+}
+QTextEdit#responseArea {
+    background-color: #EADFCA;
+    border: 1px solid #d4cbb8;
+    border-radius: 12px;
+    padding: 16px;
+    color: #433422;
+    font-size: 14px;
+    line-height: 1.6;
+    selection-background-color: #10b981;
+}
+QTextEdit#responseArea:focus { border-color: #10b981; }
+QProgressBar#ragProgressBar {
+    background-color: #d4cbb8;
+    border-radius: 3px;
+    max-height: 6px;
+}
+QProgressBar#ragProgressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #059669, stop:1 #10b981);
+    border-radius: 3px;
+}
+#ragGenStatus { color: #705E4B; font-size: 11px; }
+QFrame#ragInputFrame {
+    background-color: #EADFCA;
+    border: 1px solid #d4cbb8;
+    border-radius: 12px;
+}
+QFrame#ragInputFrame:focus-within { border-color: #10b981; }
+QLineEdit#ragInput {
+    background: transparent;
+    border: none;
+    color: #433422;
+    font-size: 14px;
+    padding: 6px 4px;
+}
+#ragSidebarWidget { background-color: #EADFCA; border-left: 1px solid #d4cbb8; }
+QFrame#ragIdxFrame {
+    background-color: #EADFCA;
+    border: 1px solid #d4cbb8;
+    border-radius: 10px;
+    padding: 4px;
+}
+#ragIndexedCountLbl { color: #705E4B; font-size: 11px; }
+QPushButton#ragIndexBtn {
+    background-color: #F4ECD8;
+    color: #10b981;
+    border: 1px solid #d4cbb8;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+}
+QPushButton#ragIndexBtn:hover { background-color: #EADFCA; border-color: #10b981; }
+QPushButton#ragIndexBtn:pressed { background-color: #047857; color: white; }
+QFrame#ragModelFrame {
+    background-color: #EADFCA;
+    border: 1px solid #d4cbb8;
+    border-radius: 10px;
+    padding: 4px;
+}
+QComboBox#ragModelCombo {
+    background-color: #F4ECD8; color: #433422;
+    border: 1px solid #d4cbb8; border-radius: 6px;
+    padding: 5px 10px; font-size: 12px;
+}
+QComboBox#ragModelCombo::drop-down { border: none; width: 24px; }
+QComboBox#ragModelCombo QAbstractItemView {
+    background: #F4ECD8; color: #433422;
+    border: 1px solid #d4cbb8; selection-background-color: #EADFCA;
+}
+QListWidget#ragSourcesList {
+    background-color: #EADFCA;
+    border: 1px solid #d4cbb8;
+    border-radius: 8px;
+    padding: 4px;
+    color: #705E4B;
+    font-size: 12px;
+}
+QListWidget#ragSourcesList::item {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border-bottom: 1px solid #d4cbb8;
+}
+QListWidget#ragSourcesList::item:hover { background-color: #F4ECD8; color: #433422; }
+QListWidget#ragSourcesList::item:selected { background-color: rgba(16,185,129,0.15); color: #10b981; }
+QFrame#ragTipsFrame {
+    background-color: #EADFCA;
+    border: 1px solid #d4cbb8;
+    border-radius: 8px;
+}
+#ragTipsText { color: #705E4B; font-size: 10px; line-height: 1.5; }
+QPushButton#ragClearBtn {
+    background: transparent;
+    color: #705E4B;
+    border: 1px solid #d4cbb8;
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 11px;
+}
+QPushButton#ragClearBtn:hover { color: #f87171; border-color: #7f1d1d; }
+
+/* Elementos estáticos do painel do Assistente (mesmo valor nos 3 temas —
+   já eram hardcoded fora do bloco condicional de set_theme). */
+QPushButton#ragBackBtn {
+    background: transparent;
+    color: #10b981;
+    border: none;
+    font-weight: 500;
+    font-size: 13px;
+    padding-right: 12px;
+}
+QPushButton#ragBackBtn:hover { color: #34d399; }
+QPushButton#ragSidebarToggleBtn {
+    background: transparent; color: #a1a1aa; border: none;
+    border-radius: 4px; font-size: 15px; font-weight: bold;
+}
+QPushButton#ragSidebarToggleBtn:hover { background: #3f3f46; color: white; }
+QPushButton#ragSidebarToggleBtn:checked { color: #10b981; }
+QPushButton#ragCloseBtn {
+    background: transparent;
+    color: #a1a1aa;
+    border: none;
+    border-radius: 4px;
+    font-size: 16px;
+    font-weight: bold;
+}
+QPushButton#ragCloseBtn:hover {
+    background: #ef4444;
+    color: white;
+}
+QSplitter#ragSplitter::handle { background: #27272a; }
+QPushButton#ragFlashcardBtn {
+    background-color: rgba(37, 99, 235, 0.15);
+    color: #3b82f6;
+    border: 1px solid #2563eb;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-weight: bold;
+    font-size: 12px;
+}
+QPushButton#ragFlashcardBtn:hover {
+    background-color: rgba(37, 99, 235, 0.25);
+}
+QPushButton#ragSaveNoteBtn {
+    background-color: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid #059669;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-weight: bold;
+    font-size: 12px;
+}
+QPushButton#ragSaveNoteBtn:hover {
+    background-color: rgba(16, 185, 129, 0.25);
+}
+QPushButton#ragSaveNoteBtn:disabled {
+    background-color: rgba(39, 39, 42, 0.5);
+    color: #52525b;
+    border: 1px solid #3f3f46;
+}
+QPushButton#ragFeedbackBtn {
+    background: transparent;
+    border: 1px solid #3f3f46;
+    border-radius: 8px;
+    color: #9ca3af;
+    padding: 8px 12px;
+    font-size: 12px;
+}
+QPushButton#ragFeedbackBtn:hover { background: rgba(16, 185, 129, 0.12); color: #10b981; }
+QPushButton#ragFeedbackBtn:disabled { color: #52525b; border-color: #2a2a2e; }
+#ragReasonLabel { color: #6b7280; font-size: 11px; }
+QPushButton#ragReasonChipBtn {
+    background: transparent;
+    border: 1px solid #3f3f46;
+    border-radius: 8px;
+    color: #9ca3af;
+    padding: 4px 10px;
+    font-size: 11px;
+}
+QPushButton#ragReasonChipBtn:hover { background: rgba(16, 185, 129, 0.12);
+                        color: #10b981; border-color: #10b981; }
+QLineEdit#ragReasonEdit {
+    background: transparent; border: 1px solid #d4cbb8;
+    border-radius: 8px; color: #433422;
+    padding: 4px 10px; font-size: 11px;
+}
+QLineEdit#ragReasonEdit:focus { border-color: #10b981; }
+QPushButton#RagRetryWithReasonButton {
+    background: transparent;
+    border: 1px solid #6366f1;
+    border-radius: 8px;
+    color: #818cf8;
+    padding: 8px 12px;
+    font-size: 12px;
+}
+QPushButton#RagRetryWithReasonButton:hover { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; }
+QPushButton#RagRetryWithReasonButton:disabled { color: #52525b; border-color: #3f3f46; }
+QPushButton#ragSendBtn {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #059669, stop:1 #10b981);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0 16px;
+    font-weight: 600;
+    font-size: 13px;
+}
+QPushButton#ragSendBtn:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #10b981, stop:1 #34d399);
+}
+QPushButton#ragSendBtn:pressed { background: #047857; }
+QPushButton#ragSendBtn:disabled { background: #27272a; color: #52525b; }
+QPushButton#ragStopBtn {
+    background: #3f1f1f;
+    color: #f87171;
+    border: 1px solid #7f1d1d;
+    border-radius: 8px;
+    padding: 0 12px;
+    font-weight: 600;
+    font-size: 13px;
+}
+QPushButton#ragStopBtn:hover { background: #7f1d1d; color: white; }
+#ragIdxTitle { color: #10b981; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
+#ragModelTitle { color: #6ee7b7; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
+QProgressBar#ragPullProgress { background: #374151; border-radius: 2px; }
+QProgressBar#ragPullProgress::chunk {
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #10b981, stop:1 #6ee7b7);
+    border-radius: 2px;
+}
+QPushButton#ragModelApplyBtn {
+    background: #064e3b; color: #6ee7b7;
+    border: 1px solid #065f46; border-radius: 6px;
+    padding: 6px; font-size: 11px; font-weight: 600;
+}
+QPushButton#ragModelApplyBtn:hover { background: #065f46; }
+QPushButton#ragModelApplyBtn:disabled { background: #1f2937; color: #374151;
+                       border-color: #374151; }
+#ragSourcesTitle { color: #52525b; font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase; }
+#ragTipsTitle { color: #4ade80; font-size: 11px; font-weight: 700; }
+
+/* Badges de estado dinâmico do painel do Assistente (objectName-swap) */
+#ragStatusChecking {
+    background: #27272a; color: #a1a1aa; border-radius: 10px;
+    padding: 4px 12px; font-size: 11px; font-weight: 600;
+}
+#ragStatusOnline {
+    background: #052e16; color: #4ade80; border-radius: 10px;
+    padding: 4px 12px; font-size: 11px; font-weight: 600;
+}
+#ragStatusOffline {
+    background: #3f1f1f; color: #f87171; border-radius: 10px;
+    padding: 4px 12px; font-size: 11px; font-weight: 600;
+}
+#ragModelBadgeChecking { color: #6b7280; font-size: 10px; }
+#ragModelBadgeInstalled { color: #4ade80; font-size: 10px; font-weight: 600; }
+#ragModelBadgeMissing { color: #f59e0b; font-size: 10px; font-weight: 600; }
+#ragModelBadgeError { color: #f87171; font-size: 10px; }
+
+/* ── Painel de Anotações ──────────────────────────────
+   Onda 0b: estilos que antes viviam em annotation_panel.py::set_theme.
+   Exceção de DADO (permanece inline no .py): cor do destaque (color_bar)
+   e swatches da paleta — a cor vem do registro/paleta, não do tema. */
+#annotationPanel { background-color: #faf5ed; }
+#annotationPanel QScrollArea { background: transparent; }
+#annotationPanel QScrollArea > QWidget > QWidget { background: transparent; }
+#annotationPanelTitle { color: #5B4636; }
+QComboBox#annotationTypeFilter {
+    background-color: #faf5ed; border: 1px solid #d4cbb8;
+    border-radius: 6px; padding: 6px 10px; color: #5B4636;
+    font-size: 12px;
+}
+QComboBox#annotationTypeFilter::drop-down { border: none; }
+QComboBox#annotationTypeFilter QAbstractItemView {
+    background-color: #faf5ed; border: 1px solid #d4cbb8;
+    selection-background-color: #ebe5d9;
+    color: #5B4636;
+}
+QFrame#annotationAddFrame {
+    background-color: #ebe5d9;
+    border: 1px solid #d4cbb8;
+    border-radius: 8px;
+}
+QLineEdit#annotationTitleInput {
+    background: #ebe5d9; border: 1px solid #d4cbb8;
+    border-radius: 6px; padding: 5px 6px; color: #5B4636;
+    font-size: 12px;
+}
+QLineEdit#annotationTitleInput:focus { border-color: #059669; }
+QTextEdit#annotationNoteInput {
+    background: #ebe5d9; border: 1px solid #d4cbb8;
+    border-radius: 6px; padding: 6px; color: #5B4636;
+    font-size: 12px;
+}
+QTextEdit#annotationNoteInput:focus { border-color: #059669; }
+QPushButton#annotationAddNoteBtn {
+    background: #059669; border: none; border-radius: 4px;
+    padding: 4px 12px; color: white; font-size: 11px; font-weight: 600;
+}
+QPushButton#annotationAddNoteBtn:hover { background: #10b981; }
+QPushButton#annotationBookmarkBtn {
+    background: #dfd8c8; border: none; border-radius: 4px;
+    color: #5B4636;
+    font-size: 14px;
+}
+QPushButton#annotationBookmarkBtn:hover { background: #d4cbb8; }
+#annotationCountLabel { color: #8b7355; font-size: 11px; }
+
+/* Item individual de anotação (labels com background transparente para o
+   hover do frame aparecer por baixo — antes garantido pelo QSS inline) */
+QFrame#annotationItem {
+    background-color: #faf5ed;
+    border: 1px solid #d4cbb8;
+    border-radius: 8px;
+    padding: 2px;
+}
+QFrame#annotationItem:hover {
+    border-color: #8b7355;
+    background-color: #ebe5d9;
+}
+#annotationItemType { color: #059669; font-size: 11px; font-weight: 600;
+    background: transparent; border: none; }
+QPushButton#annotationItemPageBtn {
+    background: rgba(16, 185, 129, 0.15);
+    border: none; border-radius: 4px;
+    padding: 2px 8px; color: #059669;
+    font-size: 11px;
+}
+QPushButton#annotationItemPageBtn:hover { background: rgba(16, 185, 129, 0.3); }
+#annotationItemTitle { color: #5B4636; font-size: 13px; font-weight: 600;
+    background: transparent; border: none; }
+#annotationItemContent { color: #5B4636; font-size: 12px; line-height: 1.5;
+    background: transparent; border: none; }
+#annotationItemDate { color: #8b7355; font-size: 10px;
+    background: transparent; border: none; }
+QPushButton#annotationItemRenameBtn {
+    background: transparent; border: none;
+    color: #8b7355; font-size: 12px;
+}
+QPushButton#annotationItemRenameBtn:hover { color: #10b981; }
+QPushButton#annotationItemDelBtn {
+    background: transparent; border: none;
+    color: #8b7355; font-size: 12px;
+}
+QPushButton#annotationItemDelBtn:hover { color: #ef4444; }
 """
 
 THEMES = {

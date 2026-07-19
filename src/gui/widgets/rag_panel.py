@@ -99,17 +99,7 @@ class RAGPanel(QWidget):
 
         # Botão voltar (para modo tela cheia)
         self._back_btn = QPushButton("← Biblioteca")
-        self._back_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #10b981;
-                border: none;
-                font-weight: 500;
-                font-size: 13px;
-                padding-right: 12px;
-            }
-            QPushButton:hover { color: #34d399; }
-        """)
+        self._back_btn.setObjectName("ragBackBtn")
         self._back_btn.setVisible(False)
         self._back_btn.clicked.connect(self.back_requested.emit)
         h_layout.addWidget(self._back_btn)
@@ -121,18 +111,17 @@ class RAGPanel(QWidget):
         title_col = QVBoxLayout()
         title_col.setSpacing(0)
         self._title_lbl = QLabel("Assistente de Biblioteca")
+        self._title_lbl.setObjectName("ragTitleLbl")
         self._sub_lbl = QLabel("Pergunte sobre seus livros e anotações · 100% local")
+        self._sub_lbl.setObjectName("ragSubLbl")
         title_col.addWidget(self._title_lbl)
         title_col.addWidget(self._sub_lbl)
         h_layout.addLayout(title_col, stretch=1)
 
-        # Status badge do Ollama
+        # Status badge do Ollama (estado dinâmico: objectName trocado por
+        # set_ollama_status — checking/online/offline, ver styles.py).
         self._status_badge = QLabel("⚫ Verificando…")
-        self._status_badge.setObjectName("badge")
-        self._status_badge.setStyleSheet("""
-            background: #27272a; color: #a1a1aa; border-radius: 10px;
-            padding: 4px 12px; font-size: 11px; font-weight: 600;
-        """)
+        self._status_badge.setObjectName("ragStatusChecking")
         h_layout.addWidget(self._status_badge)
 
         # Botão recolher/expandir a barra lateral (fontes, modelo, indexação) —
@@ -142,12 +131,7 @@ class RAGPanel(QWidget):
         self._sidebar_toggle_btn.setCheckable(True)
         self._sidebar_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._sidebar_toggle_btn.setToolTip("Recolher/expandir o painel lateral (fontes, modelo)")
-        self._sidebar_toggle_btn.setStyleSheet("""
-            QPushButton { background: transparent; color: #a1a1aa; border: none;
-                          border-radius: 4px; font-size: 15px; font-weight: bold; }
-            QPushButton:hover { background: #3f3f46; color: white; }
-            QPushButton:checked { color: #10b981; }
-        """)
+        self._sidebar_toggle_btn.setObjectName("ragSidebarToggleBtn")
         self._sidebar_toggle_btn.clicked.connect(self._toggle_sidebar)
         h_layout.addWidget(self._sidebar_toggle_btn)
 
@@ -155,20 +139,7 @@ class RAGPanel(QWidget):
         self._close_btn = QPushButton("✕")
         self._close_btn.setFixedSize(28, 28)
         self._close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._close_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #a1a1aa;
-                border: none;
-                border-radius: 4px;
-                font-size: 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: #ef4444;
-                color: white;
-            }
-        """)
+        self._close_btn.setObjectName("ragCloseBtn")
         self._close_btn.clicked.connect(self.close_requested.emit)
         h_layout.addWidget(self._close_btn)
 
@@ -176,17 +147,19 @@ class RAGPanel(QWidget):
 
         # ── Corpo central: splitter (chat | fontes) ────────────────────────────
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setObjectName("ragSplitter")
         splitter.setHandleWidth(1)
-        splitter.setStyleSheet("QSplitter::handle { background: #27272a; }")
 
         # ── Painel esquerdo: chat ──────────────────────────────────────────────
         self._chat_widget = QWidget()
+        self._chat_widget.setObjectName("ragChatWidget")
         chat_layout = QVBoxLayout(self._chat_widget)
         chat_layout.setContentsMargins(24, 16, 16, 0)
         chat_layout.setSpacing(12)
 
         # Área de resposta
         self._response_label = QLabel("💬 Resposta")
+        self._response_label.setObjectName("ragResponseLabel")
         chat_layout.addWidget(self._response_label)
 
         # Indicador PROEMINENTE de raciocínio/preparo do modelo. Fica acima da
@@ -229,89 +202,37 @@ class RAGPanel(QWidget):
         # Botão de Flashcard
         self._flashcard_btn = QPushButton("🃏 Criar Flashcard")
         self._flashcard_btn.setVisible(False)
-        self._flashcard_btn.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(37, 99, 235, 0.15);
-                color: #3b82f6;
-                border: 1px solid #2563eb;
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: rgba(37, 99, 235, 0.25);
-            }
-        """)
+        self._flashcard_btn.setObjectName("ragFlashcardBtn")
         self._flashcard_btn.clicked.connect(self._on_flashcard_clicked)
         action_btns_layout.addWidget(self._flashcard_btn)
 
         # Botão de Salvar Anotação Manual (Human-in-the-Loop)
         self._save_note_btn = QPushButton("💾 Salvar como Anotação")
         self._save_note_btn.setVisible(False)
-        self._save_note_btn.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(16, 185, 129, 0.15);
-                color: #10b981;
-                border: 1px solid #059669;
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: rgba(16, 185, 129, 0.25);
-            }
-            QPushButton:disabled {
-                background-color: rgba(39, 39, 42, 0.5);
-                color: #52525b;
-                border: 1px solid #3f3f46;
-            }
-        """)
+        self._save_note_btn.setObjectName("ragSaveNoteBtn")
         self._save_note_btn.clicked.connect(self._on_save_note_clicked)
         action_btns_layout.addWidget(self._save_note_btn)
 
         # Feedback 👍/👎 (Fase 1b): avalia a resposta → agent_feedback.
-        # Estilo "ghost" discreto, espelhando selection_popover.
-        _fb_style = """
-            QPushButton {
-                background: transparent;
-                border: 1px solid #3f3f46;
-                border-radius: 8px;
-                color: #9ca3af;
-                padding: 8px 12px;
-                font-size: 12px;
-            }
-            QPushButton:hover { background: rgba(16, 185, 129, 0.12); color: #10b981; }
-            QPushButton:disabled { color: #52525b; border-color: #2a2a2e; }
-        """
+        # Estilo "ghost" discreto, espelhando selection_popover. objectName
+        # compartilhado entre os dois botões (mesmo papel visual — padrão já
+        # usado em flashcardItem/tagBadge para widgets repetidos).
         self._thumbs_up_btn = QPushButton("👍 Útil")
         self._thumbs_up_btn.setVisible(False)
-        self._thumbs_up_btn.setStyleSheet(_fb_style)
+        self._thumbs_up_btn.setObjectName("ragFeedbackBtn")
         self._thumbs_up_btn.clicked.connect(lambda: self._on_feedback_clicked(1))
         action_btns_layout.addWidget(self._thumbs_up_btn)
 
         self._thumbs_down_btn = QPushButton("👎 Não ajudou")
         self._thumbs_down_btn.setVisible(False)
-        self._thumbs_down_btn.setStyleSheet(_fb_style)
+        self._thumbs_down_btn.setObjectName("ragFeedbackBtn")
         self._thumbs_down_btn.clicked.connect(lambda: self._on_feedback_clicked(-1))
         action_btns_layout.addWidget(self._thumbs_down_btn)
 
         # Motivo do 👎 (opcional): linha discreta de chips que ocupa o lugar dos
         # botões de feedback. Clique num chip grava a chave canônica; "Outro…"
-        # troca os chips por um campo curto de texto livre.
-        _chip_style = """
-            QPushButton {
-                background: transparent;
-                border: 1px solid #3f3f46;
-                border-radius: 8px;
-                color: #9ca3af;
-                padding: 4px 10px;
-                font-size: 11px;
-            }
-            QPushButton:hover { background: rgba(16, 185, 129, 0.12);
-                                color: #10b981; border-color: #10b981; }
-        """
+        # troca os chips por um campo curto de texto livre. objectName
+        # compartilhado entre os chips (mesmo papel visual, widgets repetidos).
         self._reason_container = QWidget()
         self._reason_container.setVisible(False)
         reason_layout = QHBoxLayout(self._reason_container)
@@ -319,20 +240,20 @@ class RAGPanel(QWidget):
         reason_layout.setSpacing(6)
 
         self._reason_label = QLabel("O que faltou? (opcional)")
-        self._reason_label.setStyleSheet("color: #6b7280; font-size: 11px;")
+        self._reason_label.setObjectName("ragReasonLabel")
         reason_layout.addWidget(self._reason_label)
 
         self._reason_chip_btns: list[QPushButton] = []
         for text, key in self._REASON_CHIPS:
             chip = QPushButton(text)
-            chip.setStyleSheet(_chip_style)
+            chip.setObjectName("ragReasonChipBtn")
             chip.setCursor(Qt.CursorShape.PointingHandCursor)
             chip.clicked.connect(lambda _=False, k=key: self._on_reason_chosen(k))
             reason_layout.addWidget(chip)
             self._reason_chip_btns.append(chip)
 
         self._reason_other_btn = QPushButton("Outro…")
-        self._reason_other_btn.setStyleSheet(_chip_style)
+        self._reason_other_btn.setObjectName("ragReasonChipBtn")
         self._reason_other_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._reason_other_btn.setToolTip("Escrever o motivo com suas palavras")
         self._reason_other_btn.clicked.connect(self._on_reason_other)
@@ -343,14 +264,7 @@ class RAGPanel(QWidget):
         self._reason_edit.setPlaceholderText("conte o motivo…")
         self._reason_edit.setMaximumWidth(220)
         self._reason_edit.setVisible(False)
-        self._reason_edit.setStyleSheet("""
-            QLineEdit {
-                background: transparent; border: 1px solid #3f3f46;
-                border-radius: 8px; color: #e5e7eb;
-                padding: 4px 10px; font-size: 11px;
-            }
-            QLineEdit:focus { border-color: #10b981; }
-        """)
+        self._reason_edit.setObjectName("ragReasonEdit")
         self._reason_edit.returnPressed.connect(self._on_reason_edit_confirmed)
         self._reason_edit.installEventFilter(self)  # Esc → volta aos chips
         reason_layout.addWidget(self._reason_edit)
@@ -364,18 +278,6 @@ class RAGPanel(QWidget):
         self._retry_btn.setObjectName("RagRetryWithReasonButton")
         self._retry_btn.setVisible(False)
         self._retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._retry_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: 1px solid #6366f1;
-                border-radius: 8px;
-                color: #818cf8;
-                padding: 8px 12px;
-                font-size: 12px;
-            }
-            QPushButton:hover { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; }
-            QPushButton:disabled { color: #52525b; border-color: #3f3f46; }
-        """)
         self._retry_btn.clicked.connect(self._on_retry_with_reason_clicked)
         action_btns_layout.addWidget(self._retry_btn)
 
@@ -383,6 +285,7 @@ class RAGPanel(QWidget):
 
         # Progress bar (visível durante geração/indexação)
         self._progress_bar = QProgressBar()
+        self._progress_bar.setObjectName("ragProgressBar")
         self._progress_bar.setTextVisible(True)
         self._progress_bar.setRange(0, 0)  # indeterminate
         self._progress_bar.setFixedHeight(6)
@@ -391,11 +294,13 @@ class RAGPanel(QWidget):
 
         # Status da geração
         self._gen_status = QLabel("")
+        self._gen_status.setObjectName("ragGenStatus")
         self._gen_status.setVisible(False)
         chat_layout.addWidget(self._gen_status)
 
         # ── Input area ────────────────────────────────────────────────────────
         self._input_frame = QFrame()
+        self._input_frame.setObjectName("ragInputFrame")
         input_layout = QHBoxLayout(self._input_frame)
         input_layout.setContentsMargins(12, 8, 8, 8)
         input_layout.setSpacing(8)
@@ -408,28 +313,13 @@ class RAGPanel(QWidget):
         self._question_input.returnPressed.connect(self._on_send)
         input_layout.addWidget(self._question_input, stretch=1)
 
+        # objectName próprio (não o "primaryBtn" genérico): o CTA de enviar
+        # pergunta tem um visual distinto (gradiente + estado disabled) do
+        # botão primário padrão usado em diálogos.
         self._send_btn = QPushButton("✨ Perguntar")
-        self._send_btn.setObjectName("primaryBtn")
+        self._send_btn.setObjectName("ragSendBtn")
         self._send_btn.setFixedHeight(38)
         self._send_btn.setMinimumWidth(110)
-        self._send_btn.setStyleSheet("""
-            QPushButton#primaryBtn {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #059669, stop:1 #10b981);
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 0 16px;
-                font-weight: 600;
-                font-size: 13px;
-            }
-            QPushButton#primaryBtn:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #10b981, stop:1 #34d399);
-            }
-            QPushButton#primaryBtn:pressed { background: #047857; }
-            QPushButton#primaryBtn:disabled { background: #27272a; color: #52525b; }
-        """)
         self._send_btn.clicked.connect(self._on_send)
         input_layout.addWidget(self._send_btn)
 
@@ -437,18 +327,7 @@ class RAGPanel(QWidget):
         self._stop_btn.setFixedHeight(38)
         self._stop_btn.setMinimumWidth(80)
         self._stop_btn.setVisible(False)
-        self._stop_btn.setStyleSheet("""
-            QPushButton {
-                background: #3f1f1f;
-                color: #f87171;
-                border: 1px solid #7f1d1d;
-                border-radius: 8px;
-                padding: 0 12px;
-                font-weight: 600;
-                font-size: 13px;
-            }
-            QPushButton:hover { background: #7f1d1d; color: white; }
-        """)
+        self._stop_btn.setObjectName("ragStopBtn")
         self._stop_btn.clicked.connect(self._on_stop)
         input_layout.addWidget(self._stop_btn)
 
@@ -459,6 +338,7 @@ class RAGPanel(QWidget):
 
         # ── Painel direito: fontes e controles ─────────────────────────────────
         self._sidebar_widget = QWidget()
+        self._sidebar_widget.setObjectName("ragSidebarWidget")
         self._sidebar_widget.setFixedWidth(230)
         sb_layout = QVBoxLayout(self._sidebar_widget)
         sb_layout.setContentsMargins(16, 20, 16, 20)
@@ -466,20 +346,21 @@ class RAGPanel(QWidget):
 
         # ── Seção de indexação ─────────────────────────────────────────────────
         self._idx_frame = QFrame()
+        self._idx_frame.setObjectName("ragIdxFrame")
         idx_layout = QVBoxLayout(self._idx_frame)
         idx_layout.setContentsMargins(12, 12, 12, 12)
         idx_layout.setSpacing(8)
 
         idx_title = QLabel("📚 Indexação")
-        idx_title.setStyleSheet(
-            "color: #10b981; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;"
-        )
+        idx_title.setObjectName("ragIdxTitle")
         idx_layout.addWidget(idx_title)
 
         self._indexed_count_lbl = QLabel("0 chunks indexados")
+        self._indexed_count_lbl.setObjectName("ragIndexedCountLbl")
         idx_layout.addWidget(self._indexed_count_lbl)
 
         self._index_btn = QPushButton("🔄 Reindexar Biblioteca")
+        self._index_btn.setObjectName("ragIndexBtn")
         self._index_btn.clicked.connect(self._on_index_all)
         idx_layout.addWidget(self._index_btn)
 
@@ -492,17 +373,17 @@ class RAGPanel(QWidget):
 
         # ── Seletor de Modelo de IA ────────────────────────────────────────────
         self._model_frame = QFrame()
+        self._model_frame.setObjectName("ragModelFrame")
         model_layout = QVBoxLayout(self._model_frame)
         model_layout.setContentsMargins(12, 12, 12, 12)
         model_layout.setSpacing(8)
 
         model_title = QLabel("⚙️ Modelo de IA")
-        model_title.setStyleSheet(
-            "color: #6ee7b7; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;"
-        )
+        model_title.setObjectName("ragModelTitle")
         model_layout.addWidget(model_title)
 
         self._model_combo = QComboBox()
+        self._model_combo.setObjectName("ragModelCombo")
 
         # Catálogo de modelos (tamanhos aproximados, Q4)
         self._MODEL_CATALOG = [
@@ -520,8 +401,10 @@ class RAGPanel(QWidget):
         self._model_combo.currentIndexChanged.connect(self._on_model_combo_changed)
         model_layout.addWidget(self._model_combo)
 
+        # Badge de estado do modelo (checking/installed/missing/error) —
+        # objectName trocado por _on_model_combo_changed/_on_pull_complete.
         self._model_badge = QLabel("🔍 Verificando...")
-        self._model_badge.setStyleSheet("color: #6b7280; font-size: 10px;")
+        self._model_badge.setObjectName("ragModelBadgeChecking")
         model_layout.addWidget(self._model_badge)
 
         self._pull_progress = QProgressBar()
@@ -529,27 +412,11 @@ class RAGPanel(QWidget):
         self._pull_progress.setFixedHeight(5)
         self._pull_progress.setTextVisible(False)
         self._pull_progress.setVisible(False)
-        self._pull_progress.setStyleSheet("""
-            QProgressBar { background: #374151; border-radius: 2px; }
-            QProgressBar::chunk {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 #10b981, stop:1 #6ee7b7);
-                border-radius: 2px;
-            }
-        """)
+        self._pull_progress.setObjectName("ragPullProgress")
         model_layout.addWidget(self._pull_progress)
 
         self._model_apply_btn = QPushButton("✅ Usar este Modelo")
-        self._model_apply_btn.setStyleSheet("""
-            QPushButton {
-                background: #064e3b; color: #6ee7b7;
-                border: 1px solid #065f46; border-radius: 6px;
-                padding: 6px; font-size: 11px; font-weight: 600;
-            }
-            QPushButton:hover { background: #065f46; }
-            QPushButton:disabled { background: #1f2937; color: #374151;
-                                   border-color: #374151; }
-        """)
+        self._model_apply_btn.setObjectName("ragModelApplyBtn")
         self._model_apply_btn.clicked.connect(self._on_model_apply)
         model_layout.addWidget(self._model_apply_btn)
 
@@ -557,13 +424,11 @@ class RAGPanel(QWidget):
 
         # ── Fontes usadas ──────────────────────────────────────────────────────
         sources_title = QLabel("📖 Fontes Consultadas")
-        sources_title.setStyleSheet(
-            "color: #52525b; font-size: 11px; font-weight: 700; "
-            "letter-spacing: 1px; text-transform: uppercase;"
-        )
+        sources_title.setObjectName("ragSourcesTitle")
         sb_layout.addWidget(sources_title)
 
         self._sources_list = QListWidget()
+        self._sources_list.setObjectName("ragSourcesList")
         # Fontes clicáveis (Tarefa 3.1): itens que carregam (book_id, page)
         # abrem o livro na página citada via source_clicked.
         self._sources_list.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -572,17 +437,19 @@ class RAGPanel(QWidget):
 
         # ── Dicas ─────────────────────────────────────────────────────────────
         self._tips_frame = QFrame()
+        self._tips_frame.setObjectName("ragTipsFrame")
         tips_layout = QVBoxLayout(self._tips_frame)
         tips_layout.setContentsMargins(12, 10, 12, 10)
         tips_layout.setSpacing(4)
         tips_title = QLabel("💡 Dicas")
-        tips_title.setStyleSheet("color: #4ade80; font-size: 11px; font-weight: 700;")
+        tips_title.setObjectName("ragTipsTitle")
         tips_layout.addWidget(tips_title)
         self._tips_text = QLabel(
             "• Indexe sua biblioteca antes de perguntar\n"
             "• Funciona com Ollama rodando localmente\n"
             "• Modelos: bge-m3 + gemma4:e4b"
         )
+        self._tips_text.setObjectName("ragTipsText")
         self._tips_text.setWordWrap(True)
         tips_layout.addWidget(self._tips_text)
         sb_layout.addWidget(self._tips_frame)
@@ -591,6 +458,7 @@ class RAGPanel(QWidget):
 
         # Botão limpar chat
         self._clear_btn = QPushButton("🗑️ Limpar Conversa")
+        self._clear_btn.setObjectName("ragClearBtn")
         self._clear_btn.clicked.connect(self._clear_chat)
         sb_layout.addWidget(self._clear_btn)
 
@@ -609,233 +477,40 @@ class RAGPanel(QWidget):
         self.set_theme("dark")
 
     def set_theme(self, theme: str) -> None:
-        """Aplica folha de estilos (QSS) correspondente ao tema selecionado (Claro, Sépia ou Escuro)."""
+        """Aplica o tema selecionado (Claro, Sépia ou Escuro).
+
+        Onda 0b: o visual em si (cores/bordas/gradientes por widget) mora
+        agora na QSS central (``styles.py``, seletores ``#ragXxx``), aplicada
+        globalmente na QApplication por ``main_window._apply_theme`` — todo
+        widget deste painel já herda a folha via objectName. O que resta
+        aqui é o que a QSS de widget NÃO alcança: as âncoras de citação já
+        renderizadas têm a cor embutida no próprio HTML (rich-text não
+        reage a QSS), então precisam ser recoloridas explicitamente; e o
+        tema corrente fica memoizado para ``_citation_link_color`` /
+        ``_translation_card_colors``, que também produzem HTML inline.
+        """
         self._current_theme = theme
-        # Âncoras de citação já renderizadas têm cor embutida no HTML — o QSS
-        # abaixo não as alcança; recolore os fragments para o tema novo.
         self._recolor_citation_anchors()
-
-        if theme == "light":
-            # Cores do tema Claro
-            bg_main = "#FFFFFF"
-            bg_input = "#f4f4f5"
-            border_color = "#d4d4d8"
-            text_main = "#1A1A1A"
-            text_sec = "#555555"
-            header_gradient = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #f4f4f5, stop:1 #e4e4e7)"
-            bg_sidebar = "#f4f4f5"
-            border_sidebar = "1px solid #e4e4e7"
-            bg_tips = "#f0fdf4"
-            border_tips = "1px solid #bbf7d0"
-            text_tips = "#166534"
-            
-        elif theme == "sepia":
-            # Cores do tema Sépia
-            bg_main = "#F4ECD8"
-            bg_input = "#EADFCA"
-            border_color = "#d4cbb8"
-            text_main = "#433422"
-            text_sec = "#705E4B"
-            header_gradient = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #EADFCA, stop:1 #dfd8c8)"
-            bg_sidebar = "#EADFCA"
-            border_sidebar = "1px solid #d4cbb8"
-            bg_tips = "#EADFCA"
-            border_tips = "1px solid #d4cbb8"
-            text_tips = "#705E4B"
-            
-        else: # "dark" ou fallback
-            # Cores do tema Escuro
-            bg_main = "#0f1115"
-            bg_input = "#161920"
-            border_color = "#2d333f"
-            text_main = "#e5e7eb"
-            text_sec = "#cbd5e1"
-            header_gradient = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #161920, stop:1 #20242d)"
-            bg_sidebar = "#161920"
-            border_sidebar = "1px solid #2d333f"
-            bg_tips = "rgba(16, 185, 129, 0.05)"
-            border_tips = "1px solid rgba(16, 185, 129, 0.2)"
-            text_tips = "#10b981"
-
-        # 1. Header
-        self._header.setStyleSheet(f"""
-            #ragHeader {{
-                background: {header_gradient};
-                border-bottom: 1px solid {border_color};
-                padding: 0;
-            }}
-        """)
-        self._title_lbl.setStyleSheet(f"color: {text_main}; font-size: 15px; font-weight: 700;")
-        self._sub_lbl.setStyleSheet(f"color: {text_sec}; font-size: 11px;")
-        
-        # 2. Chat Widget (Painel central esquerdo)
-        self._chat_widget.setStyleSheet(f"background-color: {bg_main};")
-        self._response_label.setStyleSheet(
-            f"color: {text_sec}; font-size: 11px; font-weight: 700; "
-            "letter-spacing: 1px; text-transform: uppercase;"
-        )
-        
-        # Área de resposta (QTextEdit)
-        self._response_area.setStyleSheet(f"""
-            QTextEdit#responseArea {{
-                background-color: {bg_input};
-                border: 1px solid {border_color};
-                border-radius: 12px;
-                padding: 16px;
-                color: {text_main};
-                font-size: 14px;
-                line-height: 1.6;
-                selection-background-color: #10b981;
-            }}
-            QTextEdit#responseArea:focus {{
-                border-color: #10b981;
-            }}
-        """)
-        
-        # Progress Bar e status de geração
-        self._progress_bar.setStyleSheet(f"""
-            QProgressBar {{
-                background-color: {border_color};
-                border-radius: 3px;
-                max-height: 6px;
-            }}
-            QProgressBar::chunk {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #059669, stop:1 #10b981);
-                border-radius: 3px;
-            }}
-        """)
-        self._gen_status.setStyleSheet(f"color: {text_sec}; font-size: 11px;")
-        
-        # Área de Input (QLineEdit e QFrame)
-        self._input_frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {bg_input};
-                border: 1px solid {border_color};
-                border-radius: 12px;
-            }}
-            QFrame:focus-within {{
-                border-color: #10b981;
-            }}
-        """)
-        self._question_input.setStyleSheet(f"""
-            QLineEdit#ragInput {{
-                background: transparent;
-                border: none;
-                color: {text_main};
-                font-size: 14px;
-                padding: 6px 4px;
-            }}
-        """)
-        
-        # 3. Sidebar Widget (Painel direito de fontes e controles)
-        self._sidebar_widget.setStyleSheet(f"background-color: {bg_sidebar}; border-left: {border_sidebar};")
-        
-        # Frame de Indexação
-        self._idx_frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {bg_input};
-                border: 1px solid {border_color};
-                border-radius: 10px;
-                padding: 4px;
-            }}
-        """)
-        self._indexed_count_lbl.setStyleSheet(f"color: {text_sec}; font-size: 11px;")
-        self._index_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {bg_main};
-                color: #10b981;
-                border: 1px solid {border_color};
-                border-radius: 8px;
-                padding: 8px 12px;
-                font-size: 12px;
-                font-weight: 600;
-                text-align: left;
-            }}
-            QPushButton:hover {{ background-color: {bg_input}; border-color: #10b981; }}
-            QPushButton:pressed {{ background-color: #047857; color: white; }}
-        """)
-        
-        # Frame de Modelo de IA
-        self._model_frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {bg_input};
-                border: 1px solid {border_color};
-                border-radius: 10px;
-                padding: 4px;
-            }}
-        """)
-        self._model_combo.setStyleSheet(f"""
-            QComboBox {{
-                background-color: {bg_main}; color: {text_main};
-                border: 1px solid {border_color}; border-radius: 6px;
-                padding: 5px 10px; font-size: 12px;
-            }}
-            QComboBox::drop-down {{ border: none; width: 24px; }}
-            QComboBox QAbstractItemView {{
-                background: {bg_main}; color: {text_main};
-                border: 1px solid {border_color}; selection-background-color: {bg_input};
-            }}
-        """)
-        
-        # Lista de Fontes
-        self._sources_list.setStyleSheet(f"""
-            QListWidget {{
-                background-color: {bg_input};
-                border: 1px solid {border_color};
-                border-radius: 8px;
-                padding: 4px;
-                color: {text_sec};
-                font-size: 12px;
-            }}
-            QListWidget::item {{
-                padding: 8px 10px;
-                border-radius: 6px;
-                border-bottom: 1px solid {border_color};
-            }}
-            QListWidget::item:hover {{ background-color: {bg_main}; color: {text_main}; }}
-            QListWidget::item:selected {{ background-color: rgba(16,185,129,0.15); color: #10b981; }}
-        """)
-        
-        # Dicas
-        self._tips_frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {bg_tips};
-                border: {border_tips};
-                border-radius: 8px;
-            }}
-        """)
-        self._tips_text.setStyleSheet(f"color: {text_tips}; font-size: 10px; line-height: 1.5;")
-        
-        # Botão Limpar Conversa
-        self._clear_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {text_sec};
-                border: 1px solid {border_color};
-                border-radius: 8px;
-                padding: 8px;
-                font-size: 11px;
-            }}
-            QPushButton:hover {{ color: #f87171; border-color: #7f1d1d; }}
-        """)
 
     # ── Slots públicos (chamados pelo MainWindow) ───────────────────────────────
 
+    def _swap_object_name(self, widget, object_name: str) -> None:
+        """Troca o objectName do widget (estado dinâmico) e força o repolish
+        do QSS — mesmo padrão usado em ``AnkiExportDialog`` e ``OllamaWizardDialog``."""
+        if widget.objectName() == object_name:
+            return  # estado inalterado — evita repolish à toa
+        widget.setObjectName(object_name)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+
     def set_ollama_status(self, available: bool, model: str = "") -> None:
-        """Atualiza o badge de status do Ollama."""
+        """Atualiza o badge de status do Ollama (estado via objectName-swap)."""
         if available:
             self._status_badge.setText(f"🟢 Ollama · {model}")
-            self._status_badge.setStyleSheet("""
-                background: #052e16; color: #4ade80; border-radius: 10px;
-                padding: 4px 12px; font-size: 11px; font-weight: 600;
-            """)
+            self._swap_object_name(self._status_badge, "ragStatusOnline")
         else:
             self._status_badge.setText("🔴 Ollama offline")
-            self._status_badge.setStyleSheet("""
-                background: #3f1f1f; color: #f87171; border-radius: 10px;
-                padding: 4px 12px; font-size: 11px; font-weight: 600;
-            """)
+            self._swap_object_name(self._status_badge, "ragStatusOffline")
 
     def set_standalone_mode(self, is_standalone: bool) -> None:
         """Configura a visibilidade dos botões de navegação conforme o contexto."""
@@ -1538,11 +1213,11 @@ class RAGPanel(QWidget):
 
         if model_id in installed:
             self._model_badge.setText("✅ Instalado")
-            self._model_badge.setStyleSheet("color: #4ade80; font-size: 10px; font-weight: 600;")
+            self._swap_object_name(self._model_badge, "ragModelBadgeInstalled")
             self._model_apply_btn.setText("✅ Usar este Modelo")
         else:
             self._model_badge.setText("⬇️  Não instalado")
-            self._model_badge.setStyleSheet("color: #f59e0b; font-size: 10px; font-weight: 600;")
+            self._swap_object_name(self._model_badge, "ragModelBadgeMissing")
             self._model_apply_btn.setText("⬇️  Baixar e Usar Modelo")
 
     def _on_model_apply(self) -> None:
@@ -1601,10 +1276,10 @@ class RAGPanel(QWidget):
                 self._installed_models = set()
             self._installed_models.add(model_id)
             self._model_badge.setText("✅ Instalado")
-            self._model_badge.setStyleSheet("color: #4ade80; font-size: 10px; font-weight: 600;")
+            self._swap_object_name(self._model_badge, "ragModelBadgeInstalled")
             self._model_apply_btn.setText("✅ Usar este Modelo")
             self.model_changed.emit(model_id)
         else:
             self._model_badge.setText("❌ Falha no download")
-            self._model_badge.setStyleSheet("color: #f87171; font-size: 10px;")
+            self._swap_object_name(self._model_badge, "ragModelBadgeError")
 
