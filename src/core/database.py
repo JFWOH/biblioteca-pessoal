@@ -384,15 +384,34 @@ class LibraryDB:
     def count_books(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM books").fetchone()[0]
 
-    def get_books_by_status(self, status: str) -> list[dict]:
+    def _resolve_sort(self, sort_by: str | None, sort_order: str | None,
+                       default_column: str) -> tuple[str, str] | None:
+        """Resolve ``(coluna, direção)`` usando a MESMA whitelist de
+        ``get_all_books`` (Tarefa 2.3/débito registrado: sort ignorado nas
+        visões filtradas). ``sort_by=None`` preserva o comportamento anterior
+        do chamador (retorna ``None`` — sem ORDER BY explícito aqui)."""
+        if sort_by is None:
+            return None
+        column = sort_by if sort_by in self._SORT_COLUMNS else default_column
+        order = self._SORT_ORDERS.get(str(sort_order or "desc").strip().lower(), "DESC")
+        return column, order
+
+    def get_books_by_status(self, status: str, sort_by: str | None = None,
+                            sort_order: str | None = None) -> list[dict]:
+        resolved = self._resolve_sort(sort_by, sort_order, "date_added")
+        order_clause = (f"{resolved[0]} {resolved[1]}" if resolved
+                        else "date_modified DESC")
         rows = self.conn.execute(
-            "SELECT * FROM books WHERE read_status = ? ORDER BY date_modified DESC",
+            f"SELECT * FROM books WHERE read_status = ? ORDER BY {order_clause}",
             (status,)).fetchall()
         return [dict(r) for r in rows]
 
-    def get_favorite_books(self) -> list[dict]:
+    def get_favorite_books(self, sort_by: str | None = None,
+                           sort_order: str | None = None) -> list[dict]:
+        resolved = self._resolve_sort(sort_by, sort_order, "title")
+        order_clause = f"{resolved[0]} {resolved[1]}" if resolved else "title"
         rows = self.conn.execute(
-            "SELECT * FROM books WHERE is_favorite = 1 ORDER BY title").fetchall()
+            f"SELECT * FROM books WHERE is_favorite = 1 ORDER BY {order_clause}").fetchall()
         return [dict(r) for r in rows]
 
     # ── Progresso ──────────────────────────────────────────────────────
@@ -582,10 +601,13 @@ class LibraryDB:
         except sqlite3.IntegrityError:
             pass
 
-    def get_books_in_collection(self, collection_id: int) -> list[dict]:
+    def get_books_in_collection(self, collection_id: int, sort_by: str | None = None,
+                                sort_order: str | None = None) -> list[dict]:
+        resolved = self._resolve_sort(sort_by, sort_order, "title")
+        order_clause = f"b.{resolved[0]} {resolved[1]}" if resolved else "b.title"
         rows = self.conn.execute(
-            """SELECT b.* FROM books b JOIN book_collections bc ON b.id=bc.book_id
-               WHERE bc.collection_id=? ORDER BY b.title""",
+            f"""SELECT b.* FROM books b JOIN book_collections bc ON b.id=bc.book_id
+               WHERE bc.collection_id=? ORDER BY {order_clause}""",
             (collection_id,)).fetchall()
         return [dict(r) for r in rows]
 

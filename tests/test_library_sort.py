@@ -79,6 +79,88 @@ def test_sort_defaults_unchanged(db):
     assert [b["id"] for b in db.get_all_books()] == [b2, b1]
 
 
+# ── DB: débito — sort aplicado nas visões filtradas (favoritos/status/coleção) ──
+
+def test_get_favorite_books_respects_sort_by(db):
+    _add_book(db, "Zebra", "Autor Z")
+    _add_book(db, "Alfa", "Autor A")
+    db.update_book(1, is_favorite=1)
+    db.update_book(2, is_favorite=1)
+
+    titles = [b["title"] for b in db.get_favorite_books(sort_by="title", sort_order="asc")]
+    assert titles == ["Alfa", "Zebra"]
+
+
+def test_get_favorite_books_default_unchanged(db):
+    """Sem sort_by, preserva o comportamento anterior (ORDER BY title)."""
+    _add_book(db, "Zebra", "Autor Z")
+    _add_book(db, "Alfa", "Autor A")
+    db.update_book(1, is_favorite=1)
+    db.update_book(2, is_favorite=1)
+
+    titles = [b["title"] for b in db.get_favorite_books()]
+    assert titles == ["Alfa", "Zebra"]
+
+
+def test_get_favorite_books_invalid_sort_falls_back(db):
+    _add_book(db, "Zebra", "Autor Z")
+    db.update_book(1, is_favorite=1)
+    # Não deve lançar nem interpolar texto malicioso — cai no padrão (title).
+    books = db.get_favorite_books(sort_by="x; DROP TABLE books;--", sort_order="asc")
+    assert len(books) == 1
+
+
+def test_get_books_by_status_respects_sort(db):
+    _add_book(db, "Zebra", "Autor Z")
+    _add_book(db, "Alfa", "Autor A")
+    db.update_book(1, read_status="reading")
+    db.update_book(2, read_status="reading")
+
+    titles = [b["title"] for b in
+              db.get_books_by_status("reading", sort_by="title", sort_order="asc")]
+    assert titles == ["Alfa", "Zebra"]
+
+
+def test_get_books_by_status_default_unchanged(db):
+    """Sem sort_by, preserva o comportamento anterior (ORDER BY date_modified DESC).
+
+    ``update_book`` sempre grava ``date_modified=datetime.now()`` (não aceita
+    override via kwarg — o valor é sobrescrito), então a ordem é controlada
+    pela SEQUÊNCIA das chamadas: a atualizada por último fica mais recente.
+    """
+    import time
+    b1 = _add_book(db, "Um", "A")
+    b2 = _add_book(db, "Dois", "B")
+    db.update_book(b1, read_status="reading")
+    time.sleep(0.01)  # garante date_modified distinto (resolução do relógio)
+    db.update_book(b2, read_status="reading")
+    assert [b["id"] for b in db.get_books_by_status("reading")] == [b2, b1]
+
+
+def test_get_books_in_collection_respects_sort(db):
+    col_id = db.create_collection("Coleção")
+    b1 = _add_book(db, "Zebra", "Autor Z")
+    b2 = _add_book(db, "Alfa", "Autor A")
+    db.add_book_to_collection(b1, col_id)
+    db.add_book_to_collection(b2, col_id)
+
+    titles = [b["title"] for b in
+              db.get_books_in_collection(col_id, sort_by="title", sort_order="asc")]
+    assert titles == ["Alfa", "Zebra"]
+
+
+def test_get_books_in_collection_default_unchanged(db):
+    """Sem sort_by, preserva o comportamento anterior (ORDER BY b.title)."""
+    col_id = db.create_collection("Coleção")
+    b1 = _add_book(db, "Zebra", "Autor Z")
+    b2 = _add_book(db, "Alfa", "Autor A")
+    db.add_book_to_collection(b1, col_id)
+    db.add_book_to_collection(b2, col_id)
+
+    titles = [b["title"] for b in db.get_books_in_collection(col_id)]
+    assert titles == ["Alfa", "Zebra"]
+
+
 # ── Widget: LibraryView ──────────────────────────────────────────────────────
 
 @pytest.fixture

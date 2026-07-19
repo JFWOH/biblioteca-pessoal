@@ -421,24 +421,26 @@ class MainWindow(QMainWindow):
 
     def _load_library(self, section: str = "all"):
         """Carrega livros baseado na seção selecionada."""
-        # Ordenação (Tarefa 2.3): mesma chave de config que o settings_dialog
-        # usa (library.sort_by/library.sort_order) — fonte única de verdade.
-        # Só se aplica às chamadas de get_all_books; as demais seções têm
-        # ordenação própria fixa (favoritos por título, status por
-        # modificação, coleção por título) e não foram alteradas aqui.
+        # Ordenação (Tarefa 2.3; débito corrigido — antes só valia em "Todos
+        # os Livros"): mesma chave de config que o settings_dialog usa
+        # (library.sort_by/library.sort_order) — fonte única de verdade,
+        # agora aplicada também nas visões filtradas (favoritos/status/
+        # coleção), reutilizando a MESMA whitelist de get_all_books via
+        # LibraryDB._resolve_sort.
         sort_by = self._config.get("library.sort_by", "date_added")
         sort_order = self._config.get("library.sort_order", "desc")
 
         if section == "all":
             books = self._db.get_all_books(sort_by=sort_by, sort_order=sort_order)
         elif section == "favorites":
-            books = self._db.get_favorite_books()
+            books = self._db.get_favorite_books(sort_by=sort_by, sort_order=sort_order)
         elif section in ("unread", "reading", "read"):
-            books = self._db.get_books_by_status(section)
+            books = self._db.get_books_by_status(section, sort_by=sort_by, sort_order=sort_order)
         elif section.startswith("collection_"):
             try:
                 col_id = int(section.split("_")[1])
-                books = self._db.get_books_in_collection(col_id)
+                books = self._db.get_books_in_collection(
+                    col_id, sort_by=sort_by, sort_order=sort_order)
             except ValueError:
                 books = self._db.get_all_books(sort_by=sort_by, sort_order=sort_order)
         else:
