@@ -42,7 +42,7 @@ class Sidebar(QWidget):
         font.setPointSize(16)
         font.setWeight(QFont.Weight.Bold)
         self._title.setFont(font)
-        self._title.setStyleSheet("color: #e4e4e7; padding: 0 4px 16px 4px;")
+        self._title.setObjectName("sidebarTitle")
         layout.addWidget(self._title)
 
         # Seção: Biblioteca
@@ -91,7 +91,7 @@ class Sidebar(QWidget):
 
         # Estatísticas no rodapé
         self._stats_label = QLabel()
-        self._stats_label.setStyleSheet("color: #52525b; font-size: 11px; padding: 8px 4px;")
+        self._stats_label.setObjectName("sidebarStatsLabel")
         self._stats_label.setWordWrap(True)
         layout.addWidget(self._stats_label)
 
@@ -99,43 +99,17 @@ class Sidebar(QWidget):
         layout.addSpacing(8)
         self._opds_btn = QPushButton("📡  Iniciar Servidor OPDS")
         self._opds_btn.setCheckable(True)
-        self._opds_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #3f3f46; border-radius: 6px; color: #a1a1aa; padding: 6px; }
-            QPushButton:checked { background: rgba(16, 185, 129, 0.2); border-color: #10b981; color: #10b981; }
-        """)
+        self._opds_btn.setObjectName("sidebarOpdsBtn")
         self._opds_btn.toggled.connect(self.opds_toggled.emit)
         layout.addWidget(self._opds_btn)
 
         # Seleciona "Todos" por padrão
         self._buttons["all"].setChecked(True)
 
-        # Inicializa o tema padrão como escuro
-        self.set_theme("dark")
-
     def set_theme(self, theme: str) -> None:
-        """Aplica folha de estilo específica da barra lateral dependendo do tema ativo."""
-        if theme == "light":
-            title_color = "#1A1A1A"
-            stats_color = "#555555"
-            opds_color = "#555555"
-            opds_border = "#d4d4d8"
-        elif theme == "sepia":
-            title_color = "#433422"
-            stats_color = "#705E4B"
-            opds_color = "#433422"
-            opds_border = "#d4cbb8"
-        else: # dark
-            title_color = "#e4e4e7"
-            stats_color = "#52525b"
-            opds_color = "#a1a1aa"
-            opds_border = "#3f3f46"
-
-        self._title.setStyleSheet(f"color: {title_color}; padding: 0 4px 16px 4px;")
-        self._stats_label.setStyleSheet(f"color: {stats_color}; font-size: 11px; padding: 8px 4px;")
-        self._opds_btn.setStyleSheet(f"""
-            QPushButton {{ background: transparent; border: 1px solid {opds_border}; border-radius: 6px; color: {opds_color}; padding: 6px; }}
-            QPushButton:checked {{ background: rgba(16, 185, 129, 0.2); border-color: #10b981; color: #10b981; }}
-        """)
+        """No-op de compat: o tema vem do QSS central da QApplication (styles.py,
+        seletores #sidebar*, Onda 0b 2/2) — nada a propagar por widget. Mantido
+        porque main_window chama a cada troca de tema."""
 
     def _on_section_click(self, key: str):
         for k, btn in self._buttons.items():

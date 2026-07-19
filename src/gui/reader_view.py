@@ -197,25 +197,22 @@ class ReaderView(QWidget):
         # Toolbar do leitor
         toolbar = QWidget()
         toolbar.setFixedHeight(48)
-        toolbar.setStyleSheet("background-color: #20242d; border-bottom: 1px solid #2d333f;")
+        toolbar.setObjectName("readerToolbar")
+        # QWidget puro não pinta background vindo de QSS sem este atributo
+        # (mesma lição do AnnotationPanel — Onda 0b 1/2, PR #42/#43).
+        toolbar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         tb_layout = QHBoxLayout(toolbar)
         tb_layout.setContentsMargins(12, 0, 12, 0)
 
         # Botão voltar
         back_btn = QPushButton("← Biblioteca")
-        back_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: none; color: #10b981;
-                          font-size: 13px; font-weight: 500; padding: 8px 12px; }
-            QPushButton:hover { color: #34d399; }
-        """)
+        back_btn.setObjectName("readerBackBtn")
         back_btn.clicked.connect(self.closed.emit)
         tb_layout.addWidget(back_btn)
 
         # Título do documento
         self._title_label = QLabel()
-        self._title_label.setStyleSheet(
-            "color: #e5e7eb; font-size: 13px; font-weight: 600;"
-        )
+        self._title_label.setObjectName("readerTitleLabel")
         self._title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # Deixa o título encolher livremente para nunca empurrar/cortar os botões
         # da direita (ex.: o "⋯" com Página Dupla) quando o espaço fica curto.
@@ -227,28 +224,20 @@ class ReaderView(QWidget):
         self._prev_btn = QPushButton("◀")
         self._prev_btn.setAccessibleName("Página anterior")
         self._prev_btn.setFixedSize(32, 32)
-        self._prev_btn.setStyleSheet("""
-            QPushButton { background: #161920; border: none; border-radius: 6px;
-                          color: #cbd5e1; font-size: 14px; }
-            QPushButton:hover { background: #2d333f; }
-        """)
+        self._prev_btn.setObjectName("readerNavBtn")
         self._prev_btn.clicked.connect(self._go_prev)
         tb_layout.addWidget(self._prev_btn)
 
         self._page_label = QLabel("0/0")
         self._page_label.setFixedWidth(80)
         self._page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._page_label.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        self._page_label.setObjectName("readerPageLabel")
         tb_layout.addWidget(self._page_label)
 
         self._next_btn = QPushButton("▶")
         self._next_btn.setAccessibleName("Próxima página")
         self._next_btn.setFixedSize(32, 32)
-        self._next_btn.setStyleSheet("""
-            QPushButton { background: #161920; border: none; border-radius: 6px;
-                          color: #cbd5e1; font-size: 14px; }
-            QPushButton:hover { background: #2d333f; }
-        """)
+        self._next_btn.setObjectName("readerNavBtn")
         self._next_btn.clicked.connect(self._go_next)
         tb_layout.addWidget(self._next_btn)
 
@@ -256,18 +245,14 @@ class ReaderView(QWidget):
         zoom_out = QPushButton("−")
         zoom_out.setAccessibleName("Diminuir zoom")
         zoom_out.setFixedSize(28, 28)
-        zoom_out.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 4px; color: #94a3b8; font-size: 16px; }
-            QPushButton:hover { background: #2d333f; }
-        """)
+        zoom_out.setObjectName("readerZoomBtn")
         zoom_out.clicked.connect(self._zoom_out)
         tb_layout.addWidget(zoom_out)
 
         zoom_in = QPushButton("+")
         zoom_in.setAccessibleName("Aumentar zoom")
         zoom_in.setFixedSize(28, 28)
-        zoom_in.setStyleSheet(zoom_out.styleSheet())
+        zoom_in.setObjectName("readerZoomBtn")
         zoom_in.clicked.connect(self._zoom_in)
         tb_layout.addWidget(zoom_in)
 
@@ -278,21 +263,14 @@ class ReaderView(QWidget):
         self._typography_btn.setCheckable(True)
         self._typography_btn.setToolTip("Tipografia do leitor (fonte, tamanho, tema)")
         self._typography_btn.setAccessibleName("Tipografia do leitor")
-        self._typography_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; color: #cbd5e1; font-size: 13px;
-                          font-weight: 600; }
-            QPushButton:hover { background: #2d333f; }
-            QPushButton:checked { background: rgba(16, 185, 129, 0.2);
-                                  border-color: #10b981; }
-        """)
+        self._typography_btn.setObjectName("readerTypographyBtn")
         self._typography_btn.clicked.connect(self._open_typography_popover)
         tb_layout.addWidget(self._typography_btn)
         self._typography_popover = None
 
         # Separador
         sep = QLabel("│")
-        sep.setStyleSheet("color: #2d333f; font-size: 16px;")
+        sep.setObjectName("readerToolbarSep")
         tb_layout.addWidget(sep)
 
         # Botão de anotações — emoji como ÍCONE (evita sobreposição no Windows);
@@ -303,13 +281,7 @@ class ReaderView(QWidget):
         self._annotations_btn.setToolTip("Painel de Anotações")
         self._annotations_btn.setAccessibleName("Painel de Anotações")
         self._annotations_btn.setCheckable(True)
-        self._annotations_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; font-size: 16px; }
-            QPushButton:hover { background: #2d333f; }
-            QPushButton:checked { background: rgba(16, 185, 129, 0.2);
-                                  border-color: #10b981; }
-        """)
+        self._annotations_btn.setObjectName("readerAnnotationsBtn")
         self._annotations_btn.clicked.connect(self._toggle_annotations)
         tb_layout.addWidget(self._annotations_btn)
 
@@ -322,13 +294,7 @@ class ReaderView(QWidget):
         self._bookmark_btn.setCheckable(True)
         self._bookmark_btn.setToolTip("Marcar página")
         self._bookmark_btn.setAccessibleName("Marcar página atual")
-        self._bookmark_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; font-size: 16px; }
-            QPushButton:hover { background: #2d333f; }
-            QPushButton:checked { background: rgba(16, 185, 129, 0.2);
-                                  border-color: #10b981; }
-        """)
+        self._bookmark_btn.setObjectName("readerBookmarkBtn")
         self._bookmark_btn.clicked.connect(self._toggle_current_bookmark)
         tb_layout.addWidget(self._bookmark_btn)
 
@@ -342,13 +308,7 @@ class ReaderView(QWidget):
         self._side_panel_toggle_btn.setCheckable(True)
         self._side_panel_toggle_btn.setToolTip("Sumário/Marcadores")
         self._side_panel_toggle_btn.setAccessibleName("Painel Sumário/Marcadores")
-        self._side_panel_toggle_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; font-size: 16px; }
-            QPushButton:hover { background: #2d333f; }
-            QPushButton:checked { background: rgba(16, 185, 129, 0.2);
-                                  border-color: #10b981; }
-        """)
+        self._side_panel_toggle_btn.setObjectName("readerSidePanelToggleBtn")
         self._side_panel_toggle_btn.clicked.connect(self._toggle_side_panel)
         tb_layout.addWidget(self._side_panel_toggle_btn)
 
@@ -358,11 +318,7 @@ class ReaderView(QWidget):
         search_btn.setFixedSize(32, 32)
         search_btn.setToolTip("Buscar no documento (Ctrl+F)")
         search_btn.setAccessibleName("Buscar no documento")
-        search_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; font-size: 14px; }
-            QPushButton:hover { background: #2d333f; }
-        """)
+        search_btn.setObjectName("readerSearchBtn")
         search_btn.clicked.connect(self._toggle_search)
         tb_layout.addWidget(search_btn)
 
@@ -372,27 +328,17 @@ class ReaderView(QWidget):
         self._fullscreen_btn.setFixedSize(32, 32)
         self._fullscreen_btn.setToolTip("Tela cheia (F11)")
         self._fullscreen_btn.setAccessibleName("Alternar tela cheia")
-        self._fullscreen_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; font-size: 14px; }
-            QPushButton:hover { background: #2d333f; }
-        """)
+        self._fullscreen_btn.setObjectName("readerFullscreenBtn")
         self._fullscreen_btn.clicked.connect(self._toggle_fullscreen)
         tb_layout.addWidget(self._fullscreen_btn)
-        
+
         # Botão Página Dupla (state-holder no menu de overflow)
         self._double_page_btn = QPushButton("Dupla")
         self._double_page_btn.setIcon(emoji_icon("📖"))
         self._double_page_btn.setFixedSize(85, 32)
         self._double_page_btn.setCheckable(True)
         self._double_page_btn.setToolTip("Modo Página Dupla")
-        self._double_page_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; font-size: 13px; color: #94a3b8; }
-            QPushButton:hover { background: #2d333f; }
-            QPushButton:checked { background: rgba(16, 185, 129, 0.2);
-                                  border-color: #10b981; color: #10b981; }
-        """)
+        self._double_page_btn.setObjectName("readerDoublePageBtn")
         self._double_page_btn.clicked.connect(self._toggle_double_page)
         # Movido para o menu de overflow ("⋯"): mantido como state-holder.
 
@@ -409,13 +355,7 @@ class ReaderView(QWidget):
             "4. Escolha '🖍️ Destacar' no menu"
         )
         self._highlight_mode_btn.setAccessibleName("Modo Marca-Texto")
-        self._highlight_mode_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; font-size: 14px; }
-            QPushButton:hover { background: #2d333f; }
-            QPushButton:checked { background: rgba(251, 191, 36, 0.2);
-                                  border-color: #fbbf24; }
-        """)
+        self._highlight_mode_btn.setObjectName("readerHighlightModeBtn")
         self._highlight_mode_btn.clicked.connect(self._toggle_highlight_mode)
         # Movido para o menu de overflow ("⋯"): mantido como state-holder.
 
@@ -425,11 +365,7 @@ class ReaderView(QWidget):
         self._study_btn.setFixedSize(32, 32)
         self._study_btn.setToolTip("Estudar a página: explicar · resumir · flashcards · glossário")
         self._study_btn.setAccessibleName("Estudar a página")
-        self._study_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; font-size: 14px; }
-            QPushButton:hover { background: #2d333f; }
-        """)
+        self._study_btn.setObjectName("readerStudyBtn")
         self._study_btn.clicked.connect(self._open_study_menu)
         tb_layout.addWidget(self._study_btn)
 
@@ -440,13 +376,7 @@ class ReaderView(QWidget):
         self._ai_panel_btn.setCheckable(True)
         self._ai_panel_btn.setToolTip("Assistente IA")
         self._ai_panel_btn.setAccessibleName("Assistente IA")
-        self._ai_panel_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; font-size: 14px; }
-            QPushButton:hover { background: #2d333f; }
-            QPushButton:checked { background: rgba(16, 185, 129, 0.2);
-                                  border-color: #10b981; }
-        """)
+        self._ai_panel_btn.setObjectName("readerAiPanelBtn")
         self._ai_panel_btn.clicked.connect(self._toggle_ai_panel)
         tb_layout.addWidget(self._ai_panel_btn)
 
@@ -470,12 +400,7 @@ class ReaderView(QWidget):
         self._audio_btn.setFixedHeight(32)
         self._audio_btn.setMinimumWidth(100)
         self._audio_btn.setToolTip("Ouvir Página (TTS)")
-        self._audio_btn.setStyleSheet("""
-            QToolButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; font-size: 14px; padding: 0 4px; }
-            QToolButton:hover { background: #2d333f; }
-            QToolButton::menu-button { border: none; width: 18px; }
-        """)
+        self._audio_btn.setObjectName("readerAudioBtn")
         self._audio_btn.clicked.connect(self._toggle_audio)
 
         self._act_audio_toggle = QAction("🔊 Ouvir página", self)
@@ -489,11 +414,7 @@ class ReaderView(QWidget):
         self._act_audio_settings.triggered.connect(self._on_tts_settings_clicked)
 
         self._audio_menu = QMenu(self._audio_btn)
-        self._audio_menu.setStyleSheet("""
-            QMenu { background: #1e2227; border: 1px solid #3f3f46; color: #e4e4e7; border-radius: 4px; padding: 4px; }
-            QMenu::item { padding: 6px 24px; border-radius: 4px; }
-            QMenu::item:selected { background: #3f3f46; }
-        """)
+        self._audio_menu.setObjectName("readerPopupMenu")
         self._audio_menu.addAction(self._act_audio_toggle)
         self._audio_menu.addAction(self._act_audio_stop)
         self._audio_menu.addSeparator()
@@ -506,10 +427,7 @@ class ReaderView(QWidget):
         self._proactive_combo.addItems(["Desligado", "Leve", "Moderado", "Estudo"])
         self._proactive_combo.setToolTip("Agente Proativo de Leitura")
         self._proactive_combo.setFixedSize(90, 32)
-        self._proactive_combo.setStyleSheet("""
-            QComboBox { background: transparent; border: 1px solid #2d333f; border-radius: 6px; color: #94a3b8; padding-left: 5px; }
-            QComboBox::drop-down { border: none; }
-        """)
+        self._proactive_combo.setObjectName("readerProactiveCombo")
         self._proactive_combo.currentTextChanged.connect(self._proactive_service.set_intensity)
         # Conectado DEPOIS de set_intensity: ao reagir, a intensidade nova já está
         # aplicada e o trigger engine resetado, então a avaliação imediata vale.
@@ -523,18 +441,9 @@ class ReaderView(QWidget):
         self._overflow_btn.setToolTip("Mais opções")
         self._overflow_btn.setAccessibleName("Mais opções")
         self._overflow_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self._overflow_btn.setStyleSheet("""
-            QToolButton { background: transparent; border: 1px solid #2d333f;
-                          border-radius: 6px; font-size: 16px; color: #94a3b8; }
-            QToolButton:hover { background: #2d333f; }
-            QToolButton::menu-indicator { image: none; }
-        """)
+        self._overflow_btn.setObjectName("readerOverflowBtn")
         self._overflow_menu = QMenu(self._overflow_btn)
-        self._overflow_menu.setStyleSheet("""
-            QMenu { background: #1e2227; border: 1px solid #3f3f46; color: #e4e4e7; border-radius: 4px; padding: 4px; }
-            QMenu::item { padding: 6px 24px; border-radius: 4px; }
-            QMenu::item:selected { background: #3f3f46; }
-        """)
+        self._overflow_menu.setObjectName("readerPopupMenu")
         self._act_double_page = QAction("📖 Página Dupla", self, checkable=True)
         self._act_double_page.triggered.connect(self._menu_toggle_double_page)
         self._act_highlight = QAction("🖍️ Modo Marca-Texto", self, checkable=True)
@@ -646,7 +555,7 @@ class ReaderView(QWidget):
         self._image_scroll.setWidgetResizable(True)
         self._image_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self._image_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._image_scroll.setStyleSheet("background-color: #0f1115;")
+        self._image_scroll.setObjectName("readerImageScroll")
         self._image_label = QLabel()
         self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._image_scroll.setWidget(self._image_label)
@@ -710,9 +619,11 @@ class ReaderView(QWidget):
         # Barra de progresso inferior
         self._progress_bar_widget = QWidget()
         self._progress_bar_widget.setFixedHeight(28)
-        self._progress_bar_widget.setStyleSheet(
-            "background-color: #161920; border-top: 1px solid #2d333f;"
-        )
+        self._progress_bar_widget.setObjectName("readerProgressBarWidget")
+        # QWidget puro não pinta background vindo de QSS sem este atributo
+        # (mesma lição do AnnotationPanel — Onda 0b 1/2, PR #42/#43).
+        self._progress_bar_widget.setAttribute(
+            Qt.WidgetAttribute.WA_StyledBackground, True)
         pb_layout = QHBoxLayout(self._progress_bar_widget)
         pb_layout.setContentsMargins(16, 4, 16, 4)
         self._progress_bar = ReadingProgressBar()
@@ -1377,6 +1288,14 @@ class ReaderView(QWidget):
             self._reader = None
 
     def set_theme(self, theme: str):
+        """Onda 0b (2/2): o visual da toolbar/scroll/progress bar mora agora
+        na QSS central (``styles.py``, seletores ``#readerToolbar``/
+        ``#reader*``), aplicada globalmente na QApplication — os widgets
+        deste arquivo já herdam a folha via objectName. O que resta aqui é
+        o que a QSS de widget NÃO alcança: propagação para os filhos com
+        set_theme próprio, reaplicação do CSS do conteúdo do leitor (HTML/
+        EPUB/DOCX, que é rich-text e não reage a QSS de widget) e o refresh
+        da página atual (recalcula a renderização — ex.: PDF)."""
         self._theme = theme
 
         # Apply theme to TOC and AnnotationPanel
@@ -1390,229 +1309,13 @@ class ReaderView(QWidget):
             self._dock.set_theme(theme)
         if hasattr(self, '_insights_panel'):
             self._insights_panel.set_theme(theme)
-        if hasattr(self, '_search_bar') and hasattr(self._search_bar, 'set_theme'):
-            self._search_bar.set_theme(theme)
-        if hasattr(self, '_proactive_footer') and hasattr(self._proactive_footer, 'set_theme'):
-            self._proactive_footer.set_theme(theme)
+        # search_bar e proactive_footer: 100% QSS central por objectName —
+        # sem set_theme (API morta removida na auditoria da Onda 0b 2/2).
 
         # Apply CSS to current reader if open
         if self._reader and hasattr(self._reader, "set_theme_css"):
             self._reader.set_theme_css(self._reader_css())
 
-        if theme == "light":
-            bg_toolbar = "#f4f4f5"
-            border_toolbar = "#e4e4e7"
-            text_toolbar = "#1A1A1A"
-            btn_bg = "#e4e4e7"
-            btn_hover_bg = "#d4d4d8"
-            btn_color = "#52525b"
-            page_lbl_color = "#71717a"
-            bg_scroll = "#FFFFFF"
-            bg_progress = "#f4f4f5"
-            border_progress = "#e4e4e7"
-
-            # Action button checked style
-            checked_style = """
-                background: rgba(5, 150, 105, 0.1);
-                border-color: #059669;
-                color: #059669;
-            """
-            hl_checked_style = """
-                background: rgba(251, 191, 36, 0.2);
-                border-color: #fbbf24;
-            """
-        elif theme == "sepia":
-            bg_toolbar = "#ebe5d9"
-            border_toolbar = "#d4cbb8"
-            text_toolbar = "#5B4636"
-            btn_bg = "#dfd8c8"
-            btn_hover_bg = "#d4cbb8"
-            btn_color = "#5b4636"
-            page_lbl_color = "#8b7355"
-            bg_scroll = "#F4ECD8"
-            bg_progress = "#ebe5d9"
-            border_progress = "#d4cbb8"
-
-            checked_style = """
-                background: rgba(139, 108, 66, 0.15);
-                border-color: #8b6c42;
-                color: #8b6c42;
-            """
-            hl_checked_style = """
-                background: rgba(251, 191, 36, 0.2);
-                border-color: #fbbf24;
-            """
-        else: # dark
-            bg_toolbar = "#20242d"     # Dark elevated
-            border_toolbar = "#2d333f" # Dark border
-            text_toolbar = "#e5e7eb"   # Text primary
-            btn_bg = "#161920"         # Dark surface
-            btn_hover_bg = "#2d333f"   # Dark border
-            btn_color = "#cbd5e1"      # Text secondary
-            page_lbl_color = "#94a3b8" # Text muted
-            bg_scroll = "#0f1115"      # Dark base
-            bg_progress = "#161920"    # Dark surface
-            border_progress = "#2d333f"
-
-            checked_style = """
-                background: rgba(16, 185, 129, 0.2);
-                border-color: #10b981;
-            """
-            hl_checked_style = """
-                background: rgba(251, 191, 36, 0.2);
-                border-color: #fbbf24;
-            """
-
-        # 1. Toolbar and controls inside it
-        self._toolbar.setStyleSheet(f"""
-            QWidget {{
-                background-color: {bg_toolbar};
-                border-bottom: 1px solid {border_toolbar};
-            }}
-            QPushButton {{
-                background: transparent;
-                border: none;
-                color: {btn_color};
-            }}
-            QPushButton:hover {{
-                background: {btn_hover_bg};
-            }}
-        """)
-
-        self._title_label.setStyleSheet(f"color: {text_toolbar}; font-size: 13px; font-weight: 600; background: transparent; border: none;")
-        self._page_label.setStyleSheet(f"color: {page_lbl_color}; font-size: 12px; background: transparent; border: none;")
-
-        # Navigation/control buttons with backgrounds
-        for btn in (self._prev_btn, self._next_btn):
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {btn_bg};
-                    border: none;
-                    border-radius: 6px;
-                    color: {btn_color};
-                    font-size: 14px;
-                }}
-                QPushButton:hover {{
-                    background: {btn_hover_bg};
-                }}
-            """)
-
-        # Toolbar actions (checkable)
-        self._annotations_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                border: 1px solid {btn_bg};
-                border-radius: 6px;
-                font-size: 16px;
-            }}
-            QPushButton:hover {{ background: {btn_hover_bg}; }}
-            QPushButton:checked {{ {checked_style} }}
-        """)
-        self._double_page_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                border: 1px solid {btn_bg};
-                border-radius: 6px;
-                font-size: 13px;
-                color: {btn_color};
-            }}
-            QPushButton:hover {{ background: {btn_hover_bg}; }}
-            QPushButton:checked {{ {checked_style} }}
-        """)
-        self._ai_panel_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                border: 1px solid {btn_bg};
-                border-radius: 6px;
-                font-size: 14px;
-            }}
-            QPushButton:hover {{ background: {btn_hover_bg}; }}
-            QPushButton:checked {{ {checked_style} }}
-        """)
-        self._audio_btn.setStyleSheet(f"""
-            QToolButton {{
-                background: transparent;
-                border: 1px solid {btn_bg};
-                border-radius: 6px;
-                font-size: 14px;
-                padding: 0 4px;
-            }}
-            QToolButton:hover {{ background: {btn_hover_bg}; }}
-            QToolButton::menu-button {{ border: none; width: 18px; }}
-        """)
-        if hasattr(self, "_study_btn"):
-            self._study_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent;
-                    border: 1px solid {btn_bg};
-                    border-radius: 6px;
-                    font-size: 14px;
-                }}
-                QPushButton:hover {{ background: {btn_hover_bg}; }}
-            """)
-        self._highlight_mode_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                border: 1px solid {btn_bg};
-                border-radius: 6px;
-                font-size: 14px;
-            }}
-            QPushButton:hover {{ background: {btn_hover_bg}; }}
-            QPushButton:checked {{ {hl_checked_style} }}
-        """)
-        if hasattr(self, "_typography_btn"):
-            self._typography_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent;
-                    border: 1px solid {btn_bg};
-                    border-radius: 6px;
-                    color: {btn_color};
-                    font-size: 13px;
-                    font-weight: 600;
-                }}
-                QPushButton:hover {{ background: {btn_hover_bg}; }}
-                QPushButton:checked {{ {checked_style} }}
-            """)
-        if hasattr(self, "_bookmark_btn"):
-            self._bookmark_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent;
-                    border: 1px solid {btn_bg};
-                    border-radius: 6px;
-                    font-size: 16px;
-                }}
-                QPushButton:hover {{ background: {btn_hover_bg}; }}
-                QPushButton:checked {{ {checked_style} }}
-            """)
-        if hasattr(self, "_side_panel_toggle_btn"):
-            self._side_panel_toggle_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent;
-                    border: 1px solid {btn_bg};
-                    border-radius: 6px;
-                    font-size: 16px;
-                }}
-                QPushButton:hover {{ background: {btn_hover_bg}; }}
-                QPushButton:checked {{ {checked_style} }}
-            """)
-
-        # 2. Scroll area
-        self._image_scroll.setStyleSheet(f"background-color: {bg_scroll};")
-
-        # 3. Progress bar container
-        self._progress_bar_widget.setStyleSheet(f"""
-            background-color: {bg_progress};
-            border-top: 1px solid {border_progress};
-        """)
-
-        # Overflow ("⋯") e popover de seleção acompanham o tema
-        if hasattr(self, "_overflow_btn"):
-            self._overflow_btn.setStyleSheet(f"""
-                QToolButton {{ background: transparent; border: 1px solid {btn_bg};
-                              border-radius: 6px; font-size: 16px; color: {btn_color}; }}
-                QToolButton:hover {{ background: {btn_hover_bg}; }}
-                QToolButton::menu-indicator {{ image: none; }}
-            """)
         if hasattr(self, "_selection_popover"):
             self._selection_popover.set_theme(theme)
         if hasattr(self, "_word_wise_popover"):
@@ -1997,12 +1700,7 @@ class ReaderView(QWidget):
     
     def _create_ai_menu(self) -> QMenu:
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu { background-color: #161920; border: 1px solid #2d333f; 
-                    border-radius: 6px; padding: 4px; color: #e5e7eb; }
-            QMenu::item { padding: 6px 24px; border-radius: 4px; }
-            QMenu::item:selected { background-color: #059669; }
-        """)
+        menu.setObjectName("readerAiMenu")
         return menu
 
     def _populate_ai_menu(self, menu: QMenu, text: str):
@@ -3099,12 +2797,8 @@ class ReaderView(QWidget):
             return
 
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu { background: #1e2227; border: 1px solid #3f3f46; color: #e4e4e7; border-radius: 4px; padding: 4px; }
-            QMenu::item { padding: 6px 24px; border-radius: 4px; }
-            QMenu::item:selected { background: #3f3f46; }
-        """)
-        
+        menu.setObjectName("readerPopupMenu")
+
         # 1. Ajuste rápido de Velocidade
         speed_menu = menu.addMenu("⚡ Velocidade da Leitura")
         current_rate = config.get("tts.book_narrator.rate", 1.0)

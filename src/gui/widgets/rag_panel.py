@@ -495,13 +495,9 @@ class RAGPanel(QWidget):
     # ── Slots públicos (chamados pelo MainWindow) ───────────────────────────────
 
     def _swap_object_name(self, widget, object_name: str) -> None:
-        """Troca o objectName do widget (estado dinâmico) e força o repolish
-        do QSS — mesmo padrão usado em ``AnkiExportDialog`` e ``OllamaWizardDialog``."""
-        if widget.objectName() == object_name:
-            return  # estado inalterado — evita repolish à toa
-        widget.setObjectName(object_name)
-        widget.style().unpolish(widget)
-        widget.style().polish(widget)
+        """Delegado ao helper compartilhado ``styles.swap_object_name``."""
+        from src.gui.styles import swap_object_name
+        swap_object_name(widget, object_name)
 
     def set_ollama_status(self, available: bool, model: str = "") -> None:
         """Atualiza o badge de status do Ollama (estado via objectName-swap)."""
