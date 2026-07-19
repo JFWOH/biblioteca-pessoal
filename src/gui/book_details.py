@@ -228,10 +228,10 @@ class BookDetails(QWidget):
             else:
                 self._cover.setText("📖")
                 # Repolish: setObjectName sozinho não reavalia o QSS de um
-                # widget já exibido (precisa de unpolish/polish explícito).
-                self._cover.setObjectName("bookDetailsCoverPlaceholder")
-                self._cover.style().unpolish(self._cover)
-                self._cover.style().polish(self._cover)
+                # widget já exibido (precisa de unpolish/polish explícito —
+                # trap coberto pelo helper compartilhado abaixo).
+                from src.gui.styles import swap_object_name
+                swap_object_name(self._cover, "bookDetailsCoverPlaceholder")
 
         # Metadados
         lines = []
