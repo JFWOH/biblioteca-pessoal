@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QProgressBar, QStackedWidget, QFrame, QWidget,
 )
 
+from src.gui.styles import emoji_icon
 from src.gui.workers.install_worker import OllamaInstallWorker
 
 
@@ -104,13 +105,15 @@ class OllamaWizardDialog(QDialog):
         layout.addStretch()
 
         # Botões
-        btn_install = QPushButton("⬇️  Instalar Ollama Automaticamente")
+        btn_install = QPushButton("Instalar Ollama Automaticamente")
+        btn_install.setIcon(emoji_icon("⬇️"))
         btn_install.setFixedHeight(44)
         btn_install.setObjectName("wizardInstallBtn")
         btn_install.clicked.connect(self._start_installation)
         layout.addWidget(btn_install)
 
-        btn_manual = QPushButton("🔗  Já tenho o Ollama / Instalar manualmente")
+        btn_manual = QPushButton("Já tenho o Ollama / Instalar manualmente")
+        btn_manual.setIcon(emoji_icon("🔗"))
         btn_manual.setFixedHeight(36)
         btn_manual.setObjectName("wizardManualBtn")
         btn_manual.clicked.connect(self._open_manual_page)
@@ -190,13 +193,15 @@ class OllamaWizardDialog(QDialog):
 
         layout.addStretch()
 
-        self._done_btn = QPushButton("✨ Abrir Assistente de Biblioteca")
+        self._done_btn = QPushButton("Abrir Assistente de Biblioteca")
+        self._done_btn.setIcon(emoji_icon("✨"))
         self._done_btn.setFixedHeight(44)
         self._done_btn.setObjectName("wizardInstallBtn")
         self._done_btn.clicked.connect(self.accept)
         layout.addWidget(self._done_btn)
 
-        self._manual_btn = QPushButton("🔗 Instruções de instalação manual")
+        self._manual_btn = QPushButton("Instruções de instalação manual")
+        self._manual_btn.setIcon(emoji_icon("🔗"))
         self._manual_btn.setFlat(True)
         self._manual_btn.setObjectName("wizardManualLinkBtn")
         self._manual_btn.hide()

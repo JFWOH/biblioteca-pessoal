@@ -9,7 +9,9 @@ reader_view.py também foi migrado na Onda 0b (2/2), mas NÃO entra no build
 sob os 3 temas (ver test_reader_view_has_no_inline_stylesheet_source): o
 módulo importa QtWebEngineWidgets, que só pode ser importado ANTES de existir
 QApplication — instanciá-lo nesta suíte quebraria (mesma razão documentada em
-test_reader_view_guards.py e test_security_epub_web.py).
+test_reader_view_guards.py e test_security_epub_web.py). Rodada A1 (ciclo
+jul/2026-C) soma stats_panel.StatCard, último widget DARK-ONLY registrado no
+contrato da Onda 5.
 
 1. Os widgets/diálogos continuam construíveis sob os 3 temas, sem exceção.
 2. Os objectNames-chave introduzidos na migração existem (contrato mínimo
@@ -50,6 +52,7 @@ from src.gui.widgets.ai_response_card import AIResponseCard
 from src.gui.widgets.proactive_footer import ProactiveFooterWidget
 from src.gui.widgets.search_overlay import DocumentSearchBar
 from src.gui.library_view import LibraryView
+from src.gui.widgets.stats_panel import StatCard
 
 
 @pytest.fixture(autouse=True)
@@ -145,6 +148,10 @@ def test_widgets_build_under_every_theme(qtbot, db, config, theme_css):
         (lambda: DocumentSearchBar(),
          lambda w: (w.set_results([{"page": 0}]), w.close_bar())),
         (lambda: LibraryView(), None),
+        # Rodada A1: stats_panel.StatCard — era DARK-ONLY (setStyleSheet
+        # inline com cor/borda fixas), migrado p/ objectName + QSS.
+        (lambda: StatCard("42", "Total de livros", "📚", "#818cf8"),
+         lambda w: w.update_value("43")),
     ]
     for factory, exercise in cases:
         widget = factory()
@@ -240,6 +247,13 @@ def test_migrated_widgets_have_no_inline_stylesheet(qtbot, db):
     assert lib._count_label.styleSheet() == ""
     assert lib._bulk_bar.styleSheet() == ""
 
+    # Rodada A1: StatCard — a moldura (QFrame) não tem mais setStyleSheet
+    # próprio; só o rótulo do valor/ícone mantém a cor inline (exceção de
+    # DADO, ver test_data_driven_colors_remain_inline_exception).
+    card = StatCard("42", "Total de livros", "📚", "#818cf8")
+    qtbot.addWidget(card)
+    assert card.styleSheet() == ""
+
 
 def test_data_driven_colors_remain_inline_exception(qtbot):
     """TagBadge e o swatch de cor: exceção documentada (cor é DADO)."""
@@ -255,6 +269,13 @@ def test_data_driven_colors_remain_inline_exception(qtbot):
                            "id": 1})
     qtbot.addWidget(item)
     assert any("#ef4444" in w.styleSheet() for w in item.findChildren(QWidget))
+
+    # Rodada A1: StatCard — o valor (e o ícone) levam a cor de destaque por
+    # card (ex.: "Lendo agora" é azul, "Favoritos" é âmbar); vem do
+    # cadastro de cards_config (stats_panel.py), não do tema.
+    card = StatCard("42", "Total de livros", "📚", "#818cf8")
+    qtbot.addWidget(card)
+    assert "#818cf8" in card._value_label.styleSheet()
 
 
 def test_key_object_names_present(qtbot, db):
@@ -325,6 +346,12 @@ def test_key_object_names_present(qtbot, db):
     qtbot.addWidget(lib)
     assert lib._count_label.objectName() == "libraryCountLabel"
     assert lib._bulk_bar.objectName() == "bulkBar"
+
+    # Rodada A1: stats_panel.StatCard.
+    stat_card = StatCard("42", "Total de livros", "📚", "#818cf8")
+    qtbot.addWidget(stat_card)
+    assert stat_card.objectName() == "statCard"
+    assert stat_card._value_label.objectName() == "statValue"
 
 
 def test_theme_propagation_still_works_after_migration(qtbot):

@@ -514,6 +514,20 @@ class LibraryView(QWidget):
             ]
         self._all_books = books
         self._is_search_result = is_search
+        # Rodada A1 (débito Onda 2, "filtro-quebrados-após-busca" — mesma
+        # classe de bug do estado vazio de busca, Tarefa 2.6): o filtro
+        # "Mostrar quebrados" opera sobre ``self._all_books`` e é aplicado
+        # via ``_refresh_grid`` diretamente (fora deste método). Sem este
+        # reset, uma nova carga aqui (busca, troca de seção/coleção,
+        # reordenação) substitui ``_all_books`` e re-renderiza a lista
+        # CHEIA, mas o botão continua marcado — a grade deixa de refletir o
+        # que o toggle diz estar filtrando. ``blockSignals`` evita disparar
+        # ``_on_broken_filter_toggled`` (que reescreveria ``_is_search_result``
+        # acima de volta p/ False mesmo quando ``is_search=True``).
+        if self._broken_btn.isChecked():
+            self._broken_btn.blockSignals(True)
+            self._broken_btn.setChecked(False)
+            self._broken_btn.blockSignals(False)
         # Atalho (ajustes pós-teste, jul/2026): se a lista enriquecida é
         # IDÊNTICA (por valor, mesma ordem) à última renderizada, não destrói
         # nem recria os cards — a reconstrução completa custa ~1 ms/card

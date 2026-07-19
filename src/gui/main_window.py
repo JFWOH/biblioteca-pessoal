@@ -1044,7 +1044,7 @@ class MainWindow(QMainWindow):
         else:
             if self._opds_worker:
                 self._opds_worker.stop()
-                self._sidebar._opds_btn.setText("📡  Iniciar Servidor OPDS")
+                self._sidebar._opds_btn.setText("Iniciar Servidor OPDS")
                 self._statusbar.showMessage("Servidor OPDS Parado", 3000)
 
     # ── RAG / IA ───────────────────────────────────────────────────────
