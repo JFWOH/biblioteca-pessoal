@@ -8,11 +8,15 @@
 3. Cada ação emite ``context_action(book_id, "<ação>")``.
 4. ``LibraryView`` repassa cada ação ao sinal correspondente (reaproveitando
    os MESMOS handlers que o MainWindow já conecta ao BookDetails).
+
+Débito da Onda 2 corrigido nesta rodada: a prateleira "Continuar lendo"
+(``_ContinueReadingCard``) não tinha menu de contexto — cobertura na seção
+final deste arquivo.
 """
 import pytest
 
 from src.gui.widgets.book_card import BookCard
-from src.gui.library_view import LibraryView
+from src.gui.library_view import LibraryView, _ContinueReadingCard
 
 
 # ── BookCard: construção e roteamento do menu ───────────────────────────────
@@ -115,6 +119,89 @@ def test_card_context_action_wired_when_loaded_via_grid(view, qtbot):
     dispará-lo deve chegar até o sinal público da LibraryView."""
     view.load_books([{"id": 3, "title": "Livro", "file_path": __file__}])
     card = view._cards[0]
+
+    with qtbot.waitSignal(view.delete_requested, timeout=1000) as blocker:
+        card.context_action.emit(3, "delete")
+    assert blocker.args == [3]
+
+
+# ── _ContinueReadingCard: menu de contexto (débito da Onda 2) ──────────────
+
+def _progress_book(**overrides):
+    book = {"id": 1, "title": "Livro", "file_path": __file__, "percentage": 40,
+            "current_page": 4, "total_pages": 10}
+    book.update(overrides)
+    return book
+
+
+def test_continue_card_menu_has_six_actions_not_favorited(qtbot):
+    card = _ContinueReadingCard(_progress_book(is_favorite=0))
+    qtbot.addWidget(card)
+
+    menu = card._build_context_menu()
+    labels = [a.text() for a in menu.actions() if not a.isSeparator()]
+    assert labels == [
+        "▶️ Continuar lendo", "ℹ️ Detalhes", "⭐ Favoritar",
+        "📁 Adicionar à coleção…", "🌐 Buscar metadados", "🗑️ Remover",
+    ]
+
+
+def test_continue_card_menu_shows_unfavorite_when_already_favorite(qtbot):
+    card = _ContinueReadingCard(_progress_book(is_favorite=1))
+    qtbot.addWidget(card)
+
+    menu = card._build_context_menu()
+    labels = [a.text() for a in menu.actions() if not a.isSeparator()]
+    assert "☆ Desfavoritar" in labels
+    assert "⭐ Favoritar" not in labels
+
+
+@pytest.mark.parametrize("action_attr,expected", [
+    ("_ctx_open", "open"),
+    ("_ctx_details", "details"),
+    ("_ctx_favorite", "favorite"),
+    ("_ctx_collection", "collection"),
+    ("_ctx_metadata", "fetch_metadata"),
+    ("_ctx_delete", "delete"),
+])
+def test_continue_card_each_menu_item_emits_expected_action(qtbot, action_attr, expected):
+    card = _ContinueReadingCard(_progress_book(id=7))
+    qtbot.addWidget(card)
+    card._build_context_menu()
+
+    with qtbot.waitSignal(card.context_action, timeout=1000) as blocker:
+        card._handle_context_action(getattr(card, action_attr))
+    assert blocker.args == [7, expected]
+
+
+def test_continue_card_no_action_chosen_emits_nothing(qtbot):
+    card = _ContinueReadingCard(_progress_book())
+    qtbot.addWidget(card)
+    card._build_context_menu()
+
+    received = []
+    card.context_action.connect(lambda bid, action: received.append((bid, action)))
+    card._handle_context_action(None)
+    assert received == []
+
+
+def test_continue_card_open_action_routes_to_book_open(view, qtbot):
+    with qtbot.waitSignal(view.book_open, timeout=1000) as blocker:
+        view._on_card_context_action(5, "open")
+    assert blocker.args == [5]
+
+
+def test_continue_card_details_action_routes_to_book_selected(view, qtbot):
+    with qtbot.waitSignal(view.book_selected, timeout=1000) as blocker:
+        view._on_card_context_action(5, "details")
+    assert blocker.args == [5]
+
+
+def test_continue_card_context_action_wired_when_loaded_via_shelf(view, qtbot):
+    """Card criado por load_continue_reading já vem com context_action
+    conectado — dispará-lo deve chegar até o sinal público da LibraryView."""
+    view.load_continue_reading([_progress_book(id=3)])
+    card = view._continue_cards[0]
 
     with qtbot.waitSignal(view.delete_requested, timeout=1000) as blocker:
         card.context_action.emit(3, "delete")

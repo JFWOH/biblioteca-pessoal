@@ -3,6 +3,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QLabel, QGridLayout,
     QHBoxLayout, QPushButton, QFrame, QProgressBar, QComboBox, QSizePolicy,
+    QMenu,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QCursor
@@ -32,9 +33,16 @@ class _ContinueReadingCard(QWidget):
 
     clicked = pyqtSignal(int)          # book_id — clique simples seleciona
     double_clicked = pyqtSignal(int)   # book_id — duplo clique abre o leitor
+    # book_id, ação escolhida no menu de contexto (débito da Onda 2 — a
+    # prateleira não tinha menu de botão direito): mesmo vocabulário do
+    # BookCard.context_action ("open"/"favorite"/"collection"/
+    # "fetch_metadata"/"delete"), acrescido de "details" (mostrar o painel
+    # de detalhes — o que o clique simples já faz, mas sem exigir o clique).
+    context_action = pyqtSignal(int, str)
 
     def __init__(self, book: dict, parent=None):
         super().__init__(parent)
+        self._book = book
         self._book_id = book.get("id", 0)
         self.setObjectName("continueCard")
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -104,6 +112,49 @@ class _ContinueReadingCard(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self.double_clicked.emit(self._book_id)
         super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event):
+        """Botão direito: espelha o menu do ``BookCard`` normal (débito da
+        Onda 2 — a prateleira não tinha menu de contexto), adaptado ao
+        contexto de "livro em andamento" ("Abrir" vira "Continuar lendo";
+        ganha "Detalhes", já que aqui o clique simples SELECIONA em vez de
+        abrir o painel isoladamente)."""
+        menu = self._build_context_menu()
+        chosen = menu.exec(self.mapToGlobal(event.pos()))
+        self._handle_context_action(chosen)
+
+    def _build_context_menu(self) -> QMenu:
+        """Monta o QMenu de contexto. Separado de ``contextMenuEvent`` (como
+        em ``BookCard``) para ser testável sem chamar ``exec()``."""
+        menu = QMenu(self)
+        menu.setObjectName("continueCardContextMenu")
+
+        self._ctx_open = menu.addAction("▶️ Continuar lendo")
+        self._ctx_details = menu.addAction("ℹ️ Detalhes")
+        fav_label = "☆ Desfavoritar" if self._book.get("is_favorite") else "⭐ Favoritar"
+        self._ctx_favorite = menu.addAction(fav_label)
+        self._ctx_collection = menu.addAction("📁 Adicionar à coleção…")
+        self._ctx_metadata = menu.addAction("🌐 Buscar metadados")
+        menu.addSeparator()
+        self._ctx_delete = menu.addAction("🗑️ Remover")
+        return menu
+
+    def _handle_context_action(self, chosen) -> None:
+        """Traduz a QAction escolhida (ou None) no sinal
+        ``context_action(book_id, action)``."""
+        if chosen is None:
+            return
+        mapping = {
+            self._ctx_open: "open",
+            self._ctx_details: "details",
+            self._ctx_favorite: "favorite",
+            self._ctx_collection: "collection",
+            self._ctx_metadata: "fetch_metadata",
+            self._ctx_delete: "delete",
+        }
+        action = mapping.get(chosen)
+        if action:
+            self.context_action.emit(self._book_id, action)
 
 
 class LibraryView(QWidget):
@@ -483,6 +534,7 @@ class LibraryView(QWidget):
             card = _ContinueReadingCard(book)
             card.clicked.connect(self.book_selected.emit)
             card.double_clicked.connect(self.book_open.emit)
+            card.context_action.connect(self._on_card_context_action)
             self._continue_cards.append(card)
             self._continue_layout.addWidget(card)
         self._continue_widget.show()
@@ -582,12 +634,17 @@ class LibraryView(QWidget):
             self.book_selected.emit(book_id)
 
     def _on_card_context_action(self, book_id: int, action: str) -> None:
-        """Repassa a ação do menu de contexto do card (Tarefa 2.5) ao sinal
+        """Repassa a ação do menu de contexto do card (Tarefa 2.5; reutilizado
+        também pela prateleira "Continuar lendo" — débito da Onda 2) ao sinal
         correspondente. O MainWindow conecta esses sinais diretamente aos
         handlers que já existem para o BookDetails — nenhuma lógica de
-        negócio nova aqui, só o roteamento."""
+        negócio nova aqui, só o roteamento. "details" (só emitido pelo card
+        da prateleira) reaproveita o MESMO sinal ``book_selected`` do clique
+        simples num ``BookCard``."""
         if action == "open":
             self.book_open.emit(book_id)
+        elif action == "details":
+            self.book_selected.emit(book_id)
         elif action == "favorite":
             self.favorite_toggle_requested.emit(book_id)
         elif action == "collection":
