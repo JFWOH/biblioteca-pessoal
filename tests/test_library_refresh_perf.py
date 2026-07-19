@@ -12,12 +12,19 @@ in-place (``BookCard.update_book`` por posição, criando/removendo só o delta
 de tamanho) em vez de destruir/recriar todos — os testes de "lista mudou"
 agora afirmam a reciclagem (mesmo objeto, conteúdo novo).
 
+Rodada A4 (perf/gui): a reciclagem passou a CASAR os cards por ``book_id``
+antes de reposicionar — em REORDENAÇÃO/filtro o card do MESMO livro é
+reutilizado (curto-circuita ``update_book``, a CAPA não recarrega do disco);
+só os livros novos pegam cards órfãos/novos. Os testes de resort afirmam a
+identidade por id e a AUSÊNCIA de reconstrução de conteúdo.
+
 Estes testes são FUNCIONAIS (identidade de objetos, estados visuais) — nunca
 de tempo: medição de tempo fica fora da suíte, no script de profiling.
 """
 import pytest
 
 from src.gui.library_view import LibraryView
+from src.gui.widgets.book_card import BookCard
 
 
 @pytest.fixture
@@ -201,3 +208,91 @@ def test_broken_filter_roundtrip_unaffected_by_fast_path(view):
     before = list(view._cards)
     view.load_books([dict(b) for b in books])
     assert view._cards == before
+
+
+# ── Rodada A4: casamento por book_id (capas sobrevivem ao resort) ───────────
+
+def test_resort_preserves_card_identity_by_id(view):
+    """Reordenar os MESMOS livros reutiliza o card de cada livro (mesmo objeto),
+    apenas reposicionado — não recria/reconfigura por posição."""
+    books = [_book(1), _book(2), _book(3)]
+    view.load_books(books)
+    by_id = {c._book_id: c for c in view._cards}
+
+    view.load_books([dict(b) for b in reversed(books)])  # ordem 3, 2, 1
+
+    assert [c._book_id for c in view._cards] == [3, 2, 1]
+    assert view._cards[0] is by_id[3]
+    assert view._cards[1] is by_id[2]
+    assert view._cards[2] is by_id[1]
+
+
+def test_resort_does_not_rebuild_card_contents(view, monkeypatch):
+    """Capa (e todo o conteúdo do card) NÃO é reconstruída no resort: o card do
+    mesmo id curto-circuita em ``update_book`` ANTES de ``_build_contents`` — a
+    carga/escala do QPixmap (parte mais cara do card) é evitada."""
+    books = [_book(1), _book(2), _book(3)]
+    view.load_books(books)
+
+    calls = {"n": 0}
+    original = BookCard._build_contents
+
+    def counting(self):
+        calls["n"] += 1
+        return original(self)
+
+    # Só conta reconstruções DEPOIS da carga inicial (o __init__ já construiu).
+    monkeypatch.setattr(BookCard, "_build_contents", counting)
+
+    view.load_books([dict(b) for b in reversed(books)])  # resort puro
+
+    assert calls["n"] == 0, "resort não deve reconstruir o conteúdo dos cards"
+
+
+def test_orphan_card_reused_for_new_book_preserving_matched(view):
+    """Livro sem card correspondente pega um card ÓRFÃO (o do livro que saiu),
+    enquanto os cards dos livros que permaneceram são preservados por id."""
+    view.load_books([_book(1), _book(2), _book(3)])
+    by_id = {c._book_id: c for c in view._cards}
+    orphan = by_id[2]  # o livro 2 sai da lista; seu card fica órfão
+
+    view.load_books([_book(1), _book(4), _book(3)])  # 4 é novo, no lugar de 2
+
+    assert view._cards[0] is by_id[1]      # casado por id
+    assert view._cards[2] is by_id[3]      # casado por id
+    assert view._cards[1] is orphan        # órfão reaproveitado (não recriado)
+    assert view._cards[1]._book_id == 4    # agora renderiza o livro novo
+    assert len(view._cards) == 3
+
+
+def test_resort_clears_selection_via_load_books(view):
+    """``load_books`` limpa a seleção antes de reordenar (troca o conjunto do
+    ponto de vista da view) — nenhum card fica selecionado após o resort."""
+    books = [_book(1), _book(2), _book(3)]
+    view.load_books(books)
+    view._toggle_selection(2)
+    assert not view._bulk_bar.isHidden()
+
+    view.load_books([dict(b) for b in reversed(books)])
+
+    assert view._selected_ids == set()
+    assert all(not c.is_selected for c in view._cards)
+    assert view._bulk_bar.isHidden()
+
+
+def test_reflow_preserves_visual_selection_of_reused_card(view):
+    """Reflow (resize) NÃO limpa ``_selected_ids``; o card do MESMO id continua
+    legitimamente selecionado — o visual, zerado por ``update_book``, é
+    re-sincronizado por ``_refresh_grid``."""
+    view.load_books([_book(1), _book(2)])
+    view._toggle_selection(1)
+    assert view._card_by_id(1).is_selected
+
+    # Simula o reflow do resizeEvent com mudança de colunas (força o re-grid),
+    # sem limpar _selected_ids — mesmos livros, mesma ordem.
+    view._grid_cols = 999
+    view._refresh_grid([c.book_data for c in view._cards])
+
+    assert view._selected_ids == {1}
+    assert view._card_by_id(1).is_selected
+    assert not view._card_by_id(2).is_selected

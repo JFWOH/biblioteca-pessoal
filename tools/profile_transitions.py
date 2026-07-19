@@ -143,6 +143,12 @@ def measure_grid_pair(app: QApplication, books: list[dict], loads: int) -> dict:
       - ``same``: recarrega o MESMO estado (dados idênticos) — o caminho de
         "voltar à biblioteca sem nada ter mudado". Após a correção do atalho
         em ``load_books``, este caminho não reconstrói os cards.
+      - ``resort`` (rodada A4): MESMOS livros, ORDEM alternada (invertida) a
+        cada carga, progress_map CONSTANTE — reordenação/filtro. Com o
+        casamento por ``book_id`` (A4) o card do mesmo livro é reutilizado e as
+        capas NÃO recarregam do disco; antes (reciclagem por POSIÇÃO, PR #43) a
+        reordenação trocava o livro de cada posição e recarregava todas as
+        capas (~custo do rebuild).
     """
     qss = get_theme("dark")
     app.setStyleSheet(qss)
@@ -160,7 +166,10 @@ def measure_grid_pair(app: QApplication, books: list[dict], loads: int) -> dict:
     view_b.load_books(books, progress_map=progress_1)
     _flush(app)
 
-    samples = {"a_rebuild": [], "b_rebuild": [], "a_same": [], "b_same": []}
+    samples = {
+        "a_rebuild": [], "b_rebuild": [], "a_same": [], "b_same": [],
+        "a_resort": [], "b_resort": [],
+    }
     for i in range(loads):
         pm = progress_2 if i % 2 == 0 else progress_1  # alterna → rebuild
 
@@ -173,6 +182,22 @@ def measure_grid_pair(app: QApplication, books: list[dict], loads: int) -> dict:
         for key, view in (("a_same", view_a), ("b_same", view_b)):
             t0 = perf_counter()
             view.load_books(books, progress_map=pm)  # mesmo estado → atalho
+            _flush(app)
+            samples[key].append((perf_counter() - t0) * 1000.0)
+
+    # ── Cenário RESORT (rodada A4) ──────────────────────────────────────────
+    # Mesmos livros, ORDEM alternada (invertida) a cada recarga, progress_map
+    # CONSTANTE. Re-baseline na ordem direta antes de cronometrar para isolar
+    # o custo da reordenação pura (mesmos dados, só a ordem muda).
+    books_rev = list(reversed(books))
+    view_a.load_books(books, progress_map=progress_1)
+    view_b.load_books(books, progress_map=progress_1)
+    _flush(app)
+    for i in range(loads):
+        ordered = books_rev if i % 2 == 0 else books  # alterna a ordem
+        for key, view in (("a_resort", view_a), ("b_resort", view_b)):
+            t0 = perf_counter()
+            view.load_books(ordered, progress_map=progress_1)
             _flush(app)
             samples[key].append((perf_counter() - t0) * 1000.0)
 
@@ -271,6 +296,9 @@ def main() -> None:
         print("  recarga idêntica (voltar à biblioteca sem mudança de dados):")
         print(f"    (A) só folha da QApplication : {_fmt(r['a_same'])}")
         print(f"    (B) folha app + janela-mãe   : {_fmt(r['b_same'])}")
+        print("  resort (mesmos livros, ordem invertida — reordenação/filtro):")
+        print(f"    (A) só folha da QApplication : {_fmt(r['a_resort'])}")
+        print(f"    (B) folha app + janela-mãe   : {_fmt(r['b_resort'])}")
 
     print("\n[CONSULTAS] por transição (mediana ms, DB sintético)")
     q = measure_queries(n_books)
