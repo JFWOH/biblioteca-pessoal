@@ -31,6 +31,25 @@ def clamp_session_seconds(elapsed: float, cap: int = MAX_SESSION_SECONDS_PER_PAG
     return int(min(value, cap))
 
 
+def total_elapsed_seconds(accumulated: float, started_at: float | None,
+                          now: float) -> float:
+    """Soma o tempo já acumulado (de pausas anteriores, ex.: janela
+    minimizada) com o trecho em curso, se houver cronômetro rodando.
+
+    Pura — recebe ``now`` já capturado pelo chamador (``time.monotonic()``
+    mora na GUI, nunca no core; ADR-006). Usada tanto para PAUSAR (o trecho
+    em curso é congelado no acumulado, sem aplicar teto ainda) quanto para
+    CONSUMIR o total ao trocar de página/fechar o livro (o teto anti-idle é
+    responsabilidade de ``clamp_session_seconds`` no ponto de consumo final
+    — aplicá-lo aqui, por trecho, permitiria burlar o cap de
+    ``MAX_SESSION_SECONDS_PER_PAGE`` pausando e retomando repetidamente).
+    ``started_at`` no futuro (relógio nunca deveria regredir, mas por
+    segurança) não gera trecho negativo.
+    """
+    running = max(0.0, now - started_at) if started_at is not None else 0.0
+    return accumulated + running
+
+
 def compute_reading_streak(read_dates, today: str | None = None) -> int:
     """Dias consecutivos com leitura registrada, terminando hoje OU ontem.
 

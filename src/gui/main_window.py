@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QSplitter, QFileDialog, QMessageBox,
     QStatusBar, QApplication,
 )
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, QEvent
 from PyQt6.QtGui import QAction, QKeySequence
 
 from src.core.database import LibraryDB
@@ -1830,6 +1830,20 @@ class MainWindow(QMainWindow):
         self._load_library()
 
     # ── Lifecycle ──────────────────────────────────────────────────────
+
+    def changeEvent(self, event):
+        # Limitação 5.2 corrigida: pausa o cronômetro de leitura do
+        # ReaderView quando a janela minimiza, retoma ao restaurar.
+        # WindowStateChange dispara também em maximizar/restaurar sem
+        # minimizar — _pause_reading_timer/_resume_reading_timer (GUI, sem
+        # tocar o core — ADR-006) são idempotentes/no-op fora do caso real,
+        # então chamá-los sempre que o bit Minimized muda de estado é seguro.
+        if event.type() == QEvent.Type.WindowStateChange:
+            if self.windowState() & Qt.WindowState.WindowMinimized:
+                self._reader_view._pause_reading_timer()
+            else:
+                self._reader_view._resume_reading_timer()
+        super().changeEvent(event)
 
     def closeEvent(self, event):
         # Para o serviço do grafo (cancel cooperativo)

@@ -33,7 +33,7 @@ from src.gui.widgets.reader_dock import ReaderDock
 from src.gui.widgets.proactive_insights_panel import ProactiveInsightsPanel
 from src.gui.proactive_reader_service import ProactiveReaderService
 from src.core.proactive_observation import confidence_to_float, obs_dict_from_row
-from src.core.reading_stats import clamp_session_seconds
+from src.core.reading_stats import clamp_session_seconds, total_elapsed_seconds
 from src.core.graph.graph_store import GraphStore
 from PyQt6.QtWidgets import QComboBox
 
@@ -128,6 +128,14 @@ class ReaderView(QWidget):
         # e o último (page, total) emitido, para o flush no fechamento.
         self._page_started_at: float | None = None
         self._last_progress: tuple[int, int] | None = None
+        # Pausa por minimizar/perder visibilidade (limitação 5.2 corrigida
+        # nesta rodada): trecho em curso é congelado aqui quando a janela
+        # minimiza, em vez de continuar contando ocioso. _timer_paused_for_visibility
+        # distingue "pausado pela janela" de "nenhum cronômetro rodando"
+        # (livro fechado/timer já consumido) — só o primeiro caso deve
+        # reiniciar o cronômetro ao restaurar (ver _resume_reading_timer).
+        self._accumulated_page_seconds: float = 0.0
+        self._timer_paused_for_visibility: bool = False
         self._footer_obs_id = None
         self._proactive_service = ProactiveReaderService(parent=self)
         self._proactive_service.observation_ready.connect(self._on_proactive_observation)
@@ -1059,7 +1067,7 @@ class ReaderView(QWidget):
         # descarrega e reinicia — sem contagem dupla, o timestamp é resetado
         # a cada descarga.
         seconds = self._take_elapsed_reading_seconds()
-        self._page_started_at = time.monotonic()
+        self._start_reading_timer()
         self._last_progress = (page, total)
         self.progress_changed.emit(self._book_id, page, total, seconds)
         self._update_bookmark_button(page)
@@ -1094,18 +1102,58 @@ class ReaderView(QWidget):
     # página; na troca/fechamento o decorrido é normalizado pelo teto
     # anti-idle (clamp_session_seconds, 300s/página) e emitido no
     # progress_changed para o main_window persistir em reading_sessions.
-    # Limitação registrada: janela minimizada/app em background NÃO pausa o
-    # cronômetro nesta rodada — o teto de 300s/página limita a distorção.
+    # Limitação 5.2 CORRIGIDA nesta rodada: janela minimizada/sem foco agora
+    # pausa o cronômetro (_pause_reading_timer/_resume_reading_timer, wiring
+    # em MainWindow.changeEvent) — o trecho em curso é congelado num
+    # acumulado puro (total_elapsed_seconds, core/reading_stats.py) em vez de
+    # continuar contando enquanto o app fica oculto. O teto de 300s/página
+    # segue como rede de segurança adicional (idle sem minimizar, ex.: app em
+    # foco mas usuário ausente).
+
+    def _start_reading_timer(self) -> None:
+        """Inicia o cronômetro da página atual — a menos que a janela esteja
+        minimizada/sem visibilidade (``_timer_paused_for_visibility``), caso
+        em que o início fica pendente até ``_resume_reading_timer``."""
+        if self._timer_paused_for_visibility:
+            return
+        self._page_started_at = time.monotonic()
+
+    def _pause_reading_timer(self) -> None:
+        """Suspende o cronômetro ao minimizar/perder visibilidade: congela o
+        trecho em curso no acumulado (``total_elapsed_seconds``, puro) em vez
+        de descartá-lo ou deixá-lo correr ocioso. Idempotente — chamar duas
+        vezes seguidas (dois eventos de minimizar sem restaurar entre eles)
+        não conta o trecho duas vezes, pois ``_page_started_at`` já foi
+        zerado na primeira chamada."""
+        if self._page_started_at is None:
+            return
+        self._accumulated_page_seconds = total_elapsed_seconds(
+            self._accumulated_page_seconds, self._page_started_at, time.monotonic())
+        self._page_started_at = None
+        self._timer_paused_for_visibility = True
+
+    def _resume_reading_timer(self) -> None:
+        """Retoma o cronômetro ao restaurar a janela — só reinicia o
+        timestamp se a pausa em curso foi causada por
+        ``_pause_reading_timer`` (evita reativar um cronômetro que estava
+        parado por outro motivo, ex.: nenhum livro aberto)."""
+        if not self._timer_paused_for_visibility:
+            return
+        self._timer_paused_for_visibility = False
+        self._page_started_at = time.monotonic()
 
     def _take_elapsed_reading_seconds(self) -> int:
-        """Consome o cronômetro da página atual: devolve os segundos
-        decorridos (com teto anti-idle) e zera o timestamp. 0 se não havia
-        cronômetro correndo (primeira página após abrir o livro)."""
-        if self._page_started_at is None:
-            return 0
-        elapsed = time.monotonic() - self._page_started_at
+        """Consome o cronômetro da página atual (acumulado de pausas + trecho
+        em curso, se houver): devolve os segundos decorridos (com teto
+        anti-idle) e zera o estado. 0 se não havia nada a consumir (primeira
+        página após abrir o livro)."""
+        total = total_elapsed_seconds(
+            self._accumulated_page_seconds, self._page_started_at, time.monotonic())
+        self._accumulated_page_seconds = 0.0
         self._page_started_at = None
-        return clamp_session_seconds(elapsed)
+        if total <= 0:
+            return 0
+        return clamp_session_seconds(total)
 
     def _flush_reading_time(self) -> None:
         """Descarrega o tempo pendente da página atual (fechar livro ou
