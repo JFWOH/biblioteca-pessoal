@@ -53,11 +53,15 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   (b) tema aplicado na `QApplication` → diálogos herdam; (c) seleção do book_card via
   `setProperty("selected")+repolish` em vez de setStyleSheet; (d) 113 estilos inline
   migrados p/ os 3 temas, 5 exceções data-driven mantidas (TagBadge/swatch de cor).
-  **Débito Onda 0b:** `rag_panel.py` (48), `reader_view.py` (40),
-  `annotation_panel.py` (34), `search_overlay.py` (14), `proactive_footer.py` (14),
-  `library_view.py` (12), `sidebar.py` (6) seguem com estilos inline. Débito menor:
-  botão de livro-relacionado (`book_details.refresh_graph_section`) e QActions de
-  menus mantêm emoji no texto (menus não sofrem o bug). Testes novos:
+  **Débito Onda 0b — PAGO (ciclo jul/2026-B, PRs #42 e #44, 2026-07-19):**
+  180 `setStyleSheet` inline migrados p/ o QSS central nos 3 temas
+  (rag_panel/annotation_panel no #42; reader_view/search_overlay/
+  proactive_footer/library_view/sidebar/ai_response_card no #44); restam 2
+  exceções data-driven documentadas (annotation_panel). Lições registradas
+  no QSS: WA_StyledBackground p/ subclasse de QWidget; regra por id não
+  cascateia (viewports transparentes); submenus não herdam objectName.
+  Débito menor: botão de livro-relacionado e QActions de menus mantêm
+  emoji no texto (menus não sofrem o bug — segue como está). Testes novos:
   test_emoji_buttons, test_theme_propagation, test_styles_migration.
 
 ### Onda 1 — [P1] Leitor
@@ -88,7 +92,8 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   setEnabled + Configurar vozes); `_audio_stop_btn`/`_tts_settings_btn` removidos
   (grep: sem referências externas). Testes novos: test_bookmarks (10),
   test_reader_typography (11), test_reader_navigation/side_panel/audio_menu (26).
-  Débito menor: entrada redundante "⚙️ Voz/Narração" no menu de overflow mantida.
+  Débito menor: entrada redundante "⚙️ Voz/Narração" no menu de overflow —
+  **PAGO (removida no PR #45, 2026-07-19)**.
 
 ### Onda 2 — [P1] Biblioteca
 - [x] **2.1** Overlay de % de progresso nos cards (`book_card.py`; dados de
@@ -117,9 +122,12 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   handlers existentes do MainWindow (zero duplicação); (f) busca vazia mostra
   estado 🔍 próprio (idem filtro "quebrados" — mesma classe de bug). Testes novos:
   63 (continue_reading/drag_drop 23; card_progress/library_sort/context_menu/
-  search_empty 40). Débitos menores: combo de sort visível mas sem efeito em
-  favoritos/status/coleção; edge case filtro-quebrados-após-busca documentado;
-  prateleira sem menu de contexto.
+  search_empty 40). Débitos menores: combo de sort sem efeito em
+  favoritos/status/coleção — **PAGO (PR #45: sort_by/sort_order opcionais
+  com whitelist única `_resolve_sort`; opção nova "Última atividade"/
+  date_modified preserva a recência legada das visões de status)**;
+  prateleira sem menu de contexto — **PAGO (PR #45)**; edge case
+  filtro-quebrados-após-busca segue documentado (não pago).
 
 ### Onda 3 — Leitura + IA
 - [x] **3.1** **Fontes clicáveis no RAG**: parsear `[Título, p. X]` nas respostas
@@ -144,7 +152,9 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   (3.1) parser puro `source_citations.py` (regex tolerante p/pp/pág/página; fuzzy
   título→id exato→palavra-inteira→difflib≥0.82); só a LISTA de fontes é clicável —
   linkificar o corpo exigiria trocar QTextEdit streaming por QTextBrowser (débito
-  registrado); página do sinal `source_clicked` é 0-based. (3.2) X-Ray = 3ª aba do
+  registrado — **PAGO no PR #41, 2026-07-19: QTextBrowser + âncoras
+  auto-contidas citation:{book_id}:{page0} pós-stream via Citation.start/end,
+  recoloridas na troca de tema**); página do sinal `source_clicked` é 0-based. (3.2) X-Ray = 3ª aba do
   painel lateral; conceitos do livro cacheados 1x, interseção por página eager
   (string matching, `core/xray.py` puro), "onde mais aparece" lazy ao expandir.
   (3.3) `build_study_prompt(concepts=)` retrocompatível; "🃏 Dos destaques" no
@@ -187,7 +197,9 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   no main_window). Bônus: corrigido emoji-no-texto do botão "Excluir Selecionados"
   (library_view:289). DÉBITO NOVO identificado: emoji-em-texto remanescente em
   botões de collection_dialog/import_dialog/flashcards_dialog/widgets diversos
-  (fora do escopo 0.1, que cobria book_details+toolbar do leitor). Testes: +18
+  (fora do escopo 0.1) — **PAGO em gui/widgets/* + os 3 diálogos + library_view
+  (PR #45, 2026-07-19); RESTAM sidebar.py, settings_dialog.py e
+  ollama_wizard.py (mesma classe de bug; follow-up mecânico)**. Testes: +18
   (1083→1100 com ajustes).
 
 ### Onda 5 — Busca e engajamento
@@ -217,8 +229,11 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   ampliado p/ (book_id, page, total, seconds) [única conexão no projeto],
   cronômetro monotonic por página com cap anti-idle 300s/pág
   (`clamp_session_seconds` puro), flush em fechar/trocar livro; narração
-  contínua conta como leitura. LIMITAÇÕES: janela minimizada não pausa (cap
-  limita distorção); StatCard antigo segue dark-only (pré-existente).
+  contínua conta como leitura. LIMITAÇÕES: janela minimizada não pausa —
+  **CORRIGIDA (PR #45, 2026-07-19: pausa ao minimizar via changeEvent na GUI +
+  `total_elapsed_seconds` puro no core; narração ativa NÃO pausa — modo
+  audiobook conta; perda de foco sem minimizar segue contando, cap limita)**;
+  StatCard antigo segue dark-only (pré-existente).
   Testes: 1100→1201 na onda.
 
 ### Onda 6 — OPCIONAL (novidades §4 — exige GO explícito do usuário antes de iniciar)
