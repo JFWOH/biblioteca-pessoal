@@ -127,7 +127,9 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   com whitelist única `_resolve_sort`; opção nova "Última atividade"/
   date_modified preserva a recência legada das visões de status)**;
   prateleira sem menu de contexto — **PAGO (PR #45)**; edge case
-  filtro-quebrados-após-busca segue documentado (não pago).
+  filtro-quebrados-após-busca — **PAGO (PR #47, 2026-07-20: load_books
+  desmarca o filtro quando dados novos chegam — cobre a classe inteira,
+  não só o caso pós-busca)**.
 
 ### Onda 3 — Leitura + IA
 - [x] **3.1** **Fontes clicáveis no RAG**: parsear `[Título, p. X]` nas respostas
@@ -198,9 +200,9 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   (library_view:289). DÉBITO NOVO identificado: emoji-em-texto remanescente em
   botões de collection_dialog/import_dialog/flashcards_dialog/widgets diversos
   (fora do escopo 0.1) — **PAGO em gui/widgets/* + os 3 diálogos + library_view
-  (PR #45, 2026-07-19); RESTAM sidebar.py, settings_dialog.py e
-  ollama_wizard.py (mesma classe de bug; follow-up mecânico)**. Testes: +18
-  (1083→1100 com ajustes).
+  (PR #45, 2026-07-19); restante (sidebar/settings_dialog/ollama_wizard +
+  varredura regex global) PAGO no PR #47, 2026-07-20 — débito ZERADO em
+  botões**. Testes: +18 (1083→1100 com ajustes).
 
 ### Onda 5 — Busca e engajamento
 - [x] **5.1** Busca full-text no CONTEÚDO: FTS5 do corpo/OCR (tabela nova alimentada
@@ -233,7 +235,8 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   **CORRIGIDA (PR #45, 2026-07-19: pausa ao minimizar via changeEvent na GUI +
   `total_elapsed_seconds` puro no core; narração ativa NÃO pausa — modo
   audiobook conta; perda de foco sem minimizar segue contando, cap limita)**;
-  StatCard antigo segue dark-only (pré-existente).
+  StatCard antigo dark-only — **CORRIGIDO (PR #47, 2026-07-20: objectName +
+  QSS nos 3 temas, cor por card segue exceção de dado)**.
   Testes: 1100→1201 na onda.
 
 ### Onda 6 — OPCIONAL (novidades §4 — exige GO explícito do usuário antes de iniciar)
