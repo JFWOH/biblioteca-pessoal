@@ -5986,8 +5986,8 @@ def swap_object_name(widget, object_name: str) -> None:
     """Troca o objectName do *widget* (estado dinâmico) e força o repolish
     do QSS. No-op se o estado não mudou (evita repolish à toa — lição da
     auditoria do PR #42). Substitui as cópias hand-rolled do padrão
-    (RAGPanel/AIResponseCard delegam aqui; AnkiExportDialog/OllamaWizard/
-    book_details seguem com cópias locais antigas — débito registrado)."""
+    (RAGPanel/AIResponseCard/AnkiExportDialog/OllamaWizard/book_details
+    delegam aqui — consolidação da rodada A2 do ciclo jul/2026-C)."""
     if widget.objectName() == object_name:
         return
     widget.setObjectName(object_name)

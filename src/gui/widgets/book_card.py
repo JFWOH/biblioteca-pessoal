@@ -12,6 +12,56 @@ from PyQt6.QtGui import QPixmap, QColor, QFont, QCursor
 from src.utils.constants import COVER_WIDTH, COVER_HEIGHT
 
 
+# ── Menu de contexto compartilhado (BookCard ↔ prateleira "Continuar lendo") ──
+#
+# BookCard e o card compacto da prateleira (``_ContinueReadingCard``, em
+# library_view.py) tinham cada um seu próprio builder+mapping do menu de
+# contexto — ~35 linhas quase idênticas, com drift real apontado na auditoria
+# do PR #45. build_card_context_menu() centraliza rótulos/ordem/mapeamento;
+# cada chamador decide o objectName do QMenu (QSS diferente por card) e onde
+# guardar o mapping (os atributos ``_ctx_*`` que ``_handle_context_action``
+# já usava, preservados via CTX_ACTION_ATTRS).
+CTX_ACTION_ATTRS = {
+    "open": "_ctx_open",
+    "details": "_ctx_details",
+    "favorite": "_ctx_favorite",
+    "collection": "_ctx_collection",
+    "fetch_metadata": "_ctx_metadata",
+    "delete": "_ctx_delete",
+}
+
+
+def build_card_context_menu(parent, book: dict, extra_prefix=()) -> tuple:
+    """Monta o QMenu de contexto compartilhado por BookCard e pelo card
+    compacto da prateleira "Continuar lendo".
+
+    ``extra_prefix``: sequência ordenada de pares ``(rótulo, ação)`` que
+    substitui o item padrão "📂 Abrir"→"open" (a prateleira usa "▶️ Continuar
+    lendo"→"open" + "ℹ️ Detalhes"→"details" no lugar dele). Vazio (padrão)
+    mantém só "Abrir". O restante da spec (Favoritar/Desfavoritar dinâmico,
+    Coleção, Metadados, separador, Remover) é fixo — idêntico nos dois cards.
+
+    Devolve ``(menu, mapping)``: ``mapping`` é ``dict[QAction, str]`` — a
+    ação de string de cada QAction, na mesma nomenclatura emitida por
+    ``context_action`` (open/details/favorite/collection/fetch_metadata/delete).
+    """
+    menu = QMenu(parent)
+    mapping = {}
+
+    open_items = tuple(extra_prefix) or (("📂 Abrir", "open"),)
+    for label, action_name in open_items:
+        mapping[menu.addAction(label)] = action_name
+
+    fav_label = "☆ Desfavoritar" if book.get("is_favorite") else "⭐ Favoritar"
+    mapping[menu.addAction(fav_label)] = "favorite"
+    mapping[menu.addAction("📁 Adicionar à coleção…")] = "collection"
+    mapping[menu.addAction("🌐 Buscar metadados")] = "fetch_metadata"
+    menu.addSeparator()
+    mapping[menu.addAction("🗑️ Remover")] = "delete"
+
+    return menu, mapping
+
+
 class BookCard(QWidget):
     """Card visual para exibir um livro na biblioteca.
 
@@ -280,17 +330,12 @@ class BookCard(QWidget):
     def _build_context_menu(self) -> QMenu:
         """Monta o QMenu de contexto. Separado de ``contextMenuEvent`` para
         ser testável sem precisar chamar ``exec()`` (que bloqueia esperando
-        interação do usuário)."""
-        menu = QMenu(self)
+        interação do usuário). Spec compartilhada com a prateleira "Continuar
+        lendo" via ``build_card_context_menu`` (consolidação A2, jul/2026-C)."""
+        menu, mapping = build_card_context_menu(self, self._book)
         menu.setObjectName("bookCardContextMenu")
-
-        self._ctx_open = menu.addAction("📂 Abrir")
-        fav_label = "☆ Desfavoritar" if self._book.get("is_favorite") else "⭐ Favoritar"
-        self._ctx_favorite = menu.addAction(fav_label)
-        self._ctx_collection = menu.addAction("📁 Adicionar à coleção…")
-        self._ctx_metadata = menu.addAction("🌐 Buscar metadados")
-        menu.addSeparator()
-        self._ctx_delete = menu.addAction("🗑️ Remover")
+        for action, name in mapping.items():
+            setattr(self, CTX_ACTION_ATTRS[name], action)
         return menu
 
     def _handle_context_action(self, chosen) -> None:

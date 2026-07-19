@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QCursor
 
-from src.gui.widgets.book_card import BookCard
+from src.gui.widgets.book_card import BookCard, CTX_ACTION_ATTRS, build_card_context_menu
 from src.gui.styles import emoji_icon
 from src.utils.constants import CARD_WIDTH, GRID_SPACING
 
@@ -131,19 +131,17 @@ class _ContinueReadingCard(QWidget):
             pass
 
     def _build_context_menu(self) -> QMenu:
-        """Monta o QMenu de contexto. Separado de ``contextMenuEvent`` (como
-        em ``BookCard``) para ser testável sem chamar ``exec()``."""
-        menu = QMenu(self)
+        """Monta o QMenu de contexto (como em ``BookCard``) para ser testável
+        sem chamar ``exec()``. Spec compartilhada com ``BookCard`` via
+        ``build_card_context_menu`` (consolidação A2, jul/2026-C) — só o item
+        de abertura muda: "Continuar lendo"+"Detalhes" no lugar de "Abrir"."""
+        menu, mapping = build_card_context_menu(
+            self, self._book,
+            extra_prefix=(("▶️ Continuar lendo", "open"), ("ℹ️ Detalhes", "details")),
+        )
         menu.setObjectName("continueCardContextMenu")
-
-        self._ctx_open = menu.addAction("▶️ Continuar lendo")
-        self._ctx_details = menu.addAction("ℹ️ Detalhes")
-        fav_label = "☆ Desfavoritar" if self._book.get("is_favorite") else "⭐ Favoritar"
-        self._ctx_favorite = menu.addAction(fav_label)
-        self._ctx_collection = menu.addAction("📁 Adicionar à coleção…")
-        self._ctx_metadata = menu.addAction("🌐 Buscar metadados")
-        menu.addSeparator()
-        self._ctx_delete = menu.addAction("🗑️ Remover")
+        for action, name in mapping.items():
+            setattr(self, CTX_ACTION_ATTRS[name], action)
         return menu
 
     def _handle_context_action(self, chosen) -> None:

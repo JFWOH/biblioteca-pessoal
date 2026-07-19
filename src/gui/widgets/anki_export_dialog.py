@@ -111,10 +111,10 @@ class AnkiExportDialog(QDialog):
             self.status_label.setText(f"Erro ao conectar: {e}")
 
     def _set_status_style(self, object_name: str) -> None:
-        """Troca o objectName do status (estado dinâmico) e força o repolish do QSS."""
-        self.status_label.setObjectName(object_name)
-        self.status_label.style().unpolish(self.status_label)
-        self.status_label.style().polish(self.status_label)
+        """Troca o objectName do status (estado dinâmico). Delegado ao helper
+        compartilhado ``styles.swap_object_name``."""
+        from src.gui.styles import swap_object_name
+        swap_object_name(self.status_label, object_name)
 
     def _refresh_pending_button(self):
         """Mostra o botão de reenvio se houver notas na fila de fallback."""

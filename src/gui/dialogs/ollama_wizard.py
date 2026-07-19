@@ -244,10 +244,10 @@ class OllamaWizardDialog(QDialog):
             self._manual_btn.show()
 
     def _set_done_title_style(self, object_name: str) -> None:
-        """Troca o objectName do título final (sucesso/erro) e repolisha o QSS."""
-        self._done_title.setObjectName(object_name)
-        self._done_title.style().unpolish(self._done_title)
-        self._done_title.style().polish(self._done_title)
+        """Troca o objectName do título final (sucesso/erro). Delegado ao
+        helper compartilhado ``styles.swap_object_name``."""
+        from src.gui.styles import swap_object_name
+        swap_object_name(self._done_title, object_name)
 
     def _cancel_install(self) -> None:
         if self._worker and self._worker.isRunning():
