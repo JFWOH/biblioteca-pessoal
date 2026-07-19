@@ -12,19 +12,6 @@ from PyQt6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
 )
 
-_CARD_STYLE = (
-    "QFrame#aiResponseCard { background-color: #20242d;"
-    " border: 1px solid #2d333f; border-radius: 8px; }"
-)
-_STATUS_STYLE = "color: #a5b4fc; font-size: 12px; font-style: italic;"
-_ERROR_STYLE = "color: #f87171; font-size: 12px;"
-_BODY_STYLE = "color: #cbd5e1; font-size: 12px;"
-_BTN_STYLE = (
-    "QPushButton { background: transparent; border: 1px solid #3f3f46;"
-    " border-radius: 6px; padding: 3px 10px; color: #a1a1aa; font-size: 11px; }"
-    " QPushButton:hover { border-color: #6366f1; color: #c7d2fe; }"
-)
-
 
 class AIResponseCard(QFrame):
     """Estados: idle → thinking → streaming → done | error.
@@ -50,7 +37,6 @@ class AIResponseCard(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("aiResponseCard")
-        self.setStyleSheet(_CARD_STYLE)
         self._state = self.STATE_IDLE
 
         lay = QVBoxLayout(self)
@@ -61,18 +47,18 @@ class AIResponseCard(QFrame):
         header.setSpacing(8)
         self._status_lbl = QLabel("")
         self._status_lbl.setWordWrap(True)
-        self._status_lbl.setStyleSheet(_STATUS_STYLE)
+        self._status_lbl.setObjectName("aiResponseStatusLbl")
         header.addWidget(self._status_lbl, stretch=1)
 
         self._stop_btn = QPushButton("⏹ Parar")
         self._stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._stop_btn.setStyleSheet(_BTN_STYLE)
+        self._stop_btn.setObjectName("aiResponseActionBtn")
         self._stop_btn.clicked.connect(self.stop_requested.emit)
         header.addWidget(self._stop_btn)
 
         self._retry_btn = QPushButton("🔄 Tentar de novo")
         self._retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._retry_btn.setStyleSheet(_BTN_STYLE)
+        self._retry_btn.setObjectName("aiResponseActionBtn")
         self._retry_btn.clicked.connect(self.retry_requested.emit)
         header.addWidget(self._retry_btn)
         lay.addLayout(header)
@@ -81,10 +67,19 @@ class AIResponseCard(QFrame):
         self._body_lbl.setWordWrap(True)
         self._body_lbl.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse)
-        self._body_lbl.setStyleSheet(_BODY_STYLE)
+        self._body_lbl.setObjectName("aiResponseBodyLbl")
         lay.addWidget(self._body_lbl)
 
         self._apply_state(self.STATE_IDLE)
+
+    def _swap_object_name(self, widget, object_name: str) -> None:
+        """Troca o objectName do widget (estado dinâmico) e força o repolish
+        do QSS — mesmo padrão usado em ``RAGPanel``."""
+        if widget.objectName() == object_name:
+            return  # estado inalterado — evita repolish à toa
+        widget.setObjectName(object_name)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
 
     # ── API de estados ────────────────────────────────────────────────
 
@@ -94,7 +89,7 @@ class AIResponseCard(QFrame):
 
     def start(self, status: str = "🤔 Pensando…") -> None:
         self._body_lbl.setText("")
-        self._status_lbl.setStyleSheet(_STATUS_STYLE)
+        self._swap_object_name(self._status_lbl, "aiResponseStatusLbl")
         self._status_lbl.setText(status)
         self._apply_state(self.STATE_THINKING)
 
@@ -119,7 +114,7 @@ class AIResponseCard(QFrame):
         self._apply_state(self.STATE_DONE)
 
     def fail(self, message: str) -> None:
-        self._status_lbl.setStyleSheet(_ERROR_STYLE)
+        self._swap_object_name(self._status_lbl, "aiResponseStatusLblError")
         self._status_lbl.setText(message)
         self._apply_state(self.STATE_ERROR)
 

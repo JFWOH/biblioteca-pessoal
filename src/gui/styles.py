@@ -104,6 +104,27 @@ QToolButton:pressed {
     padding: 16px 16px 4px 16px;
     letter-spacing: 1px;
 }
+#sidebar QLabel#sidebarTitle {
+    color: #e4e4e7;
+    padding: 0 4px 16px 4px;
+}
+#sidebar QLabel#sidebarStatsLabel {
+    color: #52525b;
+    font-size: 11px;
+    padding: 8px 4px;
+}
+QPushButton#sidebarOpdsBtn {
+    background: transparent;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    color: #a1a1aa;
+    padding: 6px;
+}
+QPushButton#sidebarOpdsBtn:checked {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: #10b981;
+    color: #10b981;
+}
 
 /* ── Cards de Livro ───────────────────────────────── */
 #bookCard {
@@ -1644,6 +1665,279 @@ QPushButton#annotationItemDelBtn {
     color: #94a3b8; font-size: 12px;
 }
 QPushButton#annotationItemDelBtn:hover { color: #ef4444; }
+
+/* ── Cartão de Resposta de IA (ai_response_card, Onda 0b 2/2) ────────
+   Estado de erro do status (thinking/streaming vs. falha) via
+   objectName-swap (#aiResponseStatusLbl <-> #aiResponseStatusLblError). */
+QFrame#aiResponseCard {
+    background-color: #20242d;
+    border: 1px solid #2d333f;
+    border-radius: 8px;
+}
+#aiResponseStatusLbl { color: #a5b4fc; font-size: 12px; font-style: italic; }
+#aiResponseStatusLblError { color: #f87171; font-size: 12px; }
+#aiResponseBodyLbl { color: #cbd5e1; font-size: 12px; }
+QPushButton#aiResponseActionBtn {
+    background: transparent;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    padding: 3px 10px;
+    color: #a1a1aa;
+    font-size: 11px;
+}
+QPushButton#aiResponseActionBtn:hover { border-color: #6366f1; color: #c7d2fe; }
+
+/* ── Rodapé Proativo (proactive_footer, Onda 0b 2/2) ─────────────────
+   QWidget SUBCLASSE: precisa de WA_StyledBackground (setado no .py) para
+   o bg do próprio #ProactiveFooter vir do QSS. */
+#ProactiveFooter {
+    background-color: #1e293b;
+    border-top: 1px solid #334155;
+}
+#proactiveFooterIcon { font-size: 20px; padding-top: 2px; }
+#proactiveFooterHeader { font-size: 11px; font-weight: bold; color: #10b981; }
+#proactiveFooterBody { font-size: 13px; color: #e5e7eb; line-height: 1.4; }
+QPushButton#proactiveFooterCloseBtn {
+    background: transparent; border: none; color: #9ca3af; font-weight: bold;
+}
+QPushButton#proactiveFooterCloseBtn:hover {
+    color: #f3f4f6; background: #374151; border-radius: 4px;
+}
+QPushButton#proactiveFooterFlashcardBtn {
+    background-color: #2563eb; color: white; padding: 4px 8px;
+    border-radius: 4px; border: none; font-size: 11px;
+}
+QPushButton#proactiveFooterFlashcardBtn:hover { background-color: #1d4ed8; }
+
+/* ── Barra de Busca no Documento — Ctrl+F (search_overlay, Onda 0b 2/2)
+   QWidget SUBCLASSE: precisa de WA_StyledBackground (setado no .py) para
+   o bg do próprio #documentSearchBar vir do QSS. #searchCountLabel muda de
+   cor por ESTADO (achou/zerou), não só por tema: property "state" (mesmo
+   padrão de BookCard[selected]) — o padrão (sem state) é o cinza neutro
+   usado antes da 1ª busca. */
+#documentSearchBar {
+    background-color: #161920;
+    border-bottom: 1px solid #2d333f;
+}
+#searchBarIcon { border: none; font-size: 14px; }
+QLineEdit#searchBarInput {
+    background: #0f1115;
+    border: 1px solid #2d333f;
+    border-radius: 6px;
+    padding: 6px 12px;
+    color: #e5e7eb;
+    font-size: 13px;
+}
+QLineEdit#searchBarInput:focus { border-color: #10b981; }
+QLabel#searchCountLabel {
+    color: #71717a; font-size: 12px; border: none; min-width: 60px;
+}
+QLabel#searchCountLabel[state="found"] { color: #10b981; }
+QLabel#searchCountLabel[state="empty"] { color: #ef4444; }
+QPushButton#searchNavBtn {
+    background: #20242d; border: none; border-radius: 4px;
+    color: #e5e7eb; font-size: 12px; padding: 4px 8px;
+    min-width: 28px; min-height: 28px;
+}
+QPushButton#searchNavBtn:hover { background: #2d333f; }
+QPushButton#searchNavBtn:disabled { color: #a1a1aa; }
+QPushButton#searchBarCloseBtn {
+    background: transparent; border: none;
+    color: #e5e7eb; font-size: 14px;
+}
+QPushButton#searchBarCloseBtn:hover { color: #ef4444; }
+
+/* ── Grade da Biblioteca — header/seleção em lote/estado vazio
+   (library_view, Onda 0b 2/2). library_view.py NUNCA teve set_theme (nem
+   antes da migração) — estes elementos sempre foram hardcoded, iguais nos
+   3 temas; a migração preserva esse comportamento tal como estava. */
+QLabel#libraryCountLabel { color: #71717a; font-size: 13px; font-weight: 500; }
+QPushButton#libraryBrokenBtn {
+    background: transparent; border: 1px solid #52525b;
+    border-radius: 6px; color: #71717a;
+    font-size: 11px; padding: 0 10px;
+}
+QPushButton#libraryBrokenBtn:hover { border-color: #f59e0b; color: #f59e0b; }
+QPushButton#libraryBrokenBtn:checked {
+    background: #451a03; border-color: #f59e0b; color: #f59e0b;
+}
+QPushButton#libraryGridBtn {
+    background: #27272a; border: none; border-radius: 6px;
+    color: #e4e4e7; font-size: 16px;
+}
+QPushButton#libraryGridBtn:hover { background: #3f3f46; }
+QPushButton#libraryListBtn {
+    background: transparent; border: none; border-radius: 6px;
+    color: #71717a; font-size: 16px;
+}
+QPushButton#libraryListBtn:hover { background: #27272a; color: #e4e4e7; }
+QFrame#bulkBar {
+    background: #1e1b4b;
+    border-top: 1px solid #4338ca;
+    border-bottom: 1px solid #4338ca;
+}
+QLabel#librarySelCountLbl { color: #818cf8; font-weight: 600; }
+QPushButton#librarySelectBrokenBtn {
+    background: #451a03; color: #f59e0b;
+    border: 1px solid #92400e; border-radius: 6px;
+    font-size: 11px; padding: 0 10px;
+}
+QPushButton#librarySelectBrokenBtn:hover { background: #78350f; }
+QPushButton#libraryBulkDeleteBtn {
+    background: #7f1d1d; color: #fca5a5;
+    border: 1px solid #991b1b; border-radius: 6px;
+    font-weight: 600; font-size: 11px; padding: 0 12px;
+}
+QPushButton#libraryBulkDeleteBtn:hover { background: #991b1b; color: white; }
+QPushButton#libraryBulkCancelBtn {
+    background: transparent; color: #52525b;
+    border: 1px solid #3f3f46; border-radius: 6px;
+    font-size: 11px; padding: 0 10px;
+}
+QPushButton#libraryBulkCancelBtn:hover { color: #e4e4e7; border-color: #71717a; }
+QLabel#libraryEmptyIcon { font-size: 64px; }
+QLabel#libraryEmptyText { color: #71717a; font-size: 18px; font-weight: 600; }
+QLabel#libraryEmptySub { color: #52525b; font-size: 13px; }
+
+/* ── Toolbar do Leitor (reader_view, Onda 0b 2/2) ─────────────────────
+   Elementos NUNCA tocados pelo set_theme antigo (readerBackBtn, readerZoomBtn,
+   readerToolbarSep, readerSearchBtn, readerFullscreenBtn, readerProactiveCombo,
+   readerPopupMenu, readerAiMenu) ficam hardcoded IGUAIS nos 3 temas — mesmo
+   comportamento de antes da migração (preservado, não "corrigido"). */
+QWidget#readerToolbar {
+    background-color: #20242d;
+    border-bottom: 1px solid #2d333f;
+}
+QWidget#readerToolbar QLabel#readerTitleLabel {
+    color: #e5e7eb; font-size: 13px; font-weight: 600;
+    background: transparent; border: none;
+}
+QWidget#readerToolbar QLabel#readerPageLabel {
+    color: #94a3b8; font-size: 12px; background: transparent; border: none;
+}
+QPushButton#readerNavBtn {
+    background: #161920; border: none; border-radius: 6px;
+    color: #cbd5e1; font-size: 14px;
+}
+QPushButton#readerNavBtn:hover { background: #2d333f; }
+QPushButton#readerAnnotationsBtn {
+    background: transparent; border: 1px solid #161920;
+    border-radius: 6px; font-size: 16px;
+}
+QPushButton#readerAnnotationsBtn:hover { background: #2d333f; }
+QPushButton#readerAnnotationsBtn:checked {
+    background: rgba(16, 185, 129, 0.2); border-color: #10b981;
+}
+QPushButton#readerDoublePageBtn {
+    background: transparent; border: 1px solid #161920;
+    border-radius: 6px; font-size: 13px; color: #cbd5e1;
+}
+QPushButton#readerDoublePageBtn:hover { background: #2d333f; }
+QPushButton#readerDoublePageBtn:checked {
+    background: rgba(16, 185, 129, 0.2); border-color: #10b981;
+}
+QPushButton#readerAiPanelBtn {
+    background: transparent; border: 1px solid #161920;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerAiPanelBtn:hover { background: #2d333f; }
+QPushButton#readerAiPanelBtn:checked {
+    background: rgba(16, 185, 129, 0.2); border-color: #10b981;
+}
+QToolButton#readerAudioBtn {
+    background: transparent; border: 1px solid #161920;
+    border-radius: 6px; font-size: 14px; padding: 0 4px;
+}
+QToolButton#readerAudioBtn:hover { background: #2d333f; }
+QToolButton#readerAudioBtn::menu-button { border: none; width: 18px; }
+QPushButton#readerStudyBtn {
+    background: transparent; border: 1px solid #161920;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerStudyBtn:hover { background: #2d333f; }
+QPushButton#readerHighlightModeBtn {
+    background: transparent; border: 1px solid #161920;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerHighlightModeBtn:hover { background: #2d333f; }
+QPushButton#readerHighlightModeBtn:checked {
+    background: rgba(251, 191, 36, 0.2); border-color: #fbbf24;
+}
+QPushButton#readerTypographyBtn {
+    background: transparent; border: 1px solid #161920;
+    border-radius: 6px; color: #cbd5e1; font-size: 13px; font-weight: 600;
+}
+QPushButton#readerTypographyBtn:hover { background: #2d333f; }
+QPushButton#readerTypographyBtn:checked {
+    background: rgba(16, 185, 129, 0.2); border-color: #10b981;
+}
+QPushButton#readerBookmarkBtn {
+    background: transparent; border: 1px solid #161920;
+    border-radius: 6px; font-size: 16px;
+}
+QPushButton#readerBookmarkBtn:hover { background: #2d333f; }
+QPushButton#readerBookmarkBtn:checked {
+    background: rgba(16, 185, 129, 0.2); border-color: #10b981;
+}
+QPushButton#readerSidePanelToggleBtn {
+    background: transparent; border: 1px solid #161920;
+    border-radius: 6px; font-size: 16px;
+}
+QPushButton#readerSidePanelToggleBtn:hover { background: #2d333f; }
+QPushButton#readerSidePanelToggleBtn:checked {
+    background: rgba(16, 185, 129, 0.2); border-color: #10b981;
+}
+QToolButton#readerOverflowBtn {
+    background: transparent; border: 1px solid #161920;
+    border-radius: 6px; font-size: 16px; color: #cbd5e1;
+}
+QToolButton#readerOverflowBtn:hover { background: #2d333f; }
+QToolButton#readerOverflowBtn::menu-indicator { image: none; }
+QScrollArea#readerImageScroll,
+QScrollArea#readerImageScroll > QWidget > QWidget {
+    background-color: #0f1115; border: none;
+}
+QWidget#readerProgressBarWidget {
+    background-color: #161920; border-top: 1px solid #2d333f;
+}
+QPushButton#readerBackBtn {
+    background: transparent; border: none; color: #10b981;
+    font-size: 13px; font-weight: 500; padding: 8px 12px;
+}
+QPushButton#readerBackBtn:hover { color: #34d399; }
+QPushButton#readerZoomBtn {
+    background: transparent; border: 1px solid #2d333f;
+    border-radius: 4px; color: #94a3b8; font-size: 16px;
+}
+QPushButton#readerZoomBtn:hover { background: #2d333f; }
+QLabel#readerToolbarSep { color: #2d333f; font-size: 16px; }
+QPushButton#readerSearchBtn {
+    background: transparent; border: 1px solid #2d333f;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerSearchBtn:hover { background: #2d333f; }
+QPushButton#readerFullscreenBtn {
+    background: transparent; border: 1px solid #2d333f;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerFullscreenBtn:hover { background: #2d333f; }
+QComboBox#readerProactiveCombo {
+    background: transparent; border: 1px solid #2d333f;
+    border-radius: 6px; color: #94a3b8; padding-left: 5px;
+}
+QComboBox#readerProactiveCombo::drop-down { border: none; }
+QMenu#readerPopupMenu {
+    background: #1e2227; border: 1px solid #3f3f46;
+    color: #e4e4e7; border-radius: 4px; padding: 4px;
+}
+QMenu#readerPopupMenu::item { padding: 6px 24px; border-radius: 4px; }
+QMenu#readerPopupMenu::item:selected { background: #3f3f46; }
+QMenu#readerAiMenu {
+    background-color: #161920; border: 1px solid #2d333f;
+    border-radius: 6px; padding: 4px; color: #e5e7eb;
+}
+QMenu#readerAiMenu::item { padding: 6px 24px; border-radius: 4px; }
+QMenu#readerAiMenu::item:selected { background-color: #059669; }
 """
 
 LIGHT_THEME = """
@@ -1741,6 +2035,27 @@ QToolButton:pressed {
     text-transform: uppercase;
     padding: 16px 16px 4px 16px;
     letter-spacing: 1px;
+}
+#sidebar QLabel#sidebarTitle {
+    color: #1A1A1A;
+    padding: 0 4px 16px 4px;
+}
+#sidebar QLabel#sidebarStatsLabel {
+    color: #555555;
+    font-size: 11px;
+    padding: 8px 4px;
+}
+QPushButton#sidebarOpdsBtn {
+    background: transparent;
+    border: 1px solid #d4d4d8;
+    border-radius: 6px;
+    color: #555555;
+    padding: 6px;
+}
+QPushButton#sidebarOpdsBtn:checked {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: #10b981;
+    color: #10b981;
 }
 
 /* ── Cards de Livro ───────────────────────────────── */
@@ -3280,6 +3595,279 @@ QPushButton#annotationItemDelBtn {
     color: #71717a; font-size: 12px;
 }
 QPushButton#annotationItemDelBtn:hover { color: #ef4444; }
+
+/* ── Cartão de Resposta de IA (ai_response_card, Onda 0b 2/2) ────────
+   Estado de erro do status (thinking/streaming vs. falha) via
+   objectName-swap (#aiResponseStatusLbl <-> #aiResponseStatusLblError). */
+QFrame#aiResponseCard {
+    background-color: #f4f4f5;
+    border: 1px solid #e4e4e7;
+    border-radius: 8px;
+}
+#aiResponseStatusLbl { color: #a5b4fc; font-size: 12px; font-style: italic; }
+#aiResponseStatusLblError { color: #dc2626; font-size: 12px; }
+#aiResponseBodyLbl { color: #555555; font-size: 12px; }
+QPushButton#aiResponseActionBtn {
+    background: transparent;
+    border: 1px solid #d4d4d8;
+    border-radius: 6px;
+    padding: 3px 10px;
+    color: #71717a;
+    font-size: 11px;
+}
+QPushButton#aiResponseActionBtn:hover { border-color: #6366f1; color: #4f46e5; }
+
+/* ── Rodapé Proativo (proactive_footer, Onda 0b 2/2) ─────────────────
+   QWidget SUBCLASSE: precisa de WA_StyledBackground (setado no .py) para
+   o bg do próprio #ProactiveFooter vir do QSS. */
+#ProactiveFooter {
+    background-color: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+}
+#proactiveFooterIcon { font-size: 20px; padding-top: 2px; }
+#proactiveFooterHeader { font-size: 11px; font-weight: bold; color: #059669; }
+#proactiveFooterBody { font-size: 13px; color: #1e293b; line-height: 1.4; }
+QPushButton#proactiveFooterCloseBtn {
+    background: transparent; border: none; color: #9ca3af; font-weight: bold;
+}
+QPushButton#proactiveFooterCloseBtn:hover {
+    color: #f3f4f6; background: #374151; border-radius: 4px;
+}
+QPushButton#proactiveFooterFlashcardBtn {
+    background-color: #2563eb; color: white; padding: 4px 8px;
+    border-radius: 4px; border: none; font-size: 11px;
+}
+QPushButton#proactiveFooterFlashcardBtn:hover { background-color: #1d4ed8; }
+
+/* ── Barra de Busca no Documento — Ctrl+F (search_overlay, Onda 0b 2/2)
+   QWidget SUBCLASSE: precisa de WA_StyledBackground (setado no .py) para
+   o bg do próprio #documentSearchBar vir do QSS. #searchCountLabel muda de
+   cor por ESTADO (achou/zerou), não só por tema: property "state" (mesmo
+   padrão de BookCard[selected]) — o padrão (sem state) é o cinza neutro
+   usado antes da 1ª busca. */
+#documentSearchBar {
+    background-color: #f4f4f5;
+    border-bottom: 1px solid #e4e4e7;
+}
+#searchBarIcon { border: none; font-size: 14px; }
+QLineEdit#searchBarInput {
+    background: #ffffff;
+    border: 1px solid #d4d4d8;
+    border-radius: 6px;
+    padding: 6px 12px;
+    color: #1A1A1A;
+    font-size: 13px;
+}
+QLineEdit#searchBarInput:focus { border-color: #059669; }
+QLabel#searchCountLabel {
+    color: #71717a; font-size: 12px; border: none; min-width: 60px;
+}
+QLabel#searchCountLabel[state="found"] { color: #059669; }
+QLabel#searchCountLabel[state="empty"] { color: #ef4444; }
+QPushButton#searchNavBtn {
+    background: #e4e4e7; border: none; border-radius: 4px;
+    color: #1A1A1A; font-size: 12px; padding: 4px 8px;
+    min-width: 28px; min-height: 28px;
+}
+QPushButton#searchNavBtn:hover { background: #d4d4d8; }
+QPushButton#searchNavBtn:disabled { color: #a1a1aa; }
+QPushButton#searchBarCloseBtn {
+    background: transparent; border: none;
+    color: #1A1A1A; font-size: 14px;
+}
+QPushButton#searchBarCloseBtn:hover { color: #ef4444; }
+
+/* ── Grade da Biblioteca — header/seleção em lote/estado vazio
+   (library_view, Onda 0b 2/2). library_view.py NUNCA teve set_theme (nem
+   antes da migração) — estes elementos sempre foram hardcoded, iguais nos
+   3 temas; a migração preserva esse comportamento tal como estava. */
+QLabel#libraryCountLabel { color: #71717a; font-size: 13px; font-weight: 500; }
+QPushButton#libraryBrokenBtn {
+    background: transparent; border: 1px solid #52525b;
+    border-radius: 6px; color: #71717a;
+    font-size: 11px; padding: 0 10px;
+}
+QPushButton#libraryBrokenBtn:hover { border-color: #f59e0b; color: #f59e0b; }
+QPushButton#libraryBrokenBtn:checked {
+    background: #451a03; border-color: #f59e0b; color: #f59e0b;
+}
+QPushButton#libraryGridBtn {
+    background: #27272a; border: none; border-radius: 6px;
+    color: #e4e4e7; font-size: 16px;
+}
+QPushButton#libraryGridBtn:hover { background: #3f3f46; }
+QPushButton#libraryListBtn {
+    background: transparent; border: none; border-radius: 6px;
+    color: #71717a; font-size: 16px;
+}
+QPushButton#libraryListBtn:hover { background: #27272a; color: #e4e4e7; }
+QFrame#bulkBar {
+    background: #1e1b4b;
+    border-top: 1px solid #4338ca;
+    border-bottom: 1px solid #4338ca;
+}
+QLabel#librarySelCountLbl { color: #818cf8; font-weight: 600; }
+QPushButton#librarySelectBrokenBtn {
+    background: #451a03; color: #f59e0b;
+    border: 1px solid #92400e; border-radius: 6px;
+    font-size: 11px; padding: 0 10px;
+}
+QPushButton#librarySelectBrokenBtn:hover { background: #78350f; }
+QPushButton#libraryBulkDeleteBtn {
+    background: #7f1d1d; color: #fca5a5;
+    border: 1px solid #991b1b; border-radius: 6px;
+    font-weight: 600; font-size: 11px; padding: 0 12px;
+}
+QPushButton#libraryBulkDeleteBtn:hover { background: #991b1b; color: white; }
+QPushButton#libraryBulkCancelBtn {
+    background: transparent; color: #52525b;
+    border: 1px solid #3f3f46; border-radius: 6px;
+    font-size: 11px; padding: 0 10px;
+}
+QPushButton#libraryBulkCancelBtn:hover { color: #e4e4e7; border-color: #71717a; }
+QLabel#libraryEmptyIcon { font-size: 64px; }
+QLabel#libraryEmptyText { color: #71717a; font-size: 18px; font-weight: 600; }
+QLabel#libraryEmptySub { color: #52525b; font-size: 13px; }
+
+/* ── Toolbar do Leitor (reader_view, Onda 0b 2/2) ─────────────────────
+   Elementos NUNCA tocados pelo set_theme antigo (readerBackBtn, readerZoomBtn,
+   readerToolbarSep, readerSearchBtn, readerFullscreenBtn, readerProactiveCombo,
+   readerPopupMenu, readerAiMenu) ficam hardcoded IGUAIS nos 3 temas — mesmo
+   comportamento de antes da migração (preservado, não "corrigido"). */
+QWidget#readerToolbar {
+    background-color: #f4f4f5;
+    border-bottom: 1px solid #e4e4e7;
+}
+QWidget#readerToolbar QLabel#readerTitleLabel {
+    color: #1A1A1A; font-size: 13px; font-weight: 600;
+    background: transparent; border: none;
+}
+QWidget#readerToolbar QLabel#readerPageLabel {
+    color: #71717a; font-size: 12px; background: transparent; border: none;
+}
+QPushButton#readerNavBtn {
+    background: #e4e4e7; border: none; border-radius: 6px;
+    color: #52525b; font-size: 14px;
+}
+QPushButton#readerNavBtn:hover { background: #d4d4d8; }
+QPushButton#readerAnnotationsBtn {
+    background: transparent; border: 1px solid #e4e4e7;
+    border-radius: 6px; font-size: 16px;
+}
+QPushButton#readerAnnotationsBtn:hover { background: #d4d4d8; }
+QPushButton#readerAnnotationsBtn:checked {
+    background: rgba(5, 150, 105, 0.1); border-color: #059669; color: #059669;
+}
+QPushButton#readerDoublePageBtn {
+    background: transparent; border: 1px solid #e4e4e7;
+    border-radius: 6px; font-size: 13px; color: #52525b;
+}
+QPushButton#readerDoublePageBtn:hover { background: #d4d4d8; }
+QPushButton#readerDoublePageBtn:checked {
+    background: rgba(5, 150, 105, 0.1); border-color: #059669; color: #059669;
+}
+QPushButton#readerAiPanelBtn {
+    background: transparent; border: 1px solid #e4e4e7;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerAiPanelBtn:hover { background: #d4d4d8; }
+QPushButton#readerAiPanelBtn:checked {
+    background: rgba(5, 150, 105, 0.1); border-color: #059669; color: #059669;
+}
+QToolButton#readerAudioBtn {
+    background: transparent; border: 1px solid #e4e4e7;
+    border-radius: 6px; font-size: 14px; padding: 0 4px;
+}
+QToolButton#readerAudioBtn:hover { background: #d4d4d8; }
+QToolButton#readerAudioBtn::menu-button { border: none; width: 18px; }
+QPushButton#readerStudyBtn {
+    background: transparent; border: 1px solid #e4e4e7;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerStudyBtn:hover { background: #d4d4d8; }
+QPushButton#readerHighlightModeBtn {
+    background: transparent; border: 1px solid #e4e4e7;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerHighlightModeBtn:hover { background: #d4d4d8; }
+QPushButton#readerHighlightModeBtn:checked {
+    background: rgba(251, 191, 36, 0.2); border-color: #fbbf24;
+}
+QPushButton#readerTypographyBtn {
+    background: transparent; border: 1px solid #e4e4e7;
+    border-radius: 6px; color: #52525b; font-size: 13px; font-weight: 600;
+}
+QPushButton#readerTypographyBtn:hover { background: #d4d4d8; }
+QPushButton#readerTypographyBtn:checked {
+    background: rgba(5, 150, 105, 0.1); border-color: #059669; color: #059669;
+}
+QPushButton#readerBookmarkBtn {
+    background: transparent; border: 1px solid #e4e4e7;
+    border-radius: 6px; font-size: 16px;
+}
+QPushButton#readerBookmarkBtn:hover { background: #d4d4d8; }
+QPushButton#readerBookmarkBtn:checked {
+    background: rgba(5, 150, 105, 0.1); border-color: #059669; color: #059669;
+}
+QPushButton#readerSidePanelToggleBtn {
+    background: transparent; border: 1px solid #e4e4e7;
+    border-radius: 6px; font-size: 16px;
+}
+QPushButton#readerSidePanelToggleBtn:hover { background: #d4d4d8; }
+QPushButton#readerSidePanelToggleBtn:checked {
+    background: rgba(5, 150, 105, 0.1); border-color: #059669; color: #059669;
+}
+QToolButton#readerOverflowBtn {
+    background: transparent; border: 1px solid #e4e4e7;
+    border-radius: 6px; font-size: 16px; color: #52525b;
+}
+QToolButton#readerOverflowBtn:hover { background: #d4d4d8; }
+QToolButton#readerOverflowBtn::menu-indicator { image: none; }
+QScrollArea#readerImageScroll,
+QScrollArea#readerImageScroll > QWidget > QWidget {
+    background-color: #FFFFFF; border: none;
+}
+QWidget#readerProgressBarWidget {
+    background-color: #f4f4f5; border-top: 1px solid #e4e4e7;
+}
+QPushButton#readerBackBtn {
+    background: transparent; border: none; color: #10b981;
+    font-size: 13px; font-weight: 500; padding: 8px 12px;
+}
+QPushButton#readerBackBtn:hover { color: #34d399; }
+QPushButton#readerZoomBtn {
+    background: transparent; border: 1px solid #2d333f;
+    border-radius: 4px; color: #94a3b8; font-size: 16px;
+}
+QPushButton#readerZoomBtn:hover { background: #2d333f; }
+QLabel#readerToolbarSep { color: #2d333f; font-size: 16px; }
+QPushButton#readerSearchBtn {
+    background: transparent; border: 1px solid #2d333f;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerSearchBtn:hover { background: #2d333f; }
+QPushButton#readerFullscreenBtn {
+    background: transparent; border: 1px solid #2d333f;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerFullscreenBtn:hover { background: #2d333f; }
+QComboBox#readerProactiveCombo {
+    background: transparent; border: 1px solid #2d333f;
+    border-radius: 6px; color: #94a3b8; padding-left: 5px;
+}
+QComboBox#readerProactiveCombo::drop-down { border: none; }
+QMenu#readerPopupMenu {
+    background: #1e2227; border: 1px solid #3f3f46;
+    color: #e4e4e7; border-radius: 4px; padding: 4px;
+}
+QMenu#readerPopupMenu::item { padding: 6px 24px; border-radius: 4px; }
+QMenu#readerPopupMenu::item:selected { background: #3f3f46; }
+QMenu#readerAiMenu {
+    background-color: #161920; border: 1px solid #2d333f;
+    border-radius: 6px; padding: 4px; color: #e5e7eb;
+}
+QMenu#readerAiMenu::item { padding: 6px 24px; border-radius: 4px; }
+QMenu#readerAiMenu::item:selected { background-color: #059669; }
 """
 
 SEPIA_THEME = """
@@ -3378,6 +3966,27 @@ QToolButton:pressed {
     text-transform: uppercase;
     padding: 16px 16px 4px 16px;
     letter-spacing: 1px;
+}
+#sidebar QLabel#sidebarTitle {
+    color: #433422;
+    padding: 0 4px 16px 4px;
+}
+#sidebar QLabel#sidebarStatsLabel {
+    color: #705E4B;
+    font-size: 11px;
+    padding: 8px 4px;
+}
+QPushButton#sidebarOpdsBtn {
+    background: transparent;
+    border: 1px solid #d4cbb8;
+    border-radius: 6px;
+    color: #433422;
+    padding: 6px;
+}
+QPushButton#sidebarOpdsBtn:checked {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: #10b981;
+    color: #10b981;
 }
 
 /* ── Cards de Livro ───────────────────────────────── */
@@ -4917,6 +5526,279 @@ QPushButton#annotationItemDelBtn {
     color: #8b7355; font-size: 12px;
 }
 QPushButton#annotationItemDelBtn:hover { color: #ef4444; }
+
+/* ── Cartão de Resposta de IA (ai_response_card, Onda 0b 2/2) ────────
+   Estado de erro do status (thinking/streaming vs. falha) via
+   objectName-swap (#aiResponseStatusLbl <-> #aiResponseStatusLblError). */
+QFrame#aiResponseCard {
+    background-color: #ebe5d9;
+    border: 1px solid #d4cbb8;
+    border-radius: 8px;
+}
+#aiResponseStatusLbl { color: #a5b4fc; font-size: 12px; font-style: italic; }
+#aiResponseStatusLblError { color: #b91c1c; font-size: 12px; }
+#aiResponseBodyLbl { color: #705E4B; font-size: 12px; }
+QPushButton#aiResponseActionBtn {
+    background: transparent;
+    border: 1px solid #d4cbb8;
+    border-radius: 6px;
+    padding: 3px 10px;
+    color: #8b7355;
+    font-size: 11px;
+}
+QPushButton#aiResponseActionBtn:hover { border-color: #6366f1; color: #4f46e5; }
+
+/* ── Rodapé Proativo (proactive_footer, Onda 0b 2/2) ─────────────────
+   QWidget SUBCLASSE: precisa de WA_StyledBackground (setado no .py) para
+   o bg do próprio #ProactiveFooter vir do QSS. */
+#ProactiveFooter {
+    background-color: #f1e7d0;
+    border-top: 1px solid #d4c5b0;
+}
+#proactiveFooterIcon { font-size: 20px; padding-top: 2px; }
+#proactiveFooterHeader { font-size: 11px; font-weight: bold; color: #b45309; }
+#proactiveFooterBody { font-size: 13px; color: #45301f; line-height: 1.4; }
+QPushButton#proactiveFooterCloseBtn {
+    background: transparent; border: none; color: #9ca3af; font-weight: bold;
+}
+QPushButton#proactiveFooterCloseBtn:hover {
+    color: #f3f4f6; background: #374151; border-radius: 4px;
+}
+QPushButton#proactiveFooterFlashcardBtn {
+    background-color: #2563eb; color: white; padding: 4px 8px;
+    border-radius: 4px; border: none; font-size: 11px;
+}
+QPushButton#proactiveFooterFlashcardBtn:hover { background-color: #1d4ed8; }
+
+/* ── Barra de Busca no Documento — Ctrl+F (search_overlay, Onda 0b 2/2)
+   QWidget SUBCLASSE: precisa de WA_StyledBackground (setado no .py) para
+   o bg do próprio #documentSearchBar vir do QSS. #searchCountLabel muda de
+   cor por ESTADO (achou/zerou), não só por tema: property "state" (mesmo
+   padrão de BookCard[selected]) — o padrão (sem state) é o cinza neutro
+   usado antes da 1ª busca. */
+#documentSearchBar {
+    background-color: #ebe5d9;
+    border-bottom: 1px solid #d4cbb8;
+}
+#searchBarIcon { border: none; font-size: 14px; }
+QLineEdit#searchBarInput {
+    background: #EADFCA;
+    border: 1px solid #d4cbb8;
+    border-radius: 6px;
+    padding: 6px 12px;
+    color: #433422;
+    font-size: 13px;
+}
+QLineEdit#searchBarInput:focus { border-color: #059669; }
+QLabel#searchCountLabel {
+    color: #71717a; font-size: 12px; border: none; min-width: 60px;
+}
+QLabel#searchCountLabel[state="found"] { color: #059669; }
+QLabel#searchCountLabel[state="empty"] { color: #ef4444; }
+QPushButton#searchNavBtn {
+    background: #dfd8c8; border: none; border-radius: 4px;
+    color: #433422; font-size: 12px; padding: 4px 8px;
+    min-width: 28px; min-height: 28px;
+}
+QPushButton#searchNavBtn:hover { background: #d4cbb8; }
+QPushButton#searchNavBtn:disabled { color: #a1a1aa; }
+QPushButton#searchBarCloseBtn {
+    background: transparent; border: none;
+    color: #433422; font-size: 14px;
+}
+QPushButton#searchBarCloseBtn:hover { color: #ef4444; }
+
+/* ── Grade da Biblioteca — header/seleção em lote/estado vazio
+   (library_view, Onda 0b 2/2). library_view.py NUNCA teve set_theme (nem
+   antes da migração) — estes elementos sempre foram hardcoded, iguais nos
+   3 temas; a migração preserva esse comportamento tal como estava. */
+QLabel#libraryCountLabel { color: #71717a; font-size: 13px; font-weight: 500; }
+QPushButton#libraryBrokenBtn {
+    background: transparent; border: 1px solid #52525b;
+    border-radius: 6px; color: #71717a;
+    font-size: 11px; padding: 0 10px;
+}
+QPushButton#libraryBrokenBtn:hover { border-color: #f59e0b; color: #f59e0b; }
+QPushButton#libraryBrokenBtn:checked {
+    background: #451a03; border-color: #f59e0b; color: #f59e0b;
+}
+QPushButton#libraryGridBtn {
+    background: #27272a; border: none; border-radius: 6px;
+    color: #e4e4e7; font-size: 16px;
+}
+QPushButton#libraryGridBtn:hover { background: #3f3f46; }
+QPushButton#libraryListBtn {
+    background: transparent; border: none; border-radius: 6px;
+    color: #71717a; font-size: 16px;
+}
+QPushButton#libraryListBtn:hover { background: #27272a; color: #e4e4e7; }
+QFrame#bulkBar {
+    background: #1e1b4b;
+    border-top: 1px solid #4338ca;
+    border-bottom: 1px solid #4338ca;
+}
+QLabel#librarySelCountLbl { color: #818cf8; font-weight: 600; }
+QPushButton#librarySelectBrokenBtn {
+    background: #451a03; color: #f59e0b;
+    border: 1px solid #92400e; border-radius: 6px;
+    font-size: 11px; padding: 0 10px;
+}
+QPushButton#librarySelectBrokenBtn:hover { background: #78350f; }
+QPushButton#libraryBulkDeleteBtn {
+    background: #7f1d1d; color: #fca5a5;
+    border: 1px solid #991b1b; border-radius: 6px;
+    font-weight: 600; font-size: 11px; padding: 0 12px;
+}
+QPushButton#libraryBulkDeleteBtn:hover { background: #991b1b; color: white; }
+QPushButton#libraryBulkCancelBtn {
+    background: transparent; color: #52525b;
+    border: 1px solid #3f3f46; border-radius: 6px;
+    font-size: 11px; padding: 0 10px;
+}
+QPushButton#libraryBulkCancelBtn:hover { color: #e4e4e7; border-color: #71717a; }
+QLabel#libraryEmptyIcon { font-size: 64px; }
+QLabel#libraryEmptyText { color: #71717a; font-size: 18px; font-weight: 600; }
+QLabel#libraryEmptySub { color: #52525b; font-size: 13px; }
+
+/* ── Toolbar do Leitor (reader_view, Onda 0b 2/2) ─────────────────────
+   Elementos NUNCA tocados pelo set_theme antigo (readerBackBtn, readerZoomBtn,
+   readerToolbarSep, readerSearchBtn, readerFullscreenBtn, readerProactiveCombo,
+   readerPopupMenu, readerAiMenu) ficam hardcoded IGUAIS nos 3 temas — mesmo
+   comportamento de antes da migração (preservado, não "corrigido"). */
+QWidget#readerToolbar {
+    background-color: #ebe5d9;
+    border-bottom: 1px solid #d4cbb8;
+}
+QWidget#readerToolbar QLabel#readerTitleLabel {
+    color: #5B4636; font-size: 13px; font-weight: 600;
+    background: transparent; border: none;
+}
+QWidget#readerToolbar QLabel#readerPageLabel {
+    color: #8b7355; font-size: 12px; background: transparent; border: none;
+}
+QPushButton#readerNavBtn {
+    background: #dfd8c8; border: none; border-radius: 6px;
+    color: #5b4636; font-size: 14px;
+}
+QPushButton#readerNavBtn:hover { background: #d4cbb8; }
+QPushButton#readerAnnotationsBtn {
+    background: transparent; border: 1px solid #dfd8c8;
+    border-radius: 6px; font-size: 16px;
+}
+QPushButton#readerAnnotationsBtn:hover { background: #d4cbb8; }
+QPushButton#readerAnnotationsBtn:checked {
+    background: rgba(139, 108, 66, 0.15); border-color: #8b6c42; color: #8b6c42;
+}
+QPushButton#readerDoublePageBtn {
+    background: transparent; border: 1px solid #dfd8c8;
+    border-radius: 6px; font-size: 13px; color: #5b4636;
+}
+QPushButton#readerDoublePageBtn:hover { background: #d4cbb8; }
+QPushButton#readerDoublePageBtn:checked {
+    background: rgba(139, 108, 66, 0.15); border-color: #8b6c42; color: #8b6c42;
+}
+QPushButton#readerAiPanelBtn {
+    background: transparent; border: 1px solid #dfd8c8;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerAiPanelBtn:hover { background: #d4cbb8; }
+QPushButton#readerAiPanelBtn:checked {
+    background: rgba(139, 108, 66, 0.15); border-color: #8b6c42; color: #8b6c42;
+}
+QToolButton#readerAudioBtn {
+    background: transparent; border: 1px solid #dfd8c8;
+    border-radius: 6px; font-size: 14px; padding: 0 4px;
+}
+QToolButton#readerAudioBtn:hover { background: #d4cbb8; }
+QToolButton#readerAudioBtn::menu-button { border: none; width: 18px; }
+QPushButton#readerStudyBtn {
+    background: transparent; border: 1px solid #dfd8c8;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerStudyBtn:hover { background: #d4cbb8; }
+QPushButton#readerHighlightModeBtn {
+    background: transparent; border: 1px solid #dfd8c8;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerHighlightModeBtn:hover { background: #d4cbb8; }
+QPushButton#readerHighlightModeBtn:checked {
+    background: rgba(251, 191, 36, 0.2); border-color: #fbbf24;
+}
+QPushButton#readerTypographyBtn {
+    background: transparent; border: 1px solid #dfd8c8;
+    border-radius: 6px; color: #5b4636; font-size: 13px; font-weight: 600;
+}
+QPushButton#readerTypographyBtn:hover { background: #d4cbb8; }
+QPushButton#readerTypographyBtn:checked {
+    background: rgba(139, 108, 66, 0.15); border-color: #8b6c42; color: #8b6c42;
+}
+QPushButton#readerBookmarkBtn {
+    background: transparent; border: 1px solid #dfd8c8;
+    border-radius: 6px; font-size: 16px;
+}
+QPushButton#readerBookmarkBtn:hover { background: #d4cbb8; }
+QPushButton#readerBookmarkBtn:checked {
+    background: rgba(139, 108, 66, 0.15); border-color: #8b6c42; color: #8b6c42;
+}
+QPushButton#readerSidePanelToggleBtn {
+    background: transparent; border: 1px solid #dfd8c8;
+    border-radius: 6px; font-size: 16px;
+}
+QPushButton#readerSidePanelToggleBtn:hover { background: #d4cbb8; }
+QPushButton#readerSidePanelToggleBtn:checked {
+    background: rgba(139, 108, 66, 0.15); border-color: #8b6c42; color: #8b6c42;
+}
+QToolButton#readerOverflowBtn {
+    background: transparent; border: 1px solid #dfd8c8;
+    border-radius: 6px; font-size: 16px; color: #5b4636;
+}
+QToolButton#readerOverflowBtn:hover { background: #d4cbb8; }
+QToolButton#readerOverflowBtn::menu-indicator { image: none; }
+QScrollArea#readerImageScroll,
+QScrollArea#readerImageScroll > QWidget > QWidget {
+    background-color: #F4ECD8; border: none;
+}
+QWidget#readerProgressBarWidget {
+    background-color: #ebe5d9; border-top: 1px solid #d4cbb8;
+}
+QPushButton#readerBackBtn {
+    background: transparent; border: none; color: #10b981;
+    font-size: 13px; font-weight: 500; padding: 8px 12px;
+}
+QPushButton#readerBackBtn:hover { color: #34d399; }
+QPushButton#readerZoomBtn {
+    background: transparent; border: 1px solid #2d333f;
+    border-radius: 4px; color: #94a3b8; font-size: 16px;
+}
+QPushButton#readerZoomBtn:hover { background: #2d333f; }
+QLabel#readerToolbarSep { color: #2d333f; font-size: 16px; }
+QPushButton#readerSearchBtn {
+    background: transparent; border: 1px solid #2d333f;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerSearchBtn:hover { background: #2d333f; }
+QPushButton#readerFullscreenBtn {
+    background: transparent; border: 1px solid #2d333f;
+    border-radius: 6px; font-size: 14px;
+}
+QPushButton#readerFullscreenBtn:hover { background: #2d333f; }
+QComboBox#readerProactiveCombo {
+    background: transparent; border: 1px solid #2d333f;
+    border-radius: 6px; color: #94a3b8; padding-left: 5px;
+}
+QComboBox#readerProactiveCombo::drop-down { border: none; }
+QMenu#readerPopupMenu {
+    background: #1e2227; border: 1px solid #3f3f46;
+    color: #e4e4e7; border-radius: 4px; padding: 4px;
+}
+QMenu#readerPopupMenu::item { padding: 6px 24px; border-radius: 4px; }
+QMenu#readerPopupMenu::item:selected { background: #3f3f46; }
+QMenu#readerAiMenu {
+    background-color: #161920; border: 1px solid #2d333f;
+    border-radius: 6px; padding: 4px; color: #e5e7eb;
+}
+QMenu#readerAiMenu::item { padding: 6px 24px; border-radius: 4px; }
+QMenu#readerAiMenu::item:selected { background-color: #059669; }
 """
 
 THEMES = {

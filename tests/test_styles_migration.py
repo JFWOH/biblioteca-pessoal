@@ -2,8 +2,14 @@
 
 Cobre os 10 arquivos da whitelist do contrato (book_card, book_details,
 collection_dialog, import_dialog, anki_export_dialog, book_dossier_dialog,
-tag_manager, settings_dialog, flashcards_dialog, ollama_wizard) e, desde a
-Onda 0b (1/2), também rag_panel e annotation_panel:
+tag_manager, settings_dialog, flashcards_dialog, ollama_wizard); desde a
+Onda 0b (1/2), também rag_panel e annotation_panel; e desde a Onda 0b (2/2),
+sidebar, ai_response_card, proactive_footer, search_overlay e library_view.
+reader_view.py também foi migrado na Onda 0b (2/2), mas NÃO entra no build
+sob os 3 temas (ver test_reader_view_has_no_inline_stylesheet_source): o
+módulo importa QtWebEngineWidgets, que só pode ser importado ANTES de existir
+QApplication — instanciá-lo nesta suíte quebraria (mesma razão documentada em
+test_reader_view_guards.py e test_security_epub_web.py).
 
 1. Os widgets/diálogos continuam construíveis sob os 3 temas, sem exceção.
 2. Os objectNames-chave introduzidos na migração existem (contrato mínimo
@@ -16,6 +22,8 @@ Não reinstancia MainWindow (pesada). Não asserta o valor exato de cor —
 isso é responsabilidade de revisão visual manual; aqui validamos apenas o
 MECANISMO (objectName aplicado, nenhuma exceção na construção).
 """
+import re
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -37,6 +45,11 @@ from src.gui.dialogs.ollama_wizard import OllamaWizardDialog
 from src.gui.dialogs.shortcuts_dialog import ShortcutsDialog
 from src.gui.widgets.rag_panel import RAGPanel
 from src.gui.widgets.annotation_panel import AnnotationItem, AnnotationPanel
+from src.gui.sidebar import Sidebar
+from src.gui.widgets.ai_response_card import AIResponseCard
+from src.gui.widgets.proactive_footer import ProactiveFooterWidget
+from src.gui.widgets.search_overlay import DocumentSearchBar
+from src.gui.library_view import LibraryView
 
 
 @pytest.fixture(autouse=True)
@@ -119,6 +132,19 @@ def test_widgets_build_under_every_theme(qtbot, db, config, theme_css):
              "page_number": 1, "created_at": "2026-07-18 10:00",
              "highlight_color": "#fbbf24", "id": 1}),
          None),
+        # Onda 0b (2/2): sidebar, ai_response_card, proactive_footer,
+        # search_overlay, library_view. O exercise do AIResponseCard percorre
+        # o estado dinâmico (objectName-swap) do status thinking -> erro; o do
+        # DocumentSearchBar, o estado (property-swap) do label de contagem.
+        (lambda: Sidebar(), None),
+        (lambda: AIResponseCard(),
+         lambda w: (w.start(), w.set_status("tick"), w.fail("erro"), w.finish())),
+        (lambda: ProactiveFooterWidget(),
+         lambda w: w.set_observation(
+             {"tipo": "insight", "confianca": "Alta", "texto": "x"})),
+        (lambda: DocumentSearchBar(),
+         lambda w: (w.set_results([{"page": 0}]), w.close_bar())),
+        (lambda: LibraryView(), None),
     ]
     for factory, exercise in cases:
         widget = factory()
@@ -167,6 +193,52 @@ def test_migrated_widgets_have_no_inline_stylesheet(qtbot, db):
     assert item.styleSheet() == ""
     assert item._page_btn.styleSheet() == ""
     assert item._del_btn.styleSheet() == ""
+
+    # Onda 0b (2/2): sidebar — zero setStyleSheet (título/stats/OPDS via
+    # objectName; set_theme virou no-op).
+    sidebar = Sidebar()
+    qtbot.addWidget(sidebar)
+    assert sidebar.styleSheet() == ""
+    assert sidebar._title.styleSheet() == ""
+    assert sidebar._opds_btn.styleSheet() == ""
+    sidebar.set_theme("light")
+    assert sidebar._opds_btn.styleSheet() == ""
+
+    # Onda 0b (2/2): ai_response_card — hoje DARK-ONLY, virou theme-aware; o
+    # estado de erro do status label é objectName-swap, não setStyleSheet.
+    card = AIResponseCard()
+    qtbot.addWidget(card)
+    assert card.styleSheet() == ""
+    assert card._status_lbl.styleSheet() == ""
+    card.fail("erro")
+    assert card._status_lbl.styleSheet() == ""
+
+    # Onda 0b (2/2): proactive_footer — QWidget subclasse com WA_StyledBackground.
+    footer = ProactiveFooterWidget()
+    qtbot.addWidget(footer)
+    assert footer.styleSheet() == ""
+    assert footer.header_label.styleSheet() == ""
+    assert footer.body_label.styleSheet() == ""
+
+    # Onda 0b (2/2): search_overlay — o estado do contador (achou/zerou) é
+    # property-swap ("state"), não setStyleSheet.
+    search_bar = DocumentSearchBar()
+    qtbot.addWidget(search_bar)
+    assert search_bar.styleSheet() == ""
+    assert search_bar._input.styleSheet() == ""
+    search_bar.set_results([{"page": 0}])
+    assert search_bar._count_label.styleSheet() == ""
+    search_bar._input.setText("xyz")
+    search_bar.set_results([])  # sem resultados com texto -> estado "empty"
+    assert search_bar._count_label.styleSheet() == ""
+
+    # Onda 0b (2/2): library_view — nunca teve set_theme; elementos estáticos
+    # migrados 1:1 (hardcoded, iguais nos 3 temas, como já eram).
+    lib = LibraryView()
+    qtbot.addWidget(lib)
+    assert lib.styleSheet() == ""
+    assert lib._count_label.styleSheet() == ""
+    assert lib._bulk_bar.styleSheet() == ""
 
 
 def test_data_driven_colors_remain_inline_exception(qtbot):
@@ -221,6 +293,39 @@ def test_key_object_names_present(qtbot, db):
     assert item.objectName() == "annotationItem"
     assert item._page_btn.objectName() == "annotationItemPageBtn"
 
+    # Onda 0b (2/2): sidebar, ai_response_card, proactive_footer,
+    # search_overlay, library_view.
+    sidebar = Sidebar()
+    qtbot.addWidget(sidebar)
+    assert sidebar._title.objectName() == "sidebarTitle"
+    assert sidebar._opds_btn.objectName() == "sidebarOpdsBtn"
+
+    card = AIResponseCard()
+    qtbot.addWidget(card)
+    assert card.objectName() == "aiResponseCard"
+    assert card._status_lbl.objectName() == "aiResponseStatusLbl"
+    card.fail("erro")
+    assert card._status_lbl.objectName() == "aiResponseStatusLblError"  # objectName-swap
+
+    footer = ProactiveFooterWidget()
+    qtbot.addWidget(footer)
+    assert footer.objectName() == "ProactiveFooter"
+    assert footer.header_label.objectName() == "proactiveFooterHeader"
+
+    search_bar = DocumentSearchBar()
+    qtbot.addWidget(search_bar)
+    assert search_bar.objectName() == "documentSearchBar"
+    assert search_bar._input.objectName() == "searchBarInput"
+    assert search_bar._count_label.property("state") is None
+    search_bar._input.setText("xyz")
+    search_bar.set_results([])
+    assert search_bar._count_label.property("state") == "empty"  # property-swap
+
+    lib = LibraryView()
+    qtbot.addWidget(lib)
+    assert lib._count_label.objectName() == "libraryCountLabel"
+    assert lib._bulk_bar.objectName() == "bulkBar"
+
 
 def test_theme_propagation_still_works_after_migration(qtbot):
     """Onda 0.2 (F1) continua íntegra: QApplication recebe o QSS do tema."""
@@ -229,3 +334,34 @@ def test_theme_propagation_still_works_after_migration(qtbot):
         css = get_theme(theme_name)
         app.setStyleSheet(css)
         assert app.styleSheet() == css
+
+
+def test_reader_view_has_no_inline_stylesheet_source():
+    """reader_view.py (Onda 0b 2/2): contrato via inspeção ESTÁTICA do fonte,
+    sem instanciar (o módulo importa QtWebEngineWidgets — ver docstring do
+    topo deste arquivo e test_reader_view_guards.py/test_security_epub_web.py
+    para o mesmo motivo).
+
+    Cobre: (1) zero setStyleSheet residual; (2) os objectNames-chave da
+    migração existem como literais no fonte (contrato mínimo com as regras
+    QSS ``#reader*``/``QMenu#readerPopupMenu``/``QMenu#readerAiMenu`` em
+    styles.py).
+    """
+    src_path = (Path(__file__).resolve().parent.parent
+                / "src" / "gui" / "reader_view.py")
+    text = src_path.read_text(encoding="utf-8")
+
+    assert "setStyleSheet(" not in text
+
+    key_object_names = [
+        "readerToolbar", "readerBackBtn", "readerTitleLabel", "readerPageLabel",
+        "readerNavBtn", "readerZoomBtn", "readerToolbarSep",
+        "readerAnnotationsBtn", "readerDoublePageBtn", "readerAiPanelBtn",
+        "readerAudioBtn", "readerStudyBtn", "readerHighlightModeBtn",
+        "readerTypographyBtn", "readerBookmarkBtn", "readerSidePanelToggleBtn",
+        "readerSearchBtn", "readerFullscreenBtn", "readerOverflowBtn",
+        "readerImageScroll", "readerProgressBarWidget", "readerProactiveCombo",
+        "readerPopupMenu", "readerAiMenu",
+    ]
+    for name in key_object_names:
+        assert re.search(rf'"{name}"', text), f'objectName "{name}" ausente do fonte'

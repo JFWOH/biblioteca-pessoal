@@ -161,9 +161,7 @@ class LibraryView(QWidget):
         header_layout.setContentsMargins(24, 16, 24, 8)
 
         self._count_label = QLabel("0 livros")
-        self._count_label.setStyleSheet(
-            "color: #71717a; font-size: 13px; font-weight: 500;"
-        )
+        self._count_label.setObjectName("libraryCountLabel")
         header_layout.addWidget(self._count_label)
 
         # Título da prateleira "Continuar lendo" na MESMA linha da contagem
@@ -202,17 +200,7 @@ class LibraryView(QWidget):
         self._broken_btn.setCheckable(True)
         self._broken_btn.setAccessibleName("Mostrar apenas livros com caminho quebrado")
         self._broken_btn.setFixedHeight(28)
-        self._broken_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent; border: 1px solid #52525b;
-                border-radius: 6px; color: #71717a;
-                font-size: 11px; padding: 0 10px;
-            }
-            QPushButton:hover { border-color: #f59e0b; color: #f59e0b; }
-            QPushButton:checked {
-                background: #451a03; border-color: #f59e0b; color: #f59e0b;
-            }
-        """)
+        self._broken_btn.setObjectName("libraryBrokenBtn")
         self._broken_btn.toggled.connect(self._on_broken_filter_toggled)
         header_layout.addWidget(self._broken_btn)
 
@@ -221,22 +209,14 @@ class LibraryView(QWidget):
         self._grid_btn.setToolTip("Visualização em grade")
         self._grid_btn.setAccessibleName("Visualização em grade")
         self._grid_btn.setFixedSize(32, 32)
-        self._grid_btn.setStyleSheet("""
-            QPushButton { background: #27272a; border: none; border-radius: 6px;
-                          color: #e4e4e7; font-size: 16px; }
-            QPushButton:hover { background: #3f3f46; }
-        """)
+        self._grid_btn.setObjectName("libraryGridBtn")
         header_layout.addWidget(self._grid_btn)
 
         self._list_btn = QPushButton("☰")
         self._list_btn.setToolTip("Visualização em lista")
         self._list_btn.setAccessibleName("Visualização em lista")
         self._list_btn.setFixedSize(32, 32)
-        self._list_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: none; border-radius: 6px;
-                          color: #71717a; font-size: 16px; }
-            QPushButton:hover { background: #27272a; color: #e4e4e7; }
-        """)
+        self._list_btn.setObjectName("libraryListBtn")
         header_layout.addWidget(self._list_btn)
 
         # Ordem de tabulação curada do header (Onda 4, item 4.5): ordenação →
@@ -303,31 +283,19 @@ class LibraryView(QWidget):
         # ── Barra de ação em lote (flutuante, visível ao selecionar) ─────────
         self._bulk_bar = QFrame()
         self._bulk_bar.setObjectName("bulkBar")
-        self._bulk_bar.setStyleSheet("""
-            QFrame#bulkBar {
-                background: #1e1b4b;
-                border-top: 1px solid #4338ca;
-                border-bottom: 1px solid #4338ca;
-            }
-        """)
         self._bulk_bar.setFixedHeight(48)
         bulk_layout = QHBoxLayout(self._bulk_bar)
         bulk_layout.setContentsMargins(24, 0, 24, 0)
         bulk_layout.setSpacing(12)
 
         self._sel_count_lbl = QLabel("0 livros selecionados")
-        self._sel_count_lbl.setStyleSheet("color: #818cf8; font-weight: 600;")
+        self._sel_count_lbl.setObjectName("librarySelCountLbl")
         bulk_layout.addWidget(self._sel_count_lbl)
         bulk_layout.addStretch()
 
         select_broken_btn = QPushButton("☠️ Selecionar quebrados")
         select_broken_btn.setFixedHeight(30)
-        select_broken_btn.setStyleSheet("""
-            QPushButton { background: #451a03; color: #f59e0b;
-                border: 1px solid #92400e; border-radius: 6px;
-                font-size: 11px; padding: 0 10px; }
-            QPushButton:hover { background: #78350f; }
-        """)
+        select_broken_btn.setObjectName("librarySelectBrokenBtn")
         select_broken_btn.clicked.connect(self._select_all_broken)
         bulk_layout.addWidget(select_broken_btn)
 
@@ -337,23 +305,13 @@ class LibraryView(QWidget):
         delete_btn = QPushButton("Excluir Selecionados")
         delete_btn.setIcon(emoji_icon("🗑️", 14))
         delete_btn.setFixedHeight(30)
-        delete_btn.setStyleSheet("""
-            QPushButton { background: #7f1d1d; color: #fca5a5;
-                border: 1px solid #991b1b; border-radius: 6px;
-                font-weight: 600; font-size: 11px; padding: 0 12px; }
-            QPushButton:hover { background: #991b1b; color: white; }
-        """)
+        delete_btn.setObjectName("libraryBulkDeleteBtn")
         delete_btn.clicked.connect(self._on_bulk_delete_clicked)
         bulk_layout.addWidget(delete_btn)
 
         cancel_btn = QPushButton("✕ Cancelar")
         cancel_btn.setFixedHeight(30)
-        cancel_btn.setStyleSheet("""
-            QPushButton { background: transparent; color: #52525b;
-                border: 1px solid #3f3f46; border-radius: 6px;
-                font-size: 11px; padding: 0 10px; }
-            QPushButton:hover { color: #e4e4e7; border-color: #71717a; }
-        """)
+        cancel_btn.setObjectName("libraryBulkCancelBtn")
         cancel_btn.clicked.connect(self._clear_selection)
         bulk_layout.addWidget(cancel_btn)
 
@@ -384,12 +342,12 @@ class LibraryView(QWidget):
 
         empty_icon = QLabel("📚")
         empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_icon.setStyleSheet("font-size: 64px;")
+        empty_icon.setObjectName("libraryEmptyIcon")
         empty_layout.addWidget(empty_icon)
 
         empty_text = QLabel("Sua biblioteca está vazia")
         empty_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_text.setStyleSheet("color: #71717a; font-size: 18px; font-weight: 600;")
+        empty_text.setObjectName("libraryEmptyText")
         empty_layout.addWidget(empty_text)
 
         empty_sub = QLabel(
@@ -397,7 +355,7 @@ class LibraryView(QWidget):
             "ou arraste arquivos para esta janela"
         )
         empty_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_sub.setStyleSheet("color: #52525b; font-size: 13px;")
+        empty_sub.setObjectName("libraryEmptySub")
         empty_layout.addWidget(empty_sub)
 
         import_btn = QPushButton("📂  Importar Livros")

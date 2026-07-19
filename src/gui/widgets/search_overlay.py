@@ -18,12 +18,11 @@ class DocumentSearchBar(QWidget):
         self._results: list[dict] = []
         self._current_index = -1
         self.setFixedHeight(48)
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #161920;
-                border-bottom: 1px solid #2d333f;
-            }
-        """)
+        self.setObjectName("documentSearchBar")
+        # Sem este atributo, QWidget SUBCLASSE não pinta background vindo de
+        # QSS (#documentSearchBar { background-color } seria regra morta) —
+        # mesma lição do AnnotationPanel (Onda 0b 1/2, PR #42/#43).
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._setup_ui()
         self.hide()
 
@@ -34,57 +33,35 @@ class DocumentSearchBar(QWidget):
 
         # Ícone
         icon = QLabel("🔍")
-        icon.setStyleSheet("border: none; font-size: 14px;")
+        icon.setObjectName("searchBarIcon")
         layout.addWidget(icon)
 
         # Campo de busca
         self._input = QLineEdit()
         self._input.setPlaceholderText("Buscar no documento...")
-        self._input.setStyleSheet("""
-            QLineEdit {
-                background: #0f1115;
-                border: 1px solid #2d333f;
-                border-radius: 6px;
-                padding: 6px 12px;
-                color: #e5e7eb;
-                font-size: 13px;
-            }
-            QLineEdit:focus {
-                border-color: #10b981;
-            }
-        """)
+        self._input.setObjectName("searchBarInput")
         self._input.returnPressed.connect(self._on_search)
         self._input.textChanged.connect(self._on_text_changed)
         layout.addWidget(self._input, stretch=1)
 
-        # Contagem de resultados
+        # Contagem de resultados — cor muda com o ESTADO (achou/zerou), não só
+        # o tema: property "state" + seletor QSS, mesmo padrão de
+        # BookCard[selected="true"].
         self._count_label = QLabel()
-        self._count_label.setStyleSheet(
-            "color: #71717a; font-size: 12px; border: none; min-width: 60px;"
-        )
+        self._count_label.setObjectName("searchCountLabel")
         self._count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._count_label)
 
         # Navegação
-        btn_style = """
-            QPushButton {
-                background: #20242d; border: none; border-radius: 4px;
-                color: #e5e7eb; font-size: 12px; padding: 4px 8px;
-                min-width: 28px; min-height: 28px;
-            }
-            QPushButton:hover { background: #2d333f; }
-            QPushButton:disabled { color: #52525b; }
-        """
-
         self._prev_btn = QPushButton("▲")
-        self._prev_btn.setStyleSheet(btn_style)
+        self._prev_btn.setObjectName("searchNavBtn")
         self._prev_btn.setToolTip("Resultado anterior (Shift+Enter)")
         self._prev_btn.clicked.connect(self._go_prev)
         self._prev_btn.setEnabled(False)
         layout.addWidget(self._prev_btn)
 
         self._next_btn = QPushButton("▼")
-        self._next_btn.setStyleSheet(btn_style)
+        self._next_btn.setObjectName("searchNavBtn")
         self._next_btn.setToolTip("Próximo resultado (Enter)")
         self._next_btn.clicked.connect(self._go_next)
         self._next_btn.setEnabled(False)
@@ -93,96 +70,15 @@ class DocumentSearchBar(QWidget):
         # Fechar
         self._close_btn = QPushButton("✕")
         self._close_btn.setFixedSize(28, 28)
-        self._close_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent; border: none;
-                color: #71717a; font-size: 14px;
-            }
-            QPushButton:hover { color: #e4e4e7; }
-        """)
+        self._close_btn.setObjectName("searchBarCloseBtn")
         self._close_btn.clicked.connect(self.close_bar)
         layout.addWidget(self._close_btn)
-        
-        self._theme_count_color = "#10b981"
 
     def set_theme(self, theme: str):
-        if theme == "light":
-            bg_bar = "#f4f4f5"
-            border_bar = "#e4e4e7"
-            bg_input = "#ffffff"
-            border_input = "#d4d4d8"
-            focus_input = "#059669"
-            text_main = "#1A1A1A"
-            btn_bg = "#e4e4e7"
-            btn_hover = "#d4d4d8"
-            btn_text = "#1A1A1A"
-            count_color = "#059669"
-        elif theme == "sepia":
-            bg_bar = "#ebe5d9"
-            border_bar = "#d4cbb8"
-            bg_input = "#EADFCA"
-            border_input = "#d4cbb8"
-            focus_input = "#059669"
-            text_main = "#433422"
-            btn_bg = "#dfd8c8"
-            btn_hover = "#d4cbb8"
-            btn_text = "#433422"
-            count_color = "#059669"
-        else: # dark
-            bg_bar = "#161920"
-            border_bar = "#2d333f"
-            bg_input = "#0f1115"
-            border_input = "#2d333f"
-            focus_input = "#10b981"
-            text_main = "#e5e7eb"
-            btn_bg = "#20242d"
-            btn_hover = "#2d333f"
-            btn_text = "#e5e7eb"
-            count_color = "#10b981"
-
-        self.setStyleSheet(f"""
-            QWidget {{
-                background-color: {bg_bar};
-                border-bottom: 1px solid {border_bar};
-            }}
-        """)
-        
-        self._input.setStyleSheet(f"""
-            QLineEdit {{
-                background: {bg_input};
-                border: 1px solid {border_input};
-                border-radius: 6px;
-                padding: 6px 12px;
-                color: {text_main};
-                font-size: 13px;
-            }}
-            QLineEdit:focus {{
-                border-color: {focus_input};
-            }}
-        """)
-
-        btn_style = f"""
-            QPushButton {{
-                background: {btn_bg}; border: none; border-radius: 4px;
-                color: {btn_text}; font-size: 12px; padding: 4px 8px;
-                min-width: 28px; min-height: 28px;
-            }}
-            QPushButton:hover {{ background: {btn_hover}; }}
-            QPushButton:disabled {{ color: #a1a1aa; }}
-        """
-        self._prev_btn.setStyleSheet(btn_style)
-        self._next_btn.setStyleSheet(btn_style)
-
-        self._close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent; border: none;
-                color: {btn_text}; font-size: 14px;
-            }}
-            QPushButton:hover {{ color: #ef4444; }}
-        """)
-        
-        self._theme_count_color = count_color
-        self._update_count()
+        """No-op de compat: o tema vem do QSS central da QApplication
+        (styles.py, seletores #documentSearchBar/#searchBar*, Onda 0b 2/2) —
+        nada a propagar por widget. Mantido porque reader_view chama a cada
+        troca de tema."""
 
     def show_bar(self):
         """Exibe a barra de busca e foca no input."""
@@ -235,18 +131,23 @@ class DocumentSearchBar(QWidget):
             self._update_count()
             self.navigate_result.emit(self._current_index)
 
+    def _set_count_state(self, state: str) -> None:
+        """Troca a propriedade "state" do label de contagem (achou/zerou) e
+        força o repolish do QSS — mesmo padrão de BookCard[selected]."""
+        if self._count_label.property("state") == state:
+            return  # estado inalterado — evita repolish à toa
+        self._count_label.setProperty("state", state)
+        self._count_label.style().unpolish(self._count_label)
+        self._count_label.style().polish(self._count_label)
+
     def _update_count(self):
         if self._results:
             self._count_label.setText(
                 f"{self._current_index + 1}/{len(self._results)}"
             )
-            self._count_label.setStyleSheet(
-                f"color: {self._theme_count_color}; font-size: 12px; border: none; min-width: 60px;"
-            )
+            self._set_count_state("found")
         elif self._input.text().strip():
             self._count_label.setText("0 resultados")
-            self._count_label.setStyleSheet(
-                "color: #ef4444; font-size: 12px; border: none; min-width: 60px;"
-            )
+            self._set_count_state("empty")
         else:
             self._count_label.setText("")
