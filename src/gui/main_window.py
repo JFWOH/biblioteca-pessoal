@@ -1839,10 +1839,20 @@ class MainWindow(QMainWindow):
         # tocar o core — ADR-006) são idempotentes/no-op fora do caso real,
         # então chamá-los sempre que o bit Minimized muda de estado é seguro.
         if event.type() == QEvent.Type.WindowStateChange:
-            if self.windowState() & Qt.WindowState.WindowMinimized:
-                self._reader_view._pause_reading_timer()
-            else:
-                self._reader_view._resume_reading_timer()
+            # getattr defensivo: showMaximized() em _setup_window roda ANTES
+            # de _setup_ui criar _reader_view, e o WindowStateChange chega
+            # SÍNCRONO durante o __init__ — sem a guarda, todo start com
+            # window.maximized=True abortaria (mesmo hazard documentado em
+            # _is_narration_active).
+            rv = getattr(self, "_reader_view", None)
+            if rv is not None:
+                if self.windowState() & Qt.WindowState.WindowMinimized:
+                    # Narração ativa vira páginas mesmo minimizado (modo
+                    # audiobook) e esse tempo CONTA como leitura — não pausa.
+                    if not rv.is_narrating():
+                        rv._pause_reading_timer()
+                else:
+                    rv._resume_reading_timer()
         super().changeEvent(event)
 
     def closeEvent(self, event):

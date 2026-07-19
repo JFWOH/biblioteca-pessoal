@@ -121,7 +121,14 @@ class _ContinueReadingCard(QWidget):
         abrir o painel isoladamente)."""
         menu = self._build_context_menu()
         chosen = menu.exec(self.mapToGlobal(event.pos()))
-        self._handle_context_action(chosen)
+        try:
+            self._handle_context_action(chosen)
+        except RuntimeError:
+            # A prateleira é RECRIADA (deleteLater) a cada _load_library em
+            # background (auto-import/metadados); se isso ocorrer com o menu
+            # aberto, o wrapper C++ deste card já morreu quando exec retorna
+            # — descarta a ação em vez de propagar o RuntimeError.
+            pass
 
     def _build_context_menu(self) -> QMenu:
         """Monta o QMenu de contexto. Separado de ``contextMenuEvent`` (como
@@ -181,6 +188,7 @@ class LibraryView(QWidget):
     # em config.py, Tarefa 2.3).
     _SORT_OPTIONS = [
         ("Data de adição", "date_added"),
+        ("Última atividade", "date_modified"),
         ("Título", "title"),
         ("Autor", "author"),
         ("Avaliação", "rating"),
@@ -247,7 +255,8 @@ class LibraryView(QWidget):
         header_layout.addWidget(self._sort_order_btn)
 
         # Botão "Mostrar apenas quebrados"
-        self._broken_btn = QPushButton("⚠️ Mostrar quebrados")
+        self._broken_btn = QPushButton("Mostrar quebrados")
+        self._broken_btn.setIcon(emoji_icon("⚠️", 14))
         self._broken_btn.setCheckable(True)
         self._broken_btn.setAccessibleName("Mostrar apenas livros com caminho quebrado")
         self._broken_btn.setFixedHeight(28)
@@ -344,7 +353,8 @@ class LibraryView(QWidget):
         bulk_layout.addWidget(self._sel_count_lbl)
         bulk_layout.addStretch()
 
-        select_broken_btn = QPushButton("☠️ Selecionar quebrados")
+        select_broken_btn = QPushButton("Selecionar quebrados")
+        select_broken_btn.setIcon(emoji_icon("☠️", 14))
         select_broken_btn.setFixedHeight(30)
         select_broken_btn.setObjectName("librarySelectBrokenBtn")
         select_broken_btn.clicked.connect(self._select_all_broken)
@@ -360,7 +370,8 @@ class LibraryView(QWidget):
         delete_btn.clicked.connect(self._on_bulk_delete_clicked)
         bulk_layout.addWidget(delete_btn)
 
-        cancel_btn = QPushButton("✕ Cancelar")
+        cancel_btn = QPushButton("Cancelar")
+        cancel_btn.setIcon(emoji_icon("✕", 12))
         cancel_btn.setFixedHeight(30)
         cancel_btn.setObjectName("libraryBulkCancelBtn")
         cancel_btn.clicked.connect(self._clear_selection)
@@ -409,7 +420,8 @@ class LibraryView(QWidget):
         empty_sub.setObjectName("libraryEmptySub")
         empty_layout.addWidget(empty_sub)
 
-        import_btn = QPushButton("📂  Importar Livros")
+        import_btn = QPushButton("Importar Livros")
+        import_btn.setIcon(emoji_icon("📂", 14))
         import_btn.setObjectName("primaryBtn")
         import_btn.setFixedWidth(200)
         import_btn.clicked.connect(lambda: self.book_open.emit(-1))

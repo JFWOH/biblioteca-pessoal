@@ -171,8 +171,10 @@ def view(qtbot):
 
 
 def test_sort_combo_has_same_options_as_settings_dialog(view):
+    # "date_modified" (Última atividade) adicionado na auditoria do PR #45:
+    # era a única forma de recuperar a ordem por recência das visões de status.
     values = [view._sort_combo.itemData(i) for i in range(view._sort_combo.count())]
-    assert values == ["date_added", "title", "author", "rating"]
+    assert values == ["date_added", "date_modified", "title", "author", "rating"]
 
 
 def test_changing_combo_emits_sort_changed(view, qtbot):

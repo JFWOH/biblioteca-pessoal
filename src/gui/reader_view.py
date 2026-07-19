@@ -1102,7 +1102,9 @@ class ReaderView(QWidget):
     # página; na troca/fechamento o decorrido é normalizado pelo teto
     # anti-idle (clamp_session_seconds, 300s/página) e emitido no
     # progress_changed para o main_window persistir em reading_sessions.
-    # Limitação 5.2 CORRIGIDA nesta rodada: janela minimizada/sem foco agora
+    # Limitação 5.2 CORRIGIDA nesta rodada: janela MINIMIZADA agora
+    # (perda de foco sem minimizar NÃO pausa — o teto de 300s/pág limita;
+    # narração ativa tampouco pausa: modo audiobook conta como leitura)
     # pausa o cronômetro (_pause_reading_timer/_resume_reading_timer, wiring
     # em MainWindow.changeEvent) — o trecho em curso é congelado num
     # acumulado puro (total_elapsed_seconds, core/reading_stats.py) em vez de

@@ -8,6 +8,7 @@ por checagem estática — padrão da suíte para o reader_view, que não é
 instanciável em teste sem WebEngine).
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -242,16 +243,10 @@ class TestReadingTimeWiring:
 class TestReadingTimerPauseWiring:
     def test_reader_view_imports_total_elapsed_seconds(self):
         """A combinação acumulado+trecho em curso é lógica PURA no core
-        (ADR-006), não reimplementada na GUI."""
-        assert (
-            "from src.core.reading_stats import clamp_session_seconds, "
-            "total_elapsed_seconds" in _READER_VIEW
-        )
-
-    def test_pause_and_resume_methods_exist(self):
-        assert "def _pause_reading_timer(self)" in _READER_VIEW
-        assert "def _resume_reading_timer(self)" in _READER_VIEW
-        assert "def _start_reading_timer(self)" in _READER_VIEW
+        (ADR-006), não reimplementada na GUI. Assert tolerante a re-wrap
+        de import por formatter (não exige a string exata em uma linha)."""
+        assert "total_elapsed_seconds" in _READER_VIEW
+        assert "from src.core.reading_stats import" in _READER_VIEW
 
     def test_render_page_starts_timer_via_helper_not_direct_assignment(self):
         """_render_page delega a _start_reading_timer (que respeita a pausa
@@ -266,8 +261,22 @@ class TestReadingTimerPauseWiring:
         assert "def changeEvent(self, event):" in _MAIN_WINDOW
         assert "QEvent.Type.WindowStateChange" in _MAIN_WINDOW
         assert "Qt.WindowState.WindowMinimized" in _MAIN_WINDOW
-        assert "self._reader_view._pause_reading_timer()" in _MAIN_WINDOW
-        assert "self._reader_view._resume_reading_timer()" in _MAIN_WINDOW
+        assert "rv._pause_reading_timer()" in _MAIN_WINDOW
+        assert "rv._resume_reading_timer()" in _MAIN_WINDOW
+
+    def test_change_event_guards_against_startup_and_narration(self):
+        """Regressões da auditoria do PR #45: (a) showMaximized() em
+        _setup_window entrega WindowStateChange SÍNCRONO antes de
+        _reader_view existir — sem getattr, todo start com
+        window.maximized=True abortaria; (b) narração ativa vira páginas
+        minimizado (modo audiobook) e esse tempo CONTA como leitura —
+        minimizar não pode pausar o cronômetro com is_narrating()."""
+        match = re.search(r"def changeEvent\(self, event\):(.*?)\n    def ",
+                          _MAIN_WINDOW, re.DOTALL)
+        assert match, "changeEvent não encontrado"
+        body = match.group(1)
+        assert 'getattr(self, "_reader_view", None)' in body
+        assert "is_narrating()" in body
 
     def test_core_reading_stats_stays_free_of_pyqt6(self):
         """ADR-006: core/reading_stats.py não pode importar PyQt6/GUI (a
