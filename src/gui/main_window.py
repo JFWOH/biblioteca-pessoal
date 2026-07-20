@@ -1087,6 +1087,10 @@ class MainWindow(QMainWindow):
         nasce num worker via _check_ollama_status (chromadb custa ~27 s em
         disco frio); o warmup dos modelos segue 3 s depois, como antes.
         """
+        # 1ª execução do pacote (rodada E2): o manual do usuário entra como
+        # livro nº 1 — já aparece na primeira pintura da grade, logo abaixo.
+        from src.core.first_run import import_manual_if_first_run
+        import_manual_if_first_run(self._library, self._config)
         self._load_library()
         self._setup_watcher()
         self._check_ollama_status()

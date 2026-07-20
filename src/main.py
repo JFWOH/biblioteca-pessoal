@@ -9,6 +9,22 @@ project_root = str(Path(__file__).resolve().parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+
+def _apply_portable_env(root: Path) -> None:
+    """Modo pacote portátil (rodada E2 do plano de empacotamento).
+
+    Com o marcador ``portable.flag`` na raiz (criado pelo build, rodada E4),
+    o cache de modelos (HF_HOME) vive DENTRO da pasta do app: o pacote pode
+    pré-embutir o Kokoro e nada é gravado no perfil do usuário. ``setdefault``
+    preserva um HF_HOME já definido pelo usuário; sem o marcador (ambiente de
+    desenvolvimento), nada muda.
+    """
+    if (root / "portable.flag").exists():
+        os.environ.setdefault("HF_HOME", str(root / "data" / "hf_cache"))
+
+
+_apply_portable_env(Path(project_root))
+
 # Force HuggingFace offline mode unconditionally at process startup to prevent network hangs
 os.environ["HF_HUB_OFFLINE"] = "1"
 

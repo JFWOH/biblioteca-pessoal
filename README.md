@@ -251,7 +251,12 @@ compatível) via um servidor local **stdio** — sem rede.
   **aditivo**, nada destrutivo. Para ativar, edite `data/config.json` com
   `{"mcp": {"allow_writes": true}}` (vale na hora, sem reiniciar o servidor).
 
-Registro no Claude Code (Windows — use o python do venv do projeto; o
+O caminho fácil: **⚙️ Configurações → 🔌 Integrações** dentro do app — o
+comando de registro (com os caminhos da sua máquina), o bloco `mcpServers`
+para outros hosts (Cursor, VS Code, Gemini CLI…) e a chave de escrita
+(`mcp.allow_writes`) estão lá, com botões de copiar.
+
+Registro manual no Claude Code (Windows — use o python do venv do projeto; o
 `PYTHONPATH` garante que `src.mcp.server` resolva a partir de qualquer pasta):
 
 ```bash

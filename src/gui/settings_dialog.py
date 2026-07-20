@@ -1,12 +1,15 @@
 """Diálogo de configurações da aplicação."""
 
+import json
+import sys
+
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox, QTabWidget, QWidget,
     QGroupBox, QFontComboBox, QSlider, QListWidget, QFileDialog,
-    QLineEdit, QScrollArea,
+    QLineEdit, QScrollArea, QPlainTextEdit, QApplication,
 )
-from PyQt6.QtCore import Qt, QSize, pyqtSignal
+from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 
 from src.core.config import ConfigManager, DEFAULT_CONFIG
@@ -55,6 +58,7 @@ class SettingsDialog(QDialog):
         self._tabs.addTab(self._create_library_tab(), "📚 Biblioteca")
         self._tabs.addTab(self._create_tts_tab(), "🔊 Narração")
         self._tabs.addTab(self._create_advanced_tab(), "⚙️ Avançado")
+        self._tabs.addTab(self._create_integrations_tab(), "🔌 Integrações")
         layout.addWidget(self._tabs)
 
         # Botões
@@ -644,6 +648,96 @@ class SettingsDialog(QDialog):
         layout.addStretch()
         return outer
 
+    def _create_integrations_tab(self) -> QWidget:
+        """Aba de integrações externas — servidor MCP (rodada E2 do pacote).
+
+        Comando e snippet são computados por máquina (sys.executable +
+        PROJECT_ROOT); só a chave de escrita é persistida no config.
+        """
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setSpacing(12)
+
+        group = QGroupBox("Servidor MCP — conecte assistentes de IA à sua biblioteca")
+        group.setObjectName("settingsGroup")
+        layout = QVBoxLayout(group)
+        layout.setSpacing(8)
+
+        desc = QLabel(
+            "Assistentes de IA que rodam no SEU computador podem explorar a "
+            "biblioteca, buscar dentro dos livros e consultar a IA local — "
+            "tudo offline. Compatível com hosts MCP locais: Claude "
+            "Desktop/Code, Cursor, Windsurf, VS Code (Copilot), Cline, Zed, "
+            "Gemini CLI e LM Studio, entre outros.")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        layout.addWidget(QLabel("Claude Code — cole no terminal uma única vez:"))
+        self._mcp_cmd_edit = QPlainTextEdit(self._mcp_register_command())
+        self._mcp_cmd_edit.setReadOnly(True)
+        self._mcp_cmd_edit.setFixedHeight(64)
+        layout.addWidget(self._mcp_cmd_edit)
+        copy_cmd_btn = QPushButton("Copiar comando")
+        copy_cmd_btn.setIcon(emoji_icon("📋"))
+        copy_cmd_btn.setObjectName("secondaryBtn")
+        copy_cmd_btn.clicked.connect(
+            lambda: self._copy_to_clipboard(
+                self._mcp_cmd_edit.toPlainText(), copy_cmd_btn))
+        layout.addWidget(copy_cmd_btn)
+
+        layout.addWidget(QLabel(
+            "Outros hosts (Cursor, VS Code, Gemini CLI…) — bloco mcpServers:"))
+        self._mcp_json_edit = QPlainTextEdit(self._mcp_servers_json())
+        self._mcp_json_edit.setReadOnly(True)
+        self._mcp_json_edit.setFixedHeight(120)
+        layout.addWidget(self._mcp_json_edit)
+        copy_json_btn = QPushButton("Copiar configuração JSON")
+        copy_json_btn.setIcon(emoji_icon("📋"))
+        copy_json_btn.setObjectName("secondaryBtn")
+        copy_json_btn.clicked.connect(
+            lambda: self._copy_to_clipboard(
+                self._mcp_json_edit.toPlainText(), copy_json_btn))
+        layout.addWidget(copy_json_btn)
+
+        self._mcp_allow_writes = QCheckBox(
+            "Permitir que assistentes escrevam na biblioteca "
+            "(notas da IA, tags, coleções, status)")
+        layout.addWidget(self._mcp_allow_writes)
+        note = QLabel(
+            "A leitura é sempre permitida. A escrita é ADITIVA: assistentes "
+            "nunca apagam nem editam o que já existe. A chave vale na hora — "
+            "o servidor relê a configuração a cada chamada.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        outer.addWidget(group)
+        outer.addStretch()
+        return tab
+
+    @staticmethod
+    def _mcp_python_and_root() -> tuple[str, str]:
+        from src.utils.constants import PROJECT_ROOT
+        return sys.executable, str(PROJECT_ROOT)
+
+    def _mcp_register_command(self) -> str:
+        python_exe, root = self._mcp_python_and_root()
+        return (f'claude mcp add biblioteca -e "PYTHONPATH={root}" -- '
+                f'"{python_exe}" -m src.mcp.server')
+
+    def _mcp_servers_json(self) -> str:
+        python_exe, root = self._mcp_python_and_root()
+        return json.dumps({"mcpServers": {"biblioteca": {
+            "command": python_exe,
+            "args": ["-m", "src.mcp.server"],
+            "env": {"PYTHONPATH": root},
+        }}}, indent=2, ensure_ascii=False)
+
+    def _copy_to_clipboard(self, text: str, button: QPushButton) -> None:
+        QApplication.clipboard().setText(text)
+        original = button.text()
+        button.setText("Copiado!")
+        QTimer.singleShot(1500, lambda: button.setText(original))
+
     def _load_settings(self):
         """Carrega configurações atuais nos widgets."""
         # Tema
@@ -742,6 +836,9 @@ class SettingsDialog(QDialog):
         self._adv_translation_default_tgt.setText(translation_cfg.get("default_tgt", "pt"))
         self._adv_translation_revise_llm.setChecked(translation_cfg.get("revise_with_llm", True))
 
+        # Integrações — servidor MCP (rodada E2)
+        self._mcp_allow_writes.setChecked(self._config.get("mcp.allow_writes", False))
+
     def _save_and_close(self):
         """Salva configurações e fecha o diálogo."""
         self._config.set("theme", self._theme_combo.currentData())
@@ -795,6 +892,10 @@ class SettingsDialog(QDialog):
         self._config.set("translation.default_src", self._adv_translation_default_src.text().strip() or "en")
         self._config.set("translation.default_tgt", self._adv_translation_default_tgt.text().strip() or "pt")
         self._config.set("translation.revise_with_llm", self._adv_translation_revise_llm.isChecked())
+
+        # Integrações — servidor MCP (rodada E2). ConfigManager.set() já
+        # persiste no disco, e o servidor relê a cada chamada: vale na hora.
+        self._config.set("mcp.allow_writes", self._mcp_allow_writes.isChecked())
 
         self.settings_changed.emit()
         self.accept()
