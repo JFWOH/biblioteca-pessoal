@@ -156,7 +156,15 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   linkificar o corpo exigiria trocar QTextEdit streaming por QTextBrowser (débito
   registrado — **PAGO no PR #41, 2026-07-19: QTextBrowser + âncoras
   auto-contidas citation:{book_id}:{page0} pós-stream via Citation.start/end,
-  recoloridas na troca de tema**); página do sinal `source_clicked` é 0-based. (3.2) X-Ray = 3ª aba do
+  recoloridas na troca de tema**); página do sinal `source_clicked` é 0-based.
+  **Débitos 3.4/3.5/3.6 — PAGOS na Fase B do ciclo jul/2026-C (2026-07-20):**
+  3.4 Word Wise em EPUB (PR #56: spike com evidência — mouseup→QWebChannel;
+  selectionChanged descartado como gatilho; RESTA o SelectionActionPopover
+  p/ seleções longas no EPUB, registrado); 3.5 cache de tradução no
+  traduzir-e-narrar (PR #53: mesma fingerprint do fluxo texto; releitura
+  traduzida quase instantânea); 3.6 síntese-sem-tocar como API pública
+  `TTSRouter.synthesize_segments` (PR #54: GUI sem acesso a privados —
+  guarda estrutural permanente). (3.2) X-Ray = 3ª aba do
   painel lateral; conceitos do livro cacheados 1x, interseção por página eager
   (string matching, `core/xray.py` puro), "onde mais aparece" lazy ao expandir.
   (3.3) `build_study_prompt(concepts=)` retrocompatível; "🃏 Dos destaques" no
@@ -218,8 +226,11 @@ revisão de produto). Suíte: 832 passed; ruff limpo; CI em 2 shards com retry.
   `indexed_ok`; sanitização palavra→frase-entre-aspas (query maliciosa → vazio,
   nunca exceção, ADR-005); UX: checkbox "No conteúdo" + página de resultados no
   stack com snippets destacados, clique abre livro na página (reusa caminho da
-  Onda 3). DÉBITOS: OCR salvo isolado só entra no próximo backfill; livros nunca
-  indexados no RAG só ganham FTS quando indexados; sem stemming/prefixo.
+  Onda 3). DÉBITOS — **PAGOS (PR #55, 2026-07-20, Fase B jul/2026-C)**: OCR
+  salvo entra no índice NA HORA (upsert em save_ocr_page); livro importado
+  ganha FTS imediato (kick só-FTS pós-importação, gates dispensados 1x;
+  watcher fora do atalho — contenção B0); busca por PREFIXO no último termo.
+  Stemming pleno segue FORA (limitação do FTS5 local — decisão registrada).
   (5.2) tabela `reading_sessions` (UNIQUE book+date, upsert somando segundos)
   alimentada DENTRO de `update_reading_progress` (mesma transação, assinatura
   preservada); streak termina hoje OU ontem (não quebra antes do dia acabar);
