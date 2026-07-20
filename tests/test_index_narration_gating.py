@@ -125,6 +125,7 @@ def test_busy_check_false_does_not_touch_last_activity(qtbot, db):
     svc = AutoIndexService(db=db, rag_engine=FakeEngine(), busy_check=lambda: False)
     stale = time.monotonic() - 9999
     svc._last_activity = stale
+    svc._created_at = stale  # já passou a carência de startup (achado B0)
     with patch("src.gui.auto_index_service.AutoIndexWorker") as MockWorker:
         MockWorker.return_value.isRunning.return_value = True
         svc._on_tick()

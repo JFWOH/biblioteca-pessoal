@@ -137,6 +137,7 @@ def test_idle_backfills_rag_ok_without_fts(qtbot, tmp_path):
     db.set_indexing_status(bid, "indexed_ok")  # já no RAG, mas sem FTS
     svc = AutoIndexService(db=db, rag_engine=_FakeEngine())
     svc._last_activity = time.monotonic() - 9999
+    svc._created_at = time.monotonic() - 9999  # já passou a carência de startup (B0)
     with patch("src.gui.auto_index_service.AutoIndexWorker") as MockWorker:
         MockWorker.return_value.isRunning.return_value = True
         svc._on_tick()

@@ -47,6 +47,11 @@ class AutoIndexService(QObject):
         self._current: tuple[int, str] | None = None  # (book_id, título) em curso
         self._fts_only_current = False  # o trabalho em curso é backfill de FTS?
         self._last_activity = time.monotonic()
+        # Carência de startup (achado B0): momento de criação do serviço (≈ o
+        # launch do app). A indexação não dispara enquanto (now - _created_at)
+        # < startup_grace_s — protege a sessão interativa inicial e o TTS da
+        # contenção de CPU/IO da indexação. Ver _on_tick.
+        self._created_at = time.monotonic()
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_tick)
@@ -89,6 +94,15 @@ class AutoIndexService(QObject):
                 # na cauda do áudio.
                 self._last_activity = time.monotonic()
                 return
+        # Carência de startup (achado B0): não INICIAR indexação nos primeiros N
+        # s após o launch, mesmo sem leitura ativa (navegar na grade não conta
+        # como atividade). Vem DEPOIS do busy_check para não atrapalhar o
+        # refresh do relógio de ociosidade durante uma narração. Evita que o
+        # indexador comece ~2 min após abrir o app e compita por CPU/IO com a
+        # sessão interativa e o TTS (TTFB do Kokoro estourando o SLO).
+        if (time.monotonic() - self._created_at) < float(
+                self._cfg("startup_grace_s", 300)):
+            return
         if self._worker is not None and self._worker.isRunning():
             return
         inactivity = time.monotonic() - self._last_activity

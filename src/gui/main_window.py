@@ -59,12 +59,28 @@ class MainWindow(QMainWindow):
         self._library = LibraryManager(self._db, self._config)
         self._search_engine = SearchEngine(self._db)
 
-        # Inicializa TTS router persistente
+        # Inicializa TTS router persistente. O registro/inicialização dos
+        # provedores puxa ``import kokoro`` → torch/transformers (~5,6 s de
+        # trabalho medidos no startup, achado B0): feito aqui de forma síncrona,
+        # CONGELAVA a GUI ("Não está respondendo") antes de a janela aparecer, e
+        # era a origem dos warnings do torch no console do launch.
+        #
+        # Solução: (1) o trabalho pesado roda numa QThread (o roteador é o MESMO
+        # objeto passado ao ReaderView, então os provedores aparecem nele assim
+        # que a thread termina, muito antes de o usuário abrir um livro e clicar
+        # em Ouvir); (2) o START da thread é adiado com singleShot(0) para
+        # DEPOIS de o event loop começar (i.e., após window.show()). Isso é
+        # essencial: o import é CPU-bound e disputa o GIL; iniciado ainda no
+        # __init__ (pré-show), a disputa inflava o próprio __init__ e atrasava a
+        # janela. Adiado para depois do show, a janela já apareceu e o loop
+        # segue pumpando entre as fatias de GIL → sem "Não está respondendo".
+        from PyQt6.QtCore import QTimer
         from src.core.tts.tts_router import TTSRouter
         from src.core.tts.text_preprocessor import TTSTextPreprocessor
+        from src.gui.workers.tts_init_worker import TTSInitWorker
         self._tts_router = TTSRouter(TTSTextPreprocessor())
-        self._tts_router.auto_register_providers()
-        self._tts_router.initialize()
+        self._tts_init_worker = TTSInitWorker(self._tts_router, parent=self)
+        QTimer.singleShot(0, self._tts_init_worker.start)
 
         # Inicializa RAG engine (graceful — não trava se Ollama offline)
         self._rag_engine = None
@@ -1866,6 +1882,12 @@ class MainWindow(QMainWindow):
             self._auto_index_service.shutdown()
         except Exception as exc:
             logger.warning(f"Falha ao encerrar a auto-indexação (ignorado): {exc}")
+        # Aguarda (limitado) o worker de init do TTS: nunca destruir um QThread
+        # cuja thread do SO ainda vive (lição do PR #32/SIGABRT). Em geral o
+        # import já terminou muito antes do fechamento.
+        worker = getattr(self, "_tts_init_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.wait(8000)
         # Para o worker RAG
         if self._rag_worker and self._rag_worker.isRunning():
             self._rag_worker.stop()

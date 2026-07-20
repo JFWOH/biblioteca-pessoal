@@ -40,6 +40,7 @@ def _idle_svc(db, engine=None, config=None, busy_check=None) -> AutoIndexService
     svc = AutoIndexService(db=db, rag_engine=engine or FakeEngine(),
                            config=config, busy_check=busy_check)
     svc._last_activity = time.monotonic() - 9999  # ocioso há muito tempo
+    svc._created_at = time.monotonic() - 9999      # já passou a carência de startup (B0)
     return svc
 
 
@@ -99,6 +100,27 @@ def test_no_engine_blocks(qtbot, db):
     with patch("src.gui.auto_index_service.AutoIndexWorker") as MockWorker:
         svc._on_tick()
         MockWorker.assert_not_called()
+    svc.shutdown()
+
+
+def test_startup_grace_blocks_initial_indexing(qtbot, db):
+    """Achado B0: nos primeiros N s após o launch a indexação NÃO dispara,
+    mesmo com o app aparentemente ocioso (sem leitura ativa). Sem isso, ~2 min
+    após abrir o app o indexador competia por CPU/IO com a sessão e o TTS."""
+    _book(db)
+    svc = AutoIndexService(db=db, rag_engine=FakeEngine(),
+                           config=FakeConfig({"auto_index.startup_grace_s": 300}))
+    svc._last_activity = time.monotonic() - 9999  # ocioso, mas...
+    # _created_at é "agora" (recém-criado) → dentro da carência de 300 s.
+    with patch("src.gui.auto_index_service.AutoIndexWorker") as MockWorker:
+        svc._on_tick()
+        MockWorker.assert_not_called()  # carência bloqueia
+    # Passada a carência, com o app ocioso, volta a indexar.
+    svc._created_at = time.monotonic() - 9999
+    with patch("src.gui.auto_index_service.AutoIndexWorker") as MockWorker:
+        MockWorker.return_value.isRunning.return_value = True
+        svc._on_tick()
+        MockWorker.assert_called_once()
     svc.shutdown()
 
 
