@@ -46,6 +46,7 @@ class AutoIndexService(QObject):
         self._fts_attempted: set[int] = set()
         self._current: tuple[int, str] | None = None  # (book_id, título) em curso
         self._fts_only_current = False  # o trabalho em curso é backfill de FTS?
+        self._kick_once = False  # tick pós-importação (débito 5.1, rodada B4)
         self._last_activity = time.monotonic()
         # Carência de startup (achado B0): momento de criação do serviço (≈ o
         # launch do app). A indexação não dispara enquanto (now - _created_at)
@@ -68,9 +69,25 @@ class AutoIndexService(QObject):
         """Marca atividade de leitura (conectado a reading_context_updated)."""
         self._last_activity = time.monotonic()
 
+    def kick_after_import(self, *args) -> None:
+        """Importação EXPLÍCITA concluída: agenda um tick imediato, com os
+        gates de ociosidade/carência/needs_reindex dispensados UMA vez, para
+        o livro novo entrar na busca de conteúdo sem esperar ocioso (débito
+        5.1, rodada B4). Só FTS (extração de texto — leve; sem embeddings);
+        o busy_check continua valendo (não compete com narração). O watcher
+        de auto-import NÃO usa este atalho: o scan dele dispara no launch e
+        o kick reabriria a contenção de startup do achado B0.
+        """
+        self._kick_once = True
+        QTimer.singleShot(0, self._on_tick)
+
     # ── Ciclo ─────────────────────────────────────────────────────────
 
     def _on_tick(self):
+        # Kick pós-importação (débito 5.1): consumido aqui; dispensa os gates
+        # de carência/ociosidade/needs_reindex UMA vez (FTS não toca o Chroma).
+        kicked = getattr(self, "_kick_once", False)
+        self._kick_once = False
         if not bool(self._cfg("enabled", True)):
             return
         if self._db is None or self._rag_engine is None:
@@ -100,32 +117,43 @@ class AutoIndexService(QObject):
         # refresh do relógio de ociosidade durante uma narração. Evita que o
         # indexador comece ~2 min após abrir o app e compita por CPU/IO com a
         # sessão interativa e o TTS (TTFB do Kokoro estourando o SLO).
-        if (time.monotonic() - self._created_at) < float(
+        if not kicked and (time.monotonic() - self._created_at) < float(
                 self._cfg("startup_grace_s", 300)):
             return
         if self._worker is not None and self._worker.isRunning():
             return
-        inactivity = time.monotonic() - self._last_activity
-        if inactivity < float(self._cfg("idle_min_inactivity_s", 120)):
-            return
-        try:
-            # Coleção bloqueada por troca de modelo → reindex manual resolve.
-            if self._rag_engine.needs_reindex():
-                logger.debug("Auto-index: needs_reindex pendente; aguardando reindex manual.")
+        if not kicked:
+            inactivity = time.monotonic() - self._last_activity
+            if inactivity < float(self._cfg("idle_min_inactivity_s", 120)):
                 return
-        except Exception:
-            return
+            try:
+                # Coleção bloqueada por troca de modelo → reindex manual resolve.
+                if self._rag_engine.needs_reindex():
+                    logger.debug(
+                        "Auto-index: needs_reindex pendente; aguardando reindex manual.")
+                    return
+            except Exception:
+                return
 
-        # Prioridade: indexar livros sem RAG; só depois fazer backfill do FTS
-        # de conteúdo (mais barato) dos que já têm RAG mas não têm busca por
-        # conteúdo. Um trabalho por tick, sempre 1 livro por vez.
-        book = self._pick_candidate()
-        fts_only = False
-        if book is None:
-            book = self._pick_fts_backfill_candidate()
+        if kicked:
+            # Pós-importação: SÓ FTS do livro recém-importado (mais recente
+            # sem FTS) — a indexação RAG completa (embeddings) fica para o
+            # ciclo ocioso normal.
+            book = self._pick_fts_kick_candidate()
             fts_only = True
-        if book is None:
-            return
+            if book is None:
+                return
+        else:
+            # Prioridade: indexar livros sem RAG; só depois fazer backfill do
+            # FTS de conteúdo (mais barato) dos que já têm RAG mas não têm
+            # busca por conteúdo. Um trabalho por tick, sempre 1 livro por vez.
+            book = self._pick_candidate()
+            fts_only = False
+            if book is None:
+                book = self._pick_fts_backfill_candidate()
+                fts_only = True
+            if book is None:
+                return
         book_id, title = book["id"], book.get("title", "")
         if fts_only:
             self._fts_attempted.add(book_id)
@@ -201,6 +229,30 @@ class AutoIndexService(QObject):
             candidates = self._db.get_books_by_indexing_status("indexed_ok")
         except Exception as exc:
             logger.debug("Auto-index: falha ao listar backfill FTS: %s", exc)
+            return None
+        for book in candidates:
+            bid = book["id"]
+            if bid in self._fts_attempted:
+                continue
+            try:
+                if not self._db.fts_is_indexed(bid):
+                    return book
+            except Exception:
+                return None
+        return None
+
+    def _pick_fts_kick_candidate(self) -> dict | None:
+        """Livro MAIS RECENTE ainda sem FTS de conteúdo (pós-importação).
+
+        Diferente do backfill em ocioso, NÃO exige RAG (``indexed_ok``) — o
+        recém-importado nunca foi indexado. ``_fts_attempted`` continua
+        evitando loop em livros sem texto extraível.
+        """
+        try:
+            candidates = self._db.get_all_books(
+                sort_by="date_added", sort_order="desc", limit=10)
+        except Exception as exc:
+            logger.debug("Auto-index: falha ao listar kick FTS: %s", exc)
             return None
         for book in candidates:
             bid = book["id"]

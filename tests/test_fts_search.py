@@ -34,7 +34,8 @@ def test_sanitize_empty_returns_empty(raw):
 
 
 def test_sanitize_wraps_each_word_in_quotes():
-    assert sanitize_fts_query("gato preto") == '"gato" "preto"'
+    # Rodada B4 (débito 5.1): o ÚLTIMO termo vira prefixo ("termo"*).
+    assert sanitize_fts_query("gato preto") == '"gato" "preto"*'
 
 
 def test_sanitize_only_punctuation_returns_empty():
@@ -44,13 +45,22 @@ def test_sanitize_only_punctuation_returns_empty():
 def test_sanitize_neutralizes_operators():
     # Operadores do FTS5 viram texto literal (entre aspas) — não quebram.
     out = sanitize_fts_query("gato AND OR NOT")
-    assert out == '"gato" "AND" "OR" "NOT"'
+    assert out == '"gato" "AND" "OR" "NOT"*'
 
 
 def test_sanitize_handles_embedded_quotes():
     out = sanitize_fts_query('di"sse')
     # aspas embutidas viram espaço → frase de duas palavras, sem sintaxe inválida
-    assert out == '"di sse"'
+    assert out == '"di sse"*'
+
+
+def test_sanitize_last_token_becomes_prefix():
+    assert sanitize_fts_query("estat") == '"estat"*'
+
+
+def test_sanitize_trailing_space_means_complete_word():
+    # Espaço final sinaliza palavra concluída — sem prefixo.
+    assert sanitize_fts_query("gato ") == '"gato"'
 
 
 # ── Index / search / snippet ───────────────────────────────────────────
@@ -93,6 +103,42 @@ def test_empty_pages_are_skipped(db):
     n = db.fts_index_book(bid, [(0, "   "), (1, ""), (2, "conteúdo real")])
     assert n == 1
     assert db.fts_stats()["pages"] == 1
+
+
+# ── Prefixo (débito 5.1, rodada B4) ────────────────────────────────────
+
+def test_prefix_search_finds_partial_word(db):
+    bid = _book(db)
+    db.fts_index_book(bid, [(0, "um livro de estatística aplicada")])
+    assert db.fts_search("estat")        # prefixo casa "estatística"
+    assert db.fts_search("estatística")  # palavra completa segue casando
+    assert db.fts_search("estat ") == []  # espaço final = palavra exata
+
+
+# ── OCR entra no índice NA HORA (débito 5.1, rodada B4) ────────────────
+
+def test_save_ocr_page_enters_fts_immediately(db):
+    bid = _book(db)
+    db.save_ocr_page(bid, 7, "texto reconhecido pelo OCR: xilofone raro")
+    res = db.fts_search("xilofone")
+    assert len(res) == 1
+    assert res[0]["book_id"] == bid and res[0]["page_number"] == 7
+
+
+def test_save_ocr_page_replaces_fts_row_of_same_page(db):
+    bid = _book(db)
+    db.fts_index_book(bid, [(7, "resto de extração fraca")])
+    db.save_ocr_page(bid, 7, "conteúdo OCR melhor: quimera")
+    assert db.fts_search("quimera")
+    assert db.fts_search("fraca") == []      # substituiu, não duplicou
+    assert db.fts_stats()["pages"] == 1
+
+
+def test_save_ocr_empty_content_clears_fts_row(db):
+    bid = _book(db)
+    db.fts_index_book(bid, [(7, "algo antigo")])
+    db.save_ocr_page(bid, 7, "   ")
+    assert db.fts_search("antigo") == []
 
 
 # ── Replace / delete / backfill state ──────────────────────────────────

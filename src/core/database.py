@@ -531,6 +531,25 @@ class LibraryDB:
                    ON CONFLICT(book_id, page_number) DO UPDATE SET
                    content=excluded.content""",
                 (book_id, page_number, content))
+            # Débito 5.1 (rodada B4): OCR salvo entra no índice de conteúdo
+            # NA HORA — antes só entrava no próximo backfill em ocioso. A
+            # página OCR substitui a linha FTS da mesma página (é a página
+            # que não tinha texto útil; FTS5 não tem UPDATE → delete+insert).
+            # ADR-005: FTS indisponível é no-op, o OCR em si sempre persiste.
+            try:
+                self.conn.execute(
+                    "DELETE FROM book_content_fts "
+                    "WHERE book_id = ? AND page_number = ?",
+                    (book_id, page_number))
+                if (content or "").strip():
+                    self.conn.execute(
+                        "INSERT INTO book_content_fts "
+                        "(book_id, page_number, content) VALUES (?,?,?)",
+                        (book_id, page_number, content.strip()))
+            except sqlite3.OperationalError as exc:
+                logger.warning(
+                    "FTS de conteúdo indisponível no OCR (book_id=%s): %s",
+                    book_id, exc)
             self.conn.commit()
 
     def get_ocr_page(self, book_id: int, page_number: int) -> dict | None:

@@ -231,3 +231,65 @@ def test_worker_error_emits(qtbot, db):
         w.error.connect(fails.append)
         w.run()
     assert fails == ["sem GPU"]
+
+
+# ── Kick pós-importação (débito 5.1, rodada B4) ───────────────────────
+
+def test_kick_bypasses_grace_and_inactivity_fts_only(qtbot, db):
+    """Importação explícita: tick imediato SÓ-FTS (extração leve, sem
+    embeddings), dispensando carência de startup e ociosidade UMA vez —
+    o livro novo entra na busca de conteúdo sem esperar ocioso."""
+    bid = _book(db)  # recém-importado: sem FTS e sem RAG
+    svc = AutoIndexService(db=db, rag_engine=FakeEngine(),
+                           config=FakeConfig({"auto_index.startup_grace_s": 300}))
+    # atividade AGORA e dentro da carência — os dois gates que o kick dispensa
+    with patch("src.gui.auto_index_service.AutoIndexWorker") as MockWorker:
+        svc._kick_once = True
+        svc._on_tick()
+        MockWorker.assert_called_once()
+        assert MockWorker.call_args.args[0] == bid
+        assert MockWorker.call_args.kwargs["fts_only"] is True
+    svc.shutdown()
+
+
+def test_kick_respects_busy_check(qtbot, db):
+    """Narração/RAG manual em andamento continua bloqueando mesmo o kick."""
+    _book(db)
+    svc = AutoIndexService(db=db, rag_engine=FakeEngine(),
+                           busy_check=lambda: True)
+    with patch("src.gui.auto_index_service.AutoIndexWorker") as MockWorker:
+        svc._kick_once = True
+        svc._on_tick()
+        MockWorker.assert_not_called()
+    svc.shutdown()
+
+
+def test_kick_is_consumed_once(qtbot, db):
+    """O kick dispensa os gates UMA vez; o tick seguinte volta ao regime
+    normal (carência/ociosidade bloqueiam de novo)."""
+    _book(db)
+    svc = AutoIndexService(db=db, rag_engine=FakeEngine(),
+                           config=FakeConfig({"auto_index.startup_grace_s": 300}))
+    with patch("src.gui.auto_index_service.AutoIndexWorker") as MockWorker:
+        svc._kick_once = True
+        svc._on_tick()
+        MockWorker.assert_called_once()
+        svc._worker = None  # isola o gate de worker-em-curso
+        svc._on_tick()      # sem kick: carência + atividade recente bloqueiam
+        MockWorker.assert_called_once()
+    svc.shutdown()
+
+
+def test_kick_after_import_schedules_immediate_tick(qtbot, db):
+    """kick_after_import agenda o tick via singleShot(0) — comprovado com o
+    event loop real do qtbot."""
+    bid = _book(db)
+    svc = AutoIndexService(db=db, rag_engine=FakeEngine(),
+                           config=FakeConfig({"auto_index.startup_grace_s": 300}))
+    with patch("src.gui.auto_index_service.AutoIndexWorker") as MockWorker:
+        svc.kick_after_import()
+        qtbot.wait(80)  # processa o singleShot(0)
+        MockWorker.assert_called_once()
+        assert MockWorker.call_args.args[0] == bid
+        assert MockWorker.call_args.kwargs["fts_only"] is True
+    svc.shutdown()
