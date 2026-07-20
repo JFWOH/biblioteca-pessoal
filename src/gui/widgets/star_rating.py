@@ -36,7 +36,11 @@ class StarRating(QWidget):
             star.setAlignment(Qt.AlignmentFlag.AlignCenter)
             star.setFixedSize(self._size + 4, self._size + 4)
             font = star.font()
-            font.setPointSize(self._size // 2)
+            # Guard (achado B0): único setPointSize COMPUTADO do projeto. Para
+            # size <= 1, ``size // 2`` vira 0/-1 e o Qt emite
+            # ``QFont::setPointSize: Point size <= 0``. max(1, ...) evita o
+            # warning no console sem alterar a renderização nos tamanhos normais.
+            font.setPointSize(max(1, self._size // 2))
             star.setFont(font)
             star.setStyleSheet("color: #3f3f46;")
             self._stars.append(star)
