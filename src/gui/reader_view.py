@@ -169,6 +169,15 @@ class ReaderView(QWidget):
             lambda b, t, p, txt: self._proactive_service.process_page_context(txt, p, b)
         )
 
+    def set_rag_engine(self, rag_engine) -> None:
+        """Injeta o RAGEngine criado após o show (rodada E1 — startup adiado).
+
+        Religa o cross-reference do proativo, que no construtor só era
+        habilitado quando o engine já existia."""
+        self._rag_engine = rag_engine
+        if rag_engine is not None:
+            self._proactive_service.set_cross_reference(self._proactive_cross_ref)
+
     def _proactive_observations(self, book_id: int, page=None) -> list[dict]:
         """Observações persistidas do livro (Fase 5 — memória do proativo).
 

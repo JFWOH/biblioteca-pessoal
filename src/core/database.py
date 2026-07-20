@@ -588,7 +588,8 @@ class LibraryDB:
         Base da auto-indexação em ocioso: candidatos a indexar em background.
         """
         rows = self.conn.execute(
-            """SELECT b.*, i.status AS indexing_status
+            """SELECT b.*, i.status AS indexing_status,
+                      i.updated_at AS indexing_updated_at
                FROM books b
                LEFT JOIN indexing_state i ON i.book_id = b.id
                WHERE i.status IS NULL OR i.status <> 'indexed_ok'

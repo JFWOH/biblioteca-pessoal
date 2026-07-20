@@ -35,9 +35,34 @@ def main():
     font = QFont("Segoe UI", 10)
     app.setFont(font)
 
+    # Splash imediato (rodada E1): feedback visual antes de construir a
+    # MainWindow — em disco frio os imports da GUI ainda custam segundos e,
+    # sem isso, o duplo-clique parece "não ter funcionado".
+    from PyQt6.QtWidgets import QSplashScreen
+    from PyQt6.QtGui import QColor, QPainter, QPixmap
+    from PyQt6.QtCore import QRect
+    pixmap = QPixmap(420, 220)
+    pixmap.fill(QColor("#1e2227"))
+    painter = QPainter(pixmap)
+    title_font = QFont("Segoe UI", 16)
+    title_font.setBold(True)
+    painter.setFont(title_font)
+    painter.setPen(QColor("#e4e4e7"))
+    painter.drawText(QRect(0, 78, 420, 40),
+                     Qt.AlignmentFlag.AlignCenter, "📚 Biblioteca Pessoal")
+    painter.setFont(QFont("Segoe UI", 10))
+    painter.setPen(QColor("#a1a1aa"))
+    painter.drawText(QRect(0, 122, 420, 30),
+                     Qt.AlignmentFlag.AlignCenter, "Iniciando…")
+    painter.end()
+    splash = QSplashScreen(pixmap)
+    splash.show()
+    app.processEvents()  # pinta o splash antes do trabalho pesado
+
     from src.gui.main_window import MainWindow
     window = MainWindow()
     window.show()
+    splash.finish(window)
 
     sys.exit(app.exec())
 

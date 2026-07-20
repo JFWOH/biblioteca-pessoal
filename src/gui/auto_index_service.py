@@ -20,12 +20,20 @@ mesma sessão.
 
 import logging
 import time
+from datetime import datetime
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from src.gui.workers.auto_index_worker import AutoIndexWorker
 
 logger = logging.getLogger(__name__)
+
+# Quarentena de 'failed' (rodada E1): um livro que falhou na indexação não é
+# re-tentado a cada sessão — em máquina fraca, reextrair o mesmo PDF pesado
+# todo launch disputava CPU/IO com a sessão interativa (débito do ciclo C).
+# Só volta a ser candidato após este intervalo desde a última tentativa; o
+# "Reindexar Biblioteca" manual (RAGWorker MODE_INDEX_ALL) ignora a quarentena.
+FAILED_RETRY_BACKOFF_S = 24 * 3600
 
 
 class AutoIndexService(QObject):
@@ -208,6 +216,10 @@ class AutoIndexService(QObject):
         except Exception as exc:  # ADR-005: cancelar nunca derruba o app
             logger.debug("Auto-index: falha ao cancelar worker ativo: %s", exc)
 
+    def set_rag_engine(self, rag_engine) -> None:
+        """Injeta o RAGEngine criado após o show (rodada E1 — startup adiado)."""
+        self._rag_engine = rag_engine
+
     def _pick_candidate(self) -> dict | None:
         try:
             candidates = self._db.get_unindexed_books()
@@ -215,9 +227,31 @@ class AutoIndexService(QObject):
             logger.debug("Auto-index: falha ao listar candidatos: %s", exc)
             return None
         for book in candidates:
-            if book["id"] not in self._attempted:
-                return book
+            if book["id"] in self._attempted:
+                continue
+            if self._failed_in_quarantine(book):
+                continue
+            return book
         return None
+
+    def _failed_in_quarantine(self, book: dict) -> bool:
+        """True se o livro falhou há menos de FAILED_RETRY_BACKOFF_S.
+
+        Timestamps do ``indexing_state.updated_at`` são CURRENT_TIMESTAMP do
+        SQLite (UTC, "YYYY-MM-DD HH:MM:SS"). Sem data ou com formato
+        inesperado, o livro segue elegível (gracioso — nunca prende um livro
+        na quarentena por erro de parse).
+        """
+        if book.get("indexing_status") != "failed":
+            return False
+        stamp = book.get("indexing_updated_at")
+        if not stamp:
+            return False
+        try:
+            last = datetime.strptime(str(stamp)[:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return False
+        return (datetime.utcnow() - last).total_seconds() < FAILED_RETRY_BACKOFF_S
 
     def _pick_fts_backfill_candidate(self) -> dict | None:
         """Livro já indexado no RAG (indexed_ok) mas ainda SEM FTS de conteúdo.

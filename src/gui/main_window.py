@@ -82,10 +82,15 @@ class MainWindow(QMainWindow):
         self._tts_init_worker = TTSInitWorker(self._tts_router, parent=self)
         QTimer.singleShot(0, self._tts_init_worker.start)
 
-        # Inicializa RAG engine (graceful — não trava se Ollama offline)
+        # RAG engine: criação ADIADA para depois do show (rodada E1). Importar
+        # chromadb e abrir o client persistente custa ~27 s em disco frio
+        # (medição no plano de empacotamento) e congelava a janela antes de
+        # aparecer. O RagInitWorker constrói o engine e sonda o Ollama fora da
+        # GUI thread (ver _check_ollama_status); os serviços abaixo nascem com
+        # engine=None (fluxo gracioso já existente) e são religados em
+        # _on_rag_status_ready.
         self._rag_engine = None
         self._rag_worker = None
-        self._setup_rag_engine()
 
         # Grafo de conceitos (Fase 2): ingestão em background dirigida pela leitura.
         from src.gui.graph_ingest_service import GraphIngestService
@@ -110,15 +115,21 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._setup_statusbar()
         self._apply_theme()
-        self._load_library()
-        self._setup_watcher()
 
         # Workers
         self._metadata_worker = None
         self._opds_worker = None
+        self._rag_init_worker = None
+        # _setup_watcher agora roda pós-show — o closeEvent pode disparar
+        # antes dele num fechamento imediato; atributo precisa existir.
+        self._watcher = None
 
-        # Verifica status do Ollama após UI pronta
-        self._check_ollama_status()
+        # Rodada E1 (plano de empacotamento): grade, watcher e IA carregam
+        # DEPOIS de a janela aparecer — singleShot(0) só dispara com o event
+        # loop ativo (mesma justificativa do start adiado do TTSInitWorker
+        # acima). Em disco frio isso tira dezenas de segundos do caminho
+        # entre o duplo-clique e a janela visível.
+        QTimer.singleShot(0, self._post_show_init)
 
     def _is_narration_active(self) -> bool:
         """True quando o ReaderView está narrando (TTS) a página atual.
@@ -1069,29 +1080,16 @@ class MainWindow(QMainWindow):
 
     # ── RAG / IA ───────────────────────────────────────────────────────
 
-    def _setup_rag_engine(self) -> None:
-        """Inicializa o RAGEngine. Falha silenciosamente se ChromaDB indisponível."""
-        try:
-            from src.core.rag_engine import RAGEngine
-            from src.utils.constants import DATA_DIR
-            chroma_path = DATA_DIR / "chroma_db"
-            db_path = self._db._db_path
-            self._rag_engine = RAGEngine(
-                db_path=db_path,
-                chroma_path=chroma_path,
-                ollama_url=self._config.get("rag.ollama_url", "http://localhost:11434"),
-                embed_model=self._config.get("rag.embed_model", "bge-m3"),
-                llm_model=self._config.get("rag.llm_model", "gemma4:e4b"),
-            )
-        except Exception as exc:
-            import traceback
-            print(
-                f"[RAGEngine][INIT ERROR] Falha ao inicializar o motor RAG: {exc}",
-                flush=True,
-            )
-            traceback.print_exc()
-            self._rag_engine = None
+    def _post_show_init(self) -> None:
+        """Carga adiada para depois de a janela aparecer (rodada E1).
 
+        Grade e watcher rodam aqui, com o event loop já pumpando; o motor RAG
+        nasce num worker via _check_ollama_status (chromadb custa ~27 s em
+        disco frio); o warmup dos modelos segue 3 s depois, como antes.
+        """
+        self._load_library()
+        self._setup_watcher()
+        self._check_ollama_status()
         # Warmup dos modelos alguns segundos após a UI abrir (não compete com
         # o startup). Gracioso: Ollama fora do ar vira log debug, nunca erro.
         from PyQt6.QtCore import QTimer
@@ -1109,24 +1107,55 @@ class MainWindow(QMainWindow):
         self._warmup_worker.start()
 
     def _check_ollama_status(self) -> None:
-        """Verifica status do Ollama, aciona o wizard se ausente, e atualiza o painel RAG."""
-        if self._rag_engine is None:
+        """Sonda o estado da IA SEM bloquear a GUI (rodada E1).
+
+        Na 1ª chamada o RagInitWorker também CONSTRÓI o RAGEngine (chroma
+        pesado, fora da GUI thread); nas seguintes (ex.: abrir o painel do
+        assistente) só re-sonda Ollama/modelos/índice. O resultado chega em
+        _on_rag_status_ready, que preserva o fluxo antigo: wizard quando
+        ausente, lista de modelos, contagem do índice.
+        """
+        worker = self._rag_init_worker
+        if worker is not None and worker.isRunning():
+            return
+        from src.gui.workers.rag_init_worker import RagInitWorker
+        self._rag_init_worker = RagInitWorker(
+            db_path=self._db._db_path,
+            chroma_path=DATA_DIR / "chroma_db",
+            ollama_url=self._config.get("rag.ollama_url", "http://localhost:11434"),
+            embed_model=self._config.get("rag.embed_model", "bge-m3"),
+            llm_model=self._config.get("rag.llm_model", "gemma4:e4b"),
+            engine=self._rag_engine,
+            parent=self,
+        )
+        self._rag_init_worker.ready.connect(self._on_rag_status_ready)
+        self._rag_init_worker.start()
+
+    def _on_rag_status_ready(self, engine, available, models, indexed_count) -> None:
+        """Aplica o resultado do RagInitWorker (roda na GUI thread)."""
+        if engine is not None and self._rag_engine is None:
+            # 1ª inicialização: religa os serviços que nasceram sem o engine.
+            self._rag_engine = engine
+            self._graph_service.set_rag_engine(engine)
+            self._auto_index_service.set_rag_engine(engine)
+            self._reader_view.set_rag_engine(engine)
+        if engine is None:
             self._rag_panel.set_ollama_status(False)
             return
 
-        available = self._rag_engine.is_ollama_available()
-
-        # Se não detectado e usuário abriu o assistente de IA
+        # Se não detectado e usuário abriu o assistente de IA — o wizard agora
+        # abre PÓS-show (janela visível), mesmo fluxo de antes.
         if not available:
             from PyQt6.QtWidgets import QDialog
             from src.gui.dialogs.ollama_wizard import OllamaWizardDialog
             wizard = OllamaWizardDialog(self)
             if wizard.exec() == QDialog.DialogCode.Accepted:
-                available = self._rag_engine.is_ollama_available()
+                # Pós-instalação o daemon responde imediatamente — sonda curta.
+                available = engine.is_ollama_available()
+                if available:
+                    models = engine.list_local_models()
 
         if available:
-            # Atualiza lista de modelos no UI
-            models = self._rag_engine.list_local_models()
             installed_names = [m["name"] for m in models]
             self._rag_panel.update_model_list(installed_names)
             # Daemon presente mas SEM modelos (instalado por fora / wizard
@@ -1137,8 +1166,7 @@ class MainWindow(QMainWindow):
 
         model = self._config.get("rag.llm_model", "gemma4:e4b")
         self._rag_panel.set_ollama_status(available, model if available else "")
-        count = self._rag_engine.get_indexed_count()
-        self._rag_panel.set_indexed_count(count)
+        self._rag_panel.set_indexed_count(indexed_count)
 
     def _on_model_changed(self, model_id: str) -> None:
         """Salva a preferência de modelo do usuário e atualiza o motor RAG."""
@@ -1928,6 +1956,12 @@ class MainWindow(QMainWindow):
         # cuja thread do SO ainda vive (lição do PR #32/SIGABRT). Em geral o
         # import já terminou muito antes do fechamento.
         worker = getattr(self, "_tts_init_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.wait(8000)
+        # Idem para o init do RAG (rodada E1): o chroma pode levar dezenas de
+        # segundos em disco frio — fechar o app durante o startup não pode
+        # destruir uma QThread cuja thread do SO ainda vive.
+        worker = getattr(self, "_rag_init_worker", None)
         if worker is not None and worker.isRunning():
             worker.wait(8000)
         # Para o worker RAG
