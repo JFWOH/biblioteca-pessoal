@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize, QEvent
 from PyQt6.QtGui import QPixmap, QKeySequence, QShortcut, QAction
 from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWebChannel import QWebChannel
 
 from src.readers.base_reader import BaseReader, PageContent
 from src.readers.reader_factory import create_reader
@@ -29,6 +30,9 @@ from src.utils.constants import (
 from src.gui.widgets.proactive_footer import ProactiveFooterWidget
 from src.gui.widgets.selection_popover import SelectionActionPopover
 from src.gui.widgets.word_wise_popover import WordWisePopover
+from src.gui.widgets.epub_selection_bridge import (
+    EpubSelectionBridge, EPUB_SELECTION_JS,
+)
 from src.gui.widgets.reader_dock import ReaderDock
 from src.gui.widgets.proactive_insights_panel import ProactiveInsightsPanel
 from src.gui.proactive_reader_service import ProactiveReaderService
@@ -606,6 +610,19 @@ class ReaderView(QWidget):
         
         self._web_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._web_view.customContextMenuRequested.connect(self._on_epub_context_menu)
+
+        # Word Wise no EPUB (débito 3.4 / rodada B3): o QWebEngineView roda o
+        # Chromium em processo separado e não entrega os mouse events do Qt de
+        # forma confiável ao eventFilter. Detectamos o fim da seleção pelo
+        # ``mouseup`` do DOM (via QWebChannel — ver EpubSelectionBridge) e
+        # roteamos seleções curtas para o mesmo popover do PDF. A fiação JS é
+        # re-injetada a cada página no ``loadFinished`` (o setHtml troca o doc).
+        self._epub_selection_bridge = EpubSelectionBridge()
+        self._epub_web_channel = QWebChannel(self._web_view.page())
+        self._epub_web_channel.registerObject("epubBridge", self._epub_selection_bridge)
+        self._web_view.page().setWebChannel(self._epub_web_channel)
+        self._epub_selection_bridge.selection_ended.connect(self._on_epub_selection_ended)
+        self._web_view.page().loadFinished.connect(self._inject_epub_selection_js)
 
         splitter.addWidget(self._content_stack)
         splitter.setStretchFactor(1, 1)  # área de leitura expande; TOC fica no seu max
@@ -1834,6 +1851,66 @@ class ReaderView(QWidget):
                 menu.exec(global_pos)
                 
         self._web_view.page().runJavaScript("window.getSelection().toString()", callback)
+
+    def _inject_epub_selection_js(self, ok: bool = True) -> None:
+        """Re-injeta a fiação de captura de seleção após cada render de EPUB/HTML.
+
+        Chamado no ``loadFinished`` do web_view (dispara só para EPUB/TXT/DOCX —
+        o PDF não usa ``setHtml``). O JS é idempotente por documento (guarda
+        ``__epubWW``). ADR-005: se o runJavaScript/JS falhar, o efeito é apenas
+        "sem popover de seleção no EPUB", nunca um crash.
+        """
+        if not ok:
+            return
+        try:
+            self._web_view.page().runJavaScript(EPUB_SELECTION_JS)
+        except Exception:
+            logger.debug("Falha ao injetar a fiação de seleção do EPUB", exc_info=True)
+
+    def _on_epub_selection_ended(self, text: str, rect_json: str) -> None:
+        """Fim de uma seleção no EPUB (mouseup do DOM via QWebChannel).
+
+        Espelha o caminho PDF (``_show_selection_popover``): seleção CURTA
+        (≤ ``_WORD_WISE_MAX_WORDS``) dispara o Word Wise; seleção vazia (clique
+        simples) esconde o popover. Seleções LONGAS ainda NÃO abrem a barra de
+        ações (SelectionActionPopover) no EPUB nesta rodada — débito registrado.
+        """
+        text = (text or "").strip()
+        if not text:
+            if hasattr(self, "_word_wise_popover"):
+                self._word_wise_popover.hide()
+            return
+        if len(text.split()) > self._WORD_WISE_MAX_WORDS:
+            return
+        anchor = self._epub_selection_anchor(rect_json)
+        if anchor is None:
+            return
+        self._last_selection_anchor = anchor
+        self._start_word_wise(text)
+
+    def _epub_selection_anchor(self, rect_json: str):
+        """Converte o retângulo da seleção (coords CSS do viewport) em um ponto
+        em coordenadas do ReaderView, ou ``None`` se inválido/fora da vista.
+
+        O ``getBoundingClientRect`` do JS já é relativo ao viewport (acompanha o
+        scroll); o ``zoomFactor`` do QWebEngineView escala o conteúdo composto no
+        widget, então coord_widget = css * zoomFactor (validado no spike B3).
+        ADR-005: qualquer falha de parsing/seleção fora da área ⇒ ``None``.
+        """
+        if not rect_json:
+            return None
+        try:
+            r = json.loads(rect_json)
+            zoom = self._web_view.zoomFactor()
+            x = float(r.get("x", 0.0)) * zoom
+            bottom = float(r.get("bottom", r.get("y", 0.0))) * zoom
+        except Exception:
+            return None
+        view = self._web_view
+        # Seleção rolada para fora da área visível: não ancora um popover solto.
+        if bottom < 0 or bottom > view.height() or x < 0 or x > view.width():
+            return None
+        return view.mapTo(self, QPoint(int(x), int(bottom) + 6))
 
     def _on_pdf_context_menu(self, pos: QPoint):
         """Mostra menu de contexto do PDF.
