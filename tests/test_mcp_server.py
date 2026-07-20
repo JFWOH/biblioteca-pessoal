@@ -299,6 +299,12 @@ class TestIntegracaoClientSession:
                 stats = json.loads(res.contents[0].text)
                 assert stats["total"] == 2
 
+                # resource templated: parâmetro de URI (str) coagido para int
+                res = await client.read_resource(
+                    AnyUrl(f"biblioteca://book/{mcp_db['b1']}/annotations"))
+                md = res.contents[0].text
+                assert "Dom Casmurro" in md and "Olhos de ressaca" in md
+
         anyio.run(scenario)
 
 
