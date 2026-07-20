@@ -184,3 +184,13 @@ win32_setctime==1.2.0
 wrapt==2.2.1
 yarl==1.24.2
 
+# Delta 2026-07-19 (ciclo jul/2026-D): servidor MCP local — pacotes novos
+# trazidos por `pip install "mcp>=1.28,<2"` (nenhum pacote existente mudou).
+PyJWT==2.13.0
+cryptography==49.0.0
+httpx-sse==0.4.3
+mcp==1.28.1
+pydantic-settings==2.14.2
+python-multipart==0.0.32
+sse-starlette==3.4.5
+

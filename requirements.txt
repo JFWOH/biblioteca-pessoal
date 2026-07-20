@@ -27,6 +27,10 @@ fastapi>=0.100.0
 uvicorn>=0.23.00
 ruff>=0.1.0
 
+# Servidor MCP local (stdio) — expõe a biblioteca a hosts MCP (Claude etc.)
+# Pin na série v1: a migração ao SDK v2 (spec 2026-07-28) é rodada própria.
+mcp>=1.28,<2
+
 # RAG / IA Local
 chromadb>=0.4.0,<1.0    # Vector store local (sem servidor externo)
 ollama>=0.2.0            # Python client para o daemon Ollama

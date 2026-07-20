@@ -237,6 +237,26 @@ O projeto conta com ferramentas dedicadas via linha de comando para governança 
   python -m src.tools.rag_eval_harness
   ```
 
+## 🔌 Servidor MCP (integração com LLMs)
+
+O app expõe a biblioteca a hosts MCP (Claude Desktop/Code ou outro cliente
+compatível) via um servidor local **stdio** — sem rede. A rodada atual é
+**somente-leitura**: explorar livros, buscas (metadados, full-text e
+semântica), texto de páginas (máx. 10 por chamada), anotações e estatísticas.
+
+Registro no Claude Code (Windows — use o python do venv do projeto; o
+`PYTHONPATH` garante que `src.mcp.server` resolva a partir de qualquer pasta):
+
+```bash
+claude mcp add biblioteca -e "PYTHONPATH=G:\PROGRAMAS PYTHON\Biblioteca-pessoal" -- "G:\PROGRAMAS PYTHON\Biblioteca-pessoal\venv\Scripts\python.exe" -m src.mcp.server
+```
+
+Observações:
+- O servidor abre o mesmo `data/library.db` do app (SQLite em WAL): pode rodar
+  com o app aberto; a escrita de índices (RAG/FTS) continua exclusiva do app.
+- A busca semântica exige o Ollama local em execução; sem ele a ferramenta
+  devolve um erro amigável (nada trava).
+
 ## 🧪 Testes
 
 Sempre pelo python do venv do projeto:
