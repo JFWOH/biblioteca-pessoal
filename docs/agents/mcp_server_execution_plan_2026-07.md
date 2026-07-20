@@ -6,6 +6,26 @@
 > completa + ruff → PR → auditoria de 8 ângulos → CI → merge automático se
 > reconfirmado). Gotchas de sessão: memória `handoff-sessao-jul2026`.
 
+## Registro de execução (2026-07-20)
+
+- **M1 EXECUTADA** — PR #59 (`src/mcp/server.py`, SDK `mcp==1.28.1` pinado
+  `<2`): 9 ferramentas read-only + 2 resources; páginas 1-based na fronteira;
+  envelope uniforme status/data|error; imports pesados lazy; guarda
+  estrutural; 23 testes (unit + client session in-process). Suíte 1526.
+- **M2 EXECUTADA** — PR #60: `mcp.allow_writes` (default False, relido a cada
+  chamada — sem reiniciar), 6 escritas aditivas (ai_note com origem
+  `{"source":"mcp"}` em `position_data` — nenhuma coluna nova), `ask_library`
+  serializado (lock) com needs_reindex→erro amigável e citações resolvidas
+  via `source_citations`. 14 testes. Suíte 1540. Auditoria de 8 ângulos nas
+  duas rodadas (2 fixes na M1; M2 sem pendências). CI verde; merges
+  reconfirmados pelo usuário no GO do ciclo (escopo decidido: M1+M2).
+- **M3 NÃO EXECUTADA** (decisão do GO): fica para rodada própria, idealmente
+  junto com a migração ao SDK v2 (spec 2026-07-28).
+- **Validação manual pendente do usuário:** registro real no host
+  (`claude mcp add` — comando no README), uso via Claude Desktop/Code,
+  `ask_library` com Ollama vivo (latência de minutos do thinking) e
+  concorrência com o app aberto.
+
 ## Objetivo
 
 Expor o app a uma LLM do usuário (Claude Desktop/Code ou outro host MCP)
