@@ -38,8 +38,13 @@ def sanitize_fts_query(raw: str) -> str:
     descartados. Se a query inteira for vazia (ou só pontuação/aspas), devolve
     ``""`` — o chamador trata como "sem resultado" e nem chega a rodar o MATCH.
 
-    Não faz prefixo (``termo*``) nem stemming: a busca é por palavra exata
-    (com dobra de acentos vinda do tokenizer ``remove_diacritics``).
+    Prefixo (débito 5.1, rodada B4): o ÚLTIMO termo vira busca por prefixo
+    (``"termo"*`` — sintaxe de frase-prefixo do FTS5), então "estat" encontra
+    "estatística" enquanto o usuário ainda digita. Palavra completa continua
+    casando (prefixo é superconjunto). Exceção: query terminada em ESPAÇO
+    sinaliza palavra concluída — sem prefixo. Stemming pleno segue fora
+    (limitação do FTS5 local; dobra de acentos vem do tokenizer
+    ``remove_diacritics``).
     """
     if not raw or not raw.strip():
         return ""
@@ -52,4 +57,6 @@ def sanitize_fts_query(raw: str) -> str:
         if not _WORDISH.search(cleaned):
             continue
         tokens.append('"' + cleaned + '"')
+    if tokens and not raw[-1].isspace():
+        tokens[-1] += "*"
     return " ".join(tokens)

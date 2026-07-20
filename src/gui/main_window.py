@@ -799,6 +799,9 @@ class MainWindow(QMainWindow):
         """Abre o diálogo rico de importação."""
         dialog = ImportDialog(self._library, self)
         dialog.import_completed.connect(self._load_library)
+        # Débito 5.1 (B4): livro importado entra na busca de conteúdo já —
+        # tick FTS imediato (só extração; embeddings ficam para o ocioso).
+        dialog.import_completed.connect(self._auto_index_service.kick_after_import)
         dialog.exec()
         self._load_library()
 
@@ -841,6 +844,7 @@ class MainWindow(QMainWindow):
         """ImportDialog pré-carregado (o diálogo mantém as opções de OCR etc.)."""
         dialog = ImportDialog(self._library, self, initial_files=files)
         dialog.import_completed.connect(self._load_library)
+        dialog.import_completed.connect(self._auto_index_service.kick_after_import)
         dialog.exec()
         self._load_library()
 
