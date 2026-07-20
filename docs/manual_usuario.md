@@ -283,10 +283,14 @@ Pode pular esta seção com segurança — nada aqui é necessário no dia a dia
 - **Servidor OPDS** (barra lateral → **Iniciar Servidor OPDS**): compartilha
   sua biblioteca na rede local para apps de leitura no celular/tablet que
   falem o padrão OPDS.
-- **Servidor MCP**: permite que assistentes de IA externos (como o Claude)
-  consultem sua biblioteca com sua permissão. Leitura é sempre permitida;
-  escrita só se você ativar explicitamente. Instruções no arquivo
-  `README.md` da pasta do aplicativo.
+- **Servidor MCP**: permite que assistentes de IA no seu computador (Claude
+  Desktop/Code, Cursor, Windsurf, VS Code com Copilot, Cline, Zed, Gemini
+  CLI, LM Studio e outros hosts MCP locais) consultem sua biblioteca. Tudo em
+  **⚙️ Configurações → 🔌 Integrações**: lá estão o comando pronto para
+  copiar (Claude Code), o bloco de configuração para os demais programas e a
+  chave **"Permitir que assistentes escrevam na biblioteca"** — desligada por
+  padrão. Leitura é sempre permitida; a escrita, quando ligada, é aditiva
+  (assistentes nunca apagam nem editam o que já existe).
 
 ---
 
