@@ -231,8 +231,9 @@ def test_translate_and_narrate_propagates_chaining_flag_to_narrate_text():
         _MAIN_WINDOW, re.DOTALL)
     assert match, "_translate_and_narrate não encontrado"
     body = match.group(1)
-    # As DUAS chamadas a narrate_text (já-em-PT e pós-tradução) repassam a flag.
-    assert body.count("chain_continuous=enable_chaining") == 2
+    # As TRÊS chamadas a narrate_text (já-em-PT, HIT do cache — rodada B1 —
+    # e pós-tradução) repassam a flag.
+    assert body.count("chain_continuous=enable_chaining") == 3
 
 
 def test_error_path_does_not_chain_next_page():

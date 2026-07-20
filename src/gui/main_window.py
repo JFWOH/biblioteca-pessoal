@@ -1402,8 +1402,16 @@ class MainWindow(QMainWindow):
         (Commit 4 e anteriores); True para a leitura contínua traduzida
         (Commit 5) — repassado para narrate_text(chain_continuous=...), que
         aciona _on_audio_finished → _continue_narration ao terminar.
+
+        Cache por página (débito 3.5, fluxo NARRADO): mesma convenção do
+        fluxo de texto (_translate_page_as_text) — consulta
+        ``page_translation_cache`` antes do NLLB e grava após traduzir;
+        a fingerprint (sha256 do texto normalizado) invalida sozinha se o
+        texto da página mudar. Releitura de páginas já traduzidas narra
+        quase instantâneo. Página já em PT NÃO toca o cache.
         """
         from src.core.tts.language_detect import detect_language
+        from src.core.database import page_translation_fingerprint
 
         if getattr(self, "_page_translation_pending", False):
             self._statusbar.showMessage("🌐 Já estou traduzindo uma página — aguarde…", 3000)
@@ -1411,6 +1419,9 @@ class MainWindow(QMainWindow):
 
         reader = self._reader_view._reader
         page_label = f"{reader.current_page + 1}/{reader.total_pages}" if reader else "?"
+        page_number = reader.current_page if reader else 0
+        book_id = getattr(self._reader_view, "_book_id", 0)
+        src_lang, tgt_lang = "en", "pt"
 
         if detect_language(text).lower().startswith("pt"):
             self._statusbar.showMessage(
@@ -1419,6 +1430,24 @@ class MainWindow(QMainWindow):
             # depender de nova autodetecção do texto (que traria termos EN juntos).
             self._reader_view.narrate_text(text, chain_continuous=enable_chaining, language="pt")
             return
+
+        fingerprint = page_translation_fingerprint(text)
+        if self._db is not None and book_id > 0:
+            try:
+                cached = self._db.get_cached_page_translation(
+                    book_id, page_number, src_lang, tgt_lang, fingerprint)
+            except Exception as exc:
+                logger.warning(f"Falha ao consultar cache de tradução (ignorado): {exc}")
+                cached = None
+            if cached:
+                # HIT é SÍNCRONO: nada acontece entre o pedido e o narrate,
+                # então o guard de época (abaixo, do caminho NLLB assíncrono)
+                # não se aplica aqui.
+                self._statusbar.showMessage(
+                    f"🔊 Narrando página {page_label} (tradução em cache)…", 4000)
+                self._reader_view.narrate_text(
+                    cached, chain_continuous=enable_chaining, language="pt")
+                return
 
         self._statusbar.showMessage(f"🌐 Traduzindo página {page_label}…", 60000)
         self._page_translation_pending = True
@@ -1433,6 +1462,15 @@ class MainWindow(QMainWindow):
             if not (result or "").strip():
                 self._statusbar.showMessage("⚠️ Tradução vazia — nada a narrar.", 5000)
                 return
+            # Grava no cache ANTES do guard de época: a tradução vale para a
+            # página mesmo que esta narração específica seja descartada — a
+            # próxima visita vira HIT.
+            if self._db is not None and book_id > 0:
+                try:
+                    self._db.set_page_translation_cache(
+                        book_id, page_number, src_lang, tgt_lang, fingerprint, result)
+                except Exception as exc:
+                    logger.warning(f"Falha ao gravar cache de tradução (ignorado): {exc}")
             if self._reader_view.narration_epoch != epoch_at_request:
                 self._statusbar.showMessage(
                     "ℹ️ Tradução descartada — outra narração foi iniciada no meio-tempo.", 4000)
@@ -1450,7 +1488,7 @@ class MainWindow(QMainWindow):
         try:
             from src.gui.translation_service import TranslationService
             TranslationService.get_instance().translate_async(
-                text, src_lang="en", tgt_lang="pt",
+                text, src_lang=src_lang, tgt_lang=tgt_lang,
                 on_success=_on_success, on_error=_on_error)
         except Exception as exc:
             self._page_translation_pending = False
