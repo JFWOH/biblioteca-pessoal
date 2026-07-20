@@ -1,5 +1,15 @@
 # Plano — Empacotamento v0.1 para testes com usuários reais (ciclo jul/2026-E)
 
+> **Registro de execução (2026-07-20):** E1 (PR #62 — startup: chroma/Ollama
+> fora da GUI thread, grade pós-show, quarentena de failed, splash),
+> E3 (manual em `docs/manual_usuario.md`, no PR #62), E2 (PR #63 — aba
+> 🔌 Integrações com registro MCP e chave allow_writes viva, auto-import do
+> manual, HF_HOME portátil) e E4 (script `src/tools/build_package.py` +
+> gerador `src/tools/manual_pdf.py`) EXECUTADAS. Pendente: rodar o build
+> real (rede) e a E5 em máquina limpa — roteiro em
+> `docs/agents/roteiro_validacao_pacote.md`. Melhorias seguintes só após o
+> feedback dos testers (decisão do usuário).
+
 > Preparado em 2026-07-20 (pós-ciclo D/MCP; base `main 0f50671`, suíte 1540).
 > Pedido do usuário: (1) revisão de velocidade/otimização para rodar em
 > hardwares diferentes; (2) inventário completo do pacote final para o
