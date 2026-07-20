@@ -240,9 +240,16 @@ O projeto conta com ferramentas dedicadas via linha de comando para governança 
 ## 🔌 Servidor MCP (integração com LLMs)
 
 O app expõe a biblioteca a hosts MCP (Claude Desktop/Code ou outro cliente
-compatível) via um servidor local **stdio** — sem rede. A rodada atual é
-**somente-leitura**: explorar livros, buscas (metadados, full-text e
-semântica), texto de páginas (máx. 10 por chamada), anotações e estatísticas.
+compatível) via um servidor local **stdio** — sem rede.
+
+- **Leitura (sempre disponível):** explorar livros, buscas (metadados,
+  full-text e semântica), texto de páginas (máx. 10 por chamada), anotações e
+  estatísticas; `ask_library` consulta o RAG local (Ollama + Chroma) com
+  citações resolvidas — pode levar minutos (o modelo local "pensa" antes).
+- **Escrita (opcional, desligada por padrão):** notas da IA (`ai_note` com
+  origem `mcp`), tags, coleções, status de leitura e favorito — tudo
+  **aditivo**, nada destrutivo. Para ativar, edite `data/config.json` com
+  `{"mcp": {"allow_writes": true}}` (vale na hora, sem reiniciar o servidor).
 
 Registro no Claude Code (Windows — use o python do venv do projeto; o
 `PYTHONPATH` garante que `src.mcp.server` resolva a partir de qualquer pasta):

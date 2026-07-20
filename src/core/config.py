@@ -118,6 +118,12 @@ DEFAULT_CONFIG = {
         # (trade-off aceito). Ver Orchestrator.__init__ e _stream_chat.
         "num_ctx": 8192,
     },
+    # Servidor MCP local (src/mcp/server.py). Escrita DESLIGADA por padrão:
+    # as ferramentas de escrita (anotações/tags/coleções/status) devolvem erro
+    # claro até o usuário ativar aqui (rodada M2 do plano jul/2026-D).
+    "mcp": {
+        "allow_writes": False,
+    },
 }
 
 

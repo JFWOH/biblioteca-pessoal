@@ -1,4 +1,5 @@
-"""Servidor MCP local (stdio) da Biblioteca Pessoal — rodada M1 (somente leitura).
+"""Servidor MCP local (stdio) da Biblioteca Pessoal — rodadas M1 (leitura) e
+M2 (escrita guardada + ponte com o RAG).
 
 Expõe a biblioteca a um host MCP (Claude Desktop/Code ou outro):
 
@@ -6,12 +7,19 @@ Expõe a biblioteca a um host MCP (Claude Desktop/Code ou outro):
 
 Invariantes de segurança do plano jul/2026-D:
 - transporte stdio apenas (sem rede);
-- a rodada M1 é 100% somente-leitura (nenhuma ferramenta grava no banco);
+- leitura por padrão: TODA ferramenta de escrita fica atrás do config
+  ``mcp.allow_writes`` (default False, relido do disco a cada chamada — ativar
+  não exige reiniciar o servidor) e é ADITIVA — nenhuma operação destrutiva
+  (delete/update de conteúdo existente) é exposta;
+- tudo que o MCP escreve carrega a origem ``{"source": "mcp"}`` em
+  ``position_data`` (anotações criadas por aqui são sempre ``ai_note``);
+- ``ask_library`` é serializado (1 consulta por vez): o RAGEngine compartilha
+  estado global de cancelamento entre chamadas;
 - teto de ``PAGE_CAP`` páginas por chamada em ``get_page_text``;
 - fronteira ADR-006: importa apenas ``src/core``, ``src/readers`` e
   ``src/utils`` — zero Qt;
-- startup leve: chromadb/readers só são importados dentro das ferramentas que
-  os usam (lição B0 — lazy import); torch/kokoro não entram nesta rodada.
+- startup leve: chromadb/readers/orchestrator só são importados dentro das
+  ferramentas que os usam (lição B0 — lazy import); torch/kokoro não entram.
 
 Convenção da fronteira MCP: TODOS os números de página em parâmetros e
 retornos são 1-based (o armazenamento interno do app é 0-based). Toda
@@ -25,6 +33,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -39,28 +48,42 @@ PAGE_CAP = 10
 # Caminhos ativos — redirecionáveis via configure() (testes usam tmp_path).
 _db_path: Path = DB_PATH
 _chroma_path: Path = DATA_DIR / "chroma_db"
+_config_path: Path | None = None  # None → data/config.json padrão do app
 
 # Singletons preguiçosos, criados na 1ª ferramenta que os usa.
-_state: dict[str, Any] = {"db": None, "rag": None}
+_state: dict[str, Any] = {"db": None, "rag": None, "config": None}
+
+# ask_library é serializado: o RAGEngine compartilha o sinal de cancelamento
+# entre chamadas (gotcha documentado no plano M2) — 1 consulta por vez.
+_rag_lock = threading.Lock()
+
+# Mesma cor que o app usa para notas geradas por IA
+# (MainWindow._on_rag_annotation_save).
+AI_NOTE_COLOR = "#6366f1"
 
 mcp = FastMCP(
     "biblioteca-pessoal",
     instructions=(
         "Biblioteca pessoal local do usuário: livros, anotações, progresso de "
-        "leitura e buscas (metadados, full-text e semântica). Todas as "
-        "ferramentas são somente-leitura; números de página são 1-based."
+        "leitura e buscas (metadados, full-text e semântica). Leitura sempre "
+        "disponível; escrita (anotações/tags/coleções/status) é aditiva e "
+        "exige mcp.allow_writes=true no config do app. Números de página são "
+        "1-based."
     ),
 )
 
 
 def configure(db_path: str | Path | None = None,
-              chroma_path: str | Path | None = None) -> None:
+              chroma_path: str | Path | None = None,
+              config_path: str | Path | None = None) -> None:
     """Redireciona os caminhos de dados (testes) e descarta os singletons."""
-    global _db_path, _chroma_path
+    global _db_path, _chroma_path, _config_path
     if db_path is not None:
         _db_path = Path(db_path)
     if chroma_path is not None:
         _chroma_path = Path(chroma_path)
+    if config_path is not None:
+        _config_path = Path(config_path)
     close()
 
 
@@ -74,6 +97,7 @@ def close() -> None:
             pass
     _state["db"] = None
     _state["rag"] = None
+    _state["config"] = None
 
 
 def _db() -> LibraryDB:
@@ -87,6 +111,27 @@ def _rag():
         from src.core.rag_engine import RAGEngine
         _state["rag"] = RAGEngine(db_path=str(_db_path), chroma_path=str(_chroma_path))
     return _state["rag"]
+
+
+def _config():
+    if _state["config"] is None:
+        from src.core.config import ConfigManager
+        _state["config"] = ConfigManager(_config_path)
+    return _state["config"]
+
+
+def _writes_enabled() -> bool:
+    cfg = _config()
+    cfg.load()  # relê o disco: ligar/desligar não exige reiniciar o servidor
+    return bool(cfg.get("mcp.allow_writes", False))
+
+
+_WRITES_OFF_MSG = (
+    "Escrita desabilitada (mcp.allow_writes=false). Para permitir que o "
+    "assistente grave anotações/tags/coleções/status, edite data/config.json "
+    'com {"mcp": {"allow_writes": true}} — vale na hora, sem reiniciar o '
+    "servidor."
+)
 
 
 def _ok(data: Any) -> dict:
@@ -396,6 +441,196 @@ def book_annotations_resource(book_id: int) -> str:
     if db.get_book(book_id) is None:
         return f"Livro {book_id} não encontrado."
     return _annotations_markdown(db, book_id)
+
+
+# ── Ferramentas de escrita (M2 — aditivas, atrás de mcp.allow_writes) ────
+
+
+@mcp.tool()
+def add_annotation(book_id: int, page: int, content: str,
+                   title: str | None = None) -> dict:
+    """Grava uma nota gerada pela IA (tipo 'ai_note') numa página do livro.
+
+    Exige mcp.allow_writes=true. Página 1-based. A origem fica registrada em
+    position_data ({"source": "mcp"}). Nunca altera nem apaga anotações
+    existentes."""
+    if not _writes_enabled():
+        return _err(_WRITES_OFF_MSG)
+    if not (content or "").strip():
+        return _err("Conteúdo vazio — nada para anotar.")
+    if page < 1:
+        return _err("Página inválida: páginas são 1-based (>= 1).")
+    db = _db()
+    if db.get_book(book_id) is None:
+        return _err(f"Livro {book_id} não encontrado.")
+    ann_id = db.add_annotation(
+        book_id, page - 1, content=content.strip(),
+        highlight_color=AI_NOTE_COLOR, annotation_type="ai_note",
+        position_data=json.dumps({"source": "mcp"}),
+        title=(title or "").strip(),
+    )
+    return _ok({"annotation_id": ann_id, "book_id": book_id, "page": page,
+                "type": "ai_note", "source": "mcp"})
+
+
+@mcp.tool()
+def tag_book(book_id: int, tag_name: str) -> dict:
+    """Adiciona uma tag a um livro — cria a tag se não existir, reusa se já
+    houver com o mesmo nome (sem diferenciar maiúsculas). Exige
+    mcp.allow_writes=true."""
+    if not _writes_enabled():
+        return _err(_WRITES_OFF_MSG)
+    name = (tag_name or "").strip()
+    if not name:
+        return _err("Nome de tag vazio.")
+    db = _db()
+    if db.get_book(book_id) is None:
+        return _err(f"Livro {book_id} não encontrado.")
+    existing = next((t for t in db.get_tags()
+                     if (t.get("name") or "").lower() == name.lower()), None)
+    if existing:
+        tag_id, name, created = existing["id"], existing["name"], False
+    else:
+        tag_id, created = db.create_tag(name), True
+    db.add_tag_to_book(book_id, tag_id)
+    return _ok({"book_id": book_id, "tag_id": tag_id, "tag": name,
+                "created": created})
+
+
+@mcp.tool()
+def create_collection(name: str, description: str = "") -> dict:
+    """Cria uma coleção nova. Exige mcp.allow_writes=true."""
+    if not _writes_enabled():
+        return _err(_WRITES_OFF_MSG)
+    clean = (name or "").strip()
+    if not clean:
+        return _err("Nome de coleção vazio.")
+    db = _db()
+    duplicate = next((c for c in db.get_collections()
+                      if (c.get("name") or "").lower() == clean.lower()), None)
+    if duplicate:
+        return _err(f"Coleção '{duplicate['name']}' já existe "
+                    f"(id {duplicate['id']}).")
+    try:
+        coll_id = db.create_collection(clean, description=description)
+    except sqlite3.IntegrityError:
+        return _err(f"Coleção '{clean}' já existe.")
+    return _ok({"collection_id": coll_id, "name": clean})
+
+
+@mcp.tool()
+def add_to_collection(book_id: int, collection: int | str) -> dict:
+    """Adiciona um livro a uma coleção EXISTENTE (por nome ou id).
+
+    Exige mcp.allow_writes=true. Para coleção nova, use create_collection
+    antes."""
+    if not _writes_enabled():
+        return _err(_WRITES_OFF_MSG)
+    db = _db()
+    if db.get_book(book_id) is None:
+        return _err(f"Livro {book_id} não encontrado.")
+    target = str(collection).strip()
+    if not target:
+        return _err("Coleção vazia.")
+    collections = db.get_collections()
+    found = None
+    if target.isdigit():
+        found = next((c for c in collections if c.get("id") == int(target)), None)
+    if found is None:
+        found = next((c for c in collections
+                      if (c.get("name") or "").lower() == target.lower()), None)
+    if found is None:
+        return _err(f"Coleção '{target}' não encontrada — "
+                    "crie antes com create_collection.")
+    db.add_book_to_collection(book_id, found["id"])
+    return _ok({"book_id": book_id, "collection_id": found["id"],
+                "collection": found.get("name")})
+
+
+@mcp.tool()
+def set_reading_status(book_id: int, status: str) -> dict:
+    """Define o estado de leitura do livro: 'unread', 'reading' ou 'read'.
+    Exige mcp.allow_writes=true."""
+    if not _writes_enabled():
+        return _err(_WRITES_OFF_MSG)
+    allowed = ("unread", "reading", "read")
+    if status not in allowed:
+        return _err(f"Status inválido '{status}' — use um de: {list(allowed)}.")
+    db = _db()
+    if db.get_book(book_id) is None:
+        return _err(f"Livro {book_id} não encontrado.")
+    db.update_book(book_id, read_status=status)
+    return _ok({"book_id": book_id, "read_status": status})
+
+
+@mcp.tool()
+def toggle_favorite(book_id: int) -> dict:
+    """Alterna o favorito do livro e devolve o estado FINAL.
+    Exige mcp.allow_writes=true."""
+    if not _writes_enabled():
+        return _err(_WRITES_OFF_MSG)
+    db = _db()
+    book = db.get_book(book_id)
+    if book is None:
+        return _err(f"Livro {book_id} não encontrado.")
+    new_state = 0 if book.get("is_favorite") else 1
+    db.update_book(book_id, is_favorite=new_state)
+    return _ok({"book_id": book_id, "is_favorite": bool(new_state)})
+
+
+# ── Ponte com o RAG local (M2) ───────────────────────────────────────────
+
+
+def _make_orchestrator():
+    """Orchestrator sobre o RAGEngine lazy (substituível nos testes)."""
+    from src.core.rag.orchestrator import Orchestrator
+    return Orchestrator(_rag())
+
+
+def _resolve_citations(answer: str) -> list[dict]:
+    """Citações ``[Título, p. X]`` do corpo resolvidas para book_id/página —
+    mesma heurística das âncoras clicáveis do painel RAG. Deduplicadas na
+    ordem de aparição; título sem casamento confiável → book_id None."""
+    from src.core.rag.source_citations import parse_citations, resolve_citation
+    books = _db().get_all_books()
+    seen: set = set()
+    out: list[dict] = []
+    for citation in parse_citations(answer):
+        book_id, page = resolve_citation(citation, books)
+        key = (citation.title.lower(), page, book_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"title": citation.title, "page": page, "book_id": book_id})
+    return out
+
+
+@mcp.tool()
+def ask_library(question: str, book_id: int | None = None) -> dict:
+    """Pergunta à biblioteca usando o RAG local (Ollama + ChromaDB) e devolve
+    a resposta com as citações resolvidas para (book_id, página).
+
+    Pode levar MINUTOS: o modelo local raciocina ("thinking") antes de
+    escrever — é normal, aguarde. Uma consulta por vez (serializado).
+    book_id restringe a busca a um único livro. Não exige mcp.allow_writes:
+    perguntar é leitura e não altera nada na biblioteca."""
+    if not (question or "").strip():
+        return _err("Pergunta vazia.")
+    with _rag_lock:
+        try:
+            orchestrator = _make_orchestrator()
+            if orchestrator.engine.needs_reindex():
+                return _err(
+                    "Índice vetorial desatualizado (construído com outro "
+                    "modelo de embeddings). Reindexe a biblioteca no app antes "
+                    "de perguntar — responder agora sairia errado.")
+            answer = "".join(orchestrator.query_rag(question, book_id=book_id))
+        except RuntimeError as exc:
+            # Ollama indisponível etc. — a mensagem já é amigável.
+            return _err(str(exc))
+        except Exception as exc:
+            return _err(f"Falha na consulta RAG: {exc}")
+    return _ok({"answer": answer, "citations": _resolve_citations(answer)})
 
 
 def main() -> None:
