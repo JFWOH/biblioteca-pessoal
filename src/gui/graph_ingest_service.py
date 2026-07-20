@@ -44,6 +44,10 @@ class GraphIngestService(QObject):
         self._idle_timer.timeout.connect(self._on_idle_tick)
         self._idle_timer.start(int(self._cfg("idle_interval_s", 60)) * 1000)
 
+    def set_rag_engine(self, rag_engine) -> None:
+        """Injeta o RAGEngine criado após o show (rodada E1 — startup adiado)."""
+        self._rag_engine = rag_engine
+
     # ── Config helpers ────────────────────────────────────────────────
 
     def _cfg(self, key: str, default):
