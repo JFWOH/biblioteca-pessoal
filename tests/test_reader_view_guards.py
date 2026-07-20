@@ -24,3 +24,49 @@ def test_current_page_text_method_not_shadowed_by_attribute():
         "atributo self._current_page_text sombrearia o método homônimo "
         "(use outro nome, ex.: _last_page_text)"
     )
+
+
+# ── Word Wise no EPUB (débito 3.4 / rodada B3) — fiação estática ─────────
+# reader_view importa QtWebEngine; a fiação é verificada lendo o fonte, no
+# mesmo padrão acima (a ponte em si é testada em test_epub_selection_bridge).
+
+def _reader_src() -> str:
+    return _READER_VIEW.read_text(encoding="utf-8")
+
+
+def test_epub_bridge_is_wired_to_webchannel():
+    """A ponte de seleção do EPUB é registrada no QWebChannel da página."""
+    src = _reader_src()
+    assert "EpubSelectionBridge" in src
+    assert "setWebChannel" in src
+    assert 'registerObject("epubBridge"' in src
+    # O nome registrado tem de bater com o usado no JS injetado.
+    from src.gui.widgets.epub_selection_bridge import EPUB_SELECTION_JS
+    assert "epubBridge" in EPUB_SELECTION_JS
+
+
+def test_epub_selection_js_reinjected_on_load_finished():
+    """setHtml troca o documento a cada página; o JS é re-injetado no load."""
+    src = _reader_src()
+    assert "loadFinished.connect(self._inject_epub_selection_js)" in src
+    assert "def _inject_epub_selection_js" in src
+    assert "runJavaScript(EPUB_SELECTION_JS)" in src
+
+
+def test_epub_selection_routes_short_selection_to_word_wise():
+    """Seleção curta no EPUB dispara o Word Wise; longa é ignorada nesta rodada."""
+    src = _reader_src()
+    handler = re.search(r"def _on_epub_selection_ended\(self.*?\n    def ",
+                        src, re.DOTALL).group(0)
+    assert "selection_ended.connect(self._on_epub_selection_ended)" in src
+    assert "_WORD_WISE_MAX_WORDS" in handler
+    assert "_start_word_wise" in handler
+
+
+def test_epub_selection_anchor_accounts_for_zoom():
+    """O anchor converte coords CSS→widget usando o zoomFactor (não crasha)."""
+    src = _reader_src()
+    anchor = re.search(r"def _epub_selection_anchor\(self.*?\n    def ",
+                       src, re.DOTALL).group(0)
+    assert "zoomFactor" in anchor
+    assert "mapTo" in anchor
