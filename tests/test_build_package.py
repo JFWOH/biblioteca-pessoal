@@ -25,6 +25,23 @@ class TestManualPdf:
         assert data.startswith(b"%PDF")
         assert len(data) > 20_000  # manual completo, não página vazia
 
+    def test_pdf_tem_fontes_e_texto_de_verdade(self, qtbot, tmp_path):
+        """Regressão do bug do 1º build (2026-07-20): com QT_QPA_PLATFORM=
+        offscreen no Windows, o PDF saía inteiro em tofu — ZERO fontes
+        embutidas e ZERO texto extraível (ilegível E inindexável pelo RAG).
+        Estas duas propriedades são o discriminador exato do defeito."""
+        import fitz
+        out = generate_manual_pdf(out_path=tmp_path / "manual.pdf")
+        doc = fitz.open(str(out))
+        try:
+            page = doc[0]
+            assert page.get_fonts(), "PDF sem nenhuma fonte embutida (tofu)"
+            text = "".join(p.get_text() for p in doc)
+            assert "Biblioteca Pessoal" in text
+            assert "Instala" in text  # seção 1 do manual
+        finally:
+            doc.close()
+
     def test_md_customizado(self, qtbot, tmp_path):
         md = tmp_path / "mini.md"
         md.write_text("# Título\n\nCorpo do documento.", encoding="utf-8")

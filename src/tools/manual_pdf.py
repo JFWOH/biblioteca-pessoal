@@ -32,8 +32,14 @@ _HTML_TEMPLATE = (
 def generate_manual_pdf(md_path: Path = MANUAL_MD,
                         out_path: Path = DEFAULT_OUT) -> Path:
     """Converte o manual (Markdown) em PDF e devolve o caminho gerado."""
-    # Headless por padrão (build/CI); numa sessão com display, não interfere.
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    # BUG corrigido (2026-07-20, relato real do 1º build): no WINDOWS a
+    # plataforma "offscreen" não enxerga as fontes do sistema (GDI) — o Qt
+    # caía num fallback SEM GLIFOS e o PDF saía inteiro em quadrados (tofu),
+    # sem nenhuma fonte embutida nem camada de texto. Offscreen fica só para
+    # Linux/CI (fontconfig resolve fontes mesmo headless); no Windows a
+    # plataforma nativa funciona sem exibir janela alguma.
+    if sys.platform != "win32":
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     import markdown
     from PyQt6.QtGui import QTextDocument
     from PyQt6.QtPrintSupport import QPrinter
