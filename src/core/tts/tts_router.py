@@ -21,6 +21,7 @@ from src.core.tts.base_tts_provider import (
 )
 from src.core.tts.voice_profile import VoiceProfile, NarrationRole
 from src.core.tts.text_preprocessor import TTSTextPreprocessor
+from src.core.tts.language_detect import detect_language_confident
 from src.core.tts.language_segments import split_language_runs
 
 logger = logging.getLogger(__name__)
@@ -154,6 +155,100 @@ class TTSRouter:
         # Legacy pyttsx3 is explicitly NOT registered automatically for this chunked/gapless pipeline.
 
     # ── Provider Selection ────────────────────────────────────────────
+
+    def synthesize_segments(self, text: str, role: NarrationRole,
+                            language: str | None = None,
+                            cancel_check=None) -> list[dict]:
+        """Sintetiza *text* SEM tocar — API pública da pré-síntese (débito 3.6).
+
+        Retorna segmentos no formato que o ``AudioWorker(prepared=...)``
+        consome (``audio_data``/``sample_rate``/``channels``/``dtype``),
+        espelhando as decisões de voz do ``speak()``: detecção confiante
+        quando ``language`` é ``None``, pré-processamento por estilo, voz do
+        perfil (ou resolvida por idioma) e voz por SENTENÇA em texto misto.
+
+        NÃO toca no estado de reprodução (``_is_cancelled``/``_active_player``)
+        — é seguro rodar em PARALELO a um ``speak()`` em andamento (é o design
+        da pré-síntese). Sem SLO/fallback-swap (comportamento histórico da
+        pré-síntese, preservado). ``cancel_check``: chamável consultado entre
+        chunks; verdadeiro → aborta e devolve ``[]``. Chunk que falha é pulado
+        (ADR-005); provider ausente ou pyttsx3 (sem ``audio_data``) → ``[]``.
+        """
+        if not text or not text.strip():
+            return []
+        profile = (self.get_book_profile()
+                   if role == NarrationRole.BOOK_NARRATOR
+                   else self.get_assistant_profile())
+        language = language or detect_language_confident(text)
+        effective_language = language or profile.language
+
+        try:
+            processed = self._preprocessor.prepare_for_speech(
+                text, style=profile.style)
+        except Exception:
+            processed = text
+        if not processed or not processed.strip():
+            return []
+
+        provider = self._get_provider_for_profile(profile)
+        # pyttsx3 não expõe audio_data — não dá para sintetizar sem tocar.
+        if provider is None or provider.name.lower() == "pyttsx3":
+            return []
+
+        voice_id = profile.voice_id
+        if not voice_id:
+            try:
+                voice_id = self._resolve_voice(
+                    provider, effective_language, profile.style)
+            except Exception:
+                voice_id = None
+
+        max_chars = 200 if provider.latency_profile() == "high" else 800
+
+        # Voz por SENTENÇA (item 6): idioma não fixado E detecção ambígua →
+        # cada run de idioma com a sua voz (mesma condição do multi-run do
+        # speak). Um único run mantém o caminho simples (mesma voz).
+        work: list[tuple] = []  # (voice_id, chunk)
+        lang_runs = (split_language_runs(processed, profile.language)
+                     if language is None else [])
+        if len(lang_runs) > 1:
+            prev_voice = voice_id
+            for run_lang, run_text in lang_runs:
+                try:
+                    run_voice = self._resolve_voice(
+                        provider, run_lang, profile.style)
+                except Exception:
+                    run_voice = None
+                if run_voice is None:
+                    run_voice = prev_voice  # degradação graciosa: herda a voz
+                else:
+                    prev_voice = run_voice
+                for chunk in self._split_preprocessed_text(
+                        run_text, max_chars=max_chars):
+                    work.append((run_voice, chunk))
+        else:
+            for chunk in self._split_preprocessed_text(
+                    processed, max_chars=max_chars):
+                work.append((voice_id, chunk))
+
+        segments: list[dict] = []
+        for chunk_voice, chunk in work:
+            if cancel_check is not None and cancel_check():
+                return []
+            if not chunk.strip():
+                continue
+            result = provider.synthesize(
+                chunk, voice_id=chunk_voice, rate=profile.rate,
+                volume=profile.volume)
+            if not getattr(result, "success", False) or result.audio_data is None:
+                continue
+            segments.append({
+                "audio_data": result.audio_data,
+                "sample_rate": result.sample_rate,
+                "channels": provider.channels,
+                "dtype": provider.dtype,
+            })
+        return segments
 
     def _get_provider_for_profile(self, profile: VoiceProfile) -> Optional[BaseTTSProvider]:
         """Select the best provider for a given voice profile.

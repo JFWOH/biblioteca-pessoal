@@ -75,8 +75,18 @@ def test_cache_invalidate():
 
 
 # ── Worker de pré-síntese (router falso, TTS mockado) ─────────────────
+#
+# Rodada B2 (débito 3.6): o pipeline de síntese-sem-tocar virou API pública
+# (``TTSRouter.synthesize_segments``) e o worker DELEGA a ela. O fake liga o
+# MÉTODO REAL a um self falso (harness — padrão do projeto), então estes
+# testes exercitam o pipeline público de verdade, com provider mockado.
 
 def _fake_router(provider_name="kokoro"):
+    from types import MethodType
+
+    from src.core.tts.text_preprocessor import TTSTextPreprocessor
+    from src.core.tts.tts_router import TTSRouter
+
     profile = SimpleNamespace(
         language="pt", style="neutral", voice_id="", rate=1.0, volume=1.0,
         preferred_provider=provider_name)
@@ -88,12 +98,16 @@ def _fake_router(provider_name="kokoro"):
         synthesize=lambda chunk, voice_id=None, rate=1.0, volume=1.0: SimpleNamespace(
             success=True, audio_data=b"\x00\x01\x02", sample_rate=24000),
     )
-    return SimpleNamespace(
+    router = SimpleNamespace(
         get_book_profile=lambda: profile,
         get_assistant_profile=lambda: profile,
+        _preprocessor=TTSTextPreprocessor(),
         _get_provider_for_profile=lambda p: provider,
         _resolve_voice=lambda p, lang, style: "pt-voice",
+        _split_preprocessed_text=TTSRouter._split_preprocessed_text,
     )
+    router.synthesize_segments = MethodType(TTSRouter.synthesize_segments, router)
+    return router
 
 
 def test_presynth_worker_synthesizes_segments(qtbot):
