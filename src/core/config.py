@@ -82,6 +82,13 @@ DEFAULT_CONFIG = {
         "enabled": True,
         "idle_interval_s": 120,        # frequência de verificação
         "idle_min_inactivity_s": 120,  # só roda sem leitura ativa há N segundos
+        # Carência de startup (achado B0): a indexação NÃO começa nos primeiros
+        # N segundos após o launch, mesmo que o app pareça ocioso. Sem isso, o
+        # "ocioso" era só "sem LEITURA ativa" — navegar na grade não conta como
+        # atividade —, então ~2 min após abrir o app o indexador disparava e
+        # competia por CPU/IO com a sessão interativa e com o TTS (TTFB do
+        # Kokoro estourando o SLO). A carência dá uma janela interativa inicial.
+        "startup_grace_s": 300,
     },
     # Grafo de conceitos (Fase 2): ingestão dirigida pela leitura + ocioso.
     "graph": {

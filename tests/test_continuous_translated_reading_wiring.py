@@ -49,7 +49,9 @@ def test_toggle_audio_forks_to_translated_chain_on_start_path():
     assert match, "_toggle_audio não encontrado"
     body = match.group(1)
     pause_idx = body.index("self._resume_audio()")
-    fork_idx = body.index("if self._continuous_translate_mode:")
+    # Achado B0: o fork traduzido agora é guardado pelo override "Ouvir original".
+    fork_idx = body.index(
+        "if self._continuous_translate_mode and not self._listen_original_override:")
     launch_idx = body.index("self._launch_audio_worker(page_text, chain_continuous=True)")
     assert pause_idx < fork_idx < launch_idx  # fork vem depois do pause/resume, antes do launch direto
     assert (
@@ -110,6 +112,78 @@ def test_enabling_translate_mode_invalidates_presynth():
         r"def _toggle_continuous_translate_reading\(self, checked: bool\):(.*?)\n    def ",
         _READER_VIEW, re.DOTALL)
     assert "self._invalidate_presynth()" in match.group(1)
+
+
+# ── Achado B0: override de sessão "Ouvir original" ────────────────────
+#
+# "Ouvir original" com a Leitura Contínua Traduzida ligada deve SEGUIR no
+# original até o usuário parar (antes: one-shot que voltava a traduzir). Guardas
+# estruturais dos pontos de set/consult/clear (ReaderView não instancia na suíte
+# por causa do QtWebEngine — mesmo padrão dos testes acima). O comportamento
+# encadeado é coberto também por test_listen_original_override.py (harness).
+
+
+def _body(name: str, sig: str = r"self\)") -> str:
+    m = re.search(rf"def {name}\({sig}[^\n]*:(.*?)\n    def ", _READER_VIEW, re.DOTALL)
+    assert m, f"{name} não encontrado"
+    return m.group(1)
+
+
+def test_override_flag_initialized():
+    assert "self._listen_original_override: bool = False" in _READER_VIEW
+
+
+def test_listen_original_sets_override():
+    body = _body("_on_listen_original")
+    assert "self._listen_original_override = True" in body
+    # A ordem importa: o override é setado ANTES de narrar.
+    assert body.index("self._listen_original_override = True") < body.index(
+        "self.narrate_text(page_text, chain_continuous=True)")
+
+
+def test_toggle_audio_consults_override():
+    body = _body("_toggle_audio")
+    assert (
+        "if self._continuous_translate_mode and not self._listen_original_override:"
+        in body)
+
+
+def test_manual_stop_clears_override_via_dedicated_handler():
+    # O botão ⏹️ passa por _on_audio_stop_clicked (limpa o override) e NÃO
+    # direto por _stop_audio_if_running (que é chamado em transições internas).
+    assert (
+        "self._act_audio_stop.triggered.connect(self._on_audio_stop_clicked)"
+        in _READER_VIEW)
+    body = _body("_on_audio_stop_clicked")
+    assert "self._listen_original_override = False" in body
+    assert "self._stop_audio_if_running()" in body
+
+
+def test_stop_audio_if_running_does_not_touch_override():
+    # Crítico: _stop_audio_if_running é chamado ao virar página NA cadeia e por
+    # narrate_text; se limpasse o override, a própria cadeia o apagaria.
+    body = _body("_stop_audio_if_running")
+    assert "_listen_original_override" not in body
+
+
+def test_read_translated_clears_override():
+    body = _body("_on_read_translated_page")
+    assert "self._listen_original_override = False" in body
+
+
+def test_toggle_translate_reading_clears_override():
+    body = _body("_toggle_continuous_translate_reading", sig=r"self, checked: bool\)")
+    assert "self._listen_original_override = False" in body
+
+
+def test_book_switch_and_teardown_clear_override():
+    assert "self._listen_original_override = False  # troca de livro reseta o override (B0)" in _READER_VIEW
+    assert "self._listen_original_override = False  # fechar leitor reseta o override (B0)" in _READER_VIEW
+
+
+def test_persisted_translate_toggle_key_unchanged():
+    # O override NÃO altera o toggle persistido (garantia explícita do achado).
+    assert _READER_VIEW.count('config.set("tts.continuous_translate_reading"') == 1
 
 
 def test_delayed_translation_result_is_discarded_by_narration_epoch():

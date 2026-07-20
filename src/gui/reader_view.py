@@ -95,6 +95,15 @@ class ReaderView(QWidget):
         # Leitura contínua TRADUZIDA: mesma cadeia, mas cada página é traduzida
         # (NLLB) antes de narrar. Ver docs/agents/traducao_confiavel_execution_contract.md.
         self._continuous_translate_mode: bool = False
+        # Override de sessão "Ouvir original" (achado B0): quando o usuário pede
+        # "Ouvir original" com a Leitura Contínua Traduzida ligada, a cadeia deve
+        # SEGUIR no idioma original (página a página) até ele parar — em vez do
+        # one-shot antigo, que voltava a traduzir na página seguinte. Enquanto
+        # este flag vive, o encadeamento (_toggle_audio) PULA a tradução. É
+        # limpo em: stop manual (botão ⏹️), "Ouvir traduzido", mudança do toggle
+        # de Leitura Contínua Traduzida, e troca/fechamento de livro. NÃO altera
+        # o toggle persistido tts.continuous_translate_reading.
+        self._listen_original_override: bool = False
         self._audio_stopped_by_user: bool = False  # stop manual não encadeia a próxima
         self._chain_continuous: bool = False       # só narração de página encadeia (tradução não)
         # Época de narração: incrementa a cada narração NOVA (não em pause/
@@ -416,7 +425,11 @@ class ReaderView(QWidget):
 
         self._act_audio_stop = QAction("⏹️ Parar", self)
         self._act_audio_stop.setEnabled(False)  # só habilitado durante reprodução/pausa
-        self._act_audio_stop.triggered.connect(self._stop_audio_if_running)
+        # Stop MANUAL (ação explícita do usuário) passa por _on_audio_stop_clicked
+        # para limpar o override "Ouvir original" (achado B0). O
+        # _stop_audio_if_running cru NÃO limpa o override porque também é chamado
+        # em transições internas (virar página na cadeia, narrate_text).
+        self._act_audio_stop.triggered.connect(self._on_audio_stop_clicked)
 
         self._act_audio_settings = QAction("⚙️ Configurar vozes…", self)
         self._act_audio_settings.triggered.connect(self._on_tts_settings_clicked)
@@ -943,6 +956,7 @@ class ReaderView(QWidget):
 
         self._book_id = book_data.get("id", 0)
         self._invalidate_presynth()  # troca de livro descarta pré-síntese (3.6)
+        self._listen_original_override = False  # troca de livro reseta o override (B0)
         self._annotation_panel.set_book_id(self._book_id)
         self._title_label.setText(book_data.get("title", ""))
         self._load_persisted_observations()
@@ -1327,6 +1341,7 @@ class ReaderView(QWidget):
         self._flush_reading_time()
         # Teardown: espera (bloqueante, limitado) os workers de áudio — aqui é
         # encerramento, não interação, então nenhum worker órfão pode sobreviver.
+        self._listen_original_override = False  # fechar leitor reseta o override (B0)
         self._teardown_audio_workers()
         if getattr(self, "_typography_popover", None) is not None:
             self._typography_popover.hide()
@@ -2091,10 +2106,12 @@ class ReaderView(QWidget):
         if not page_text:
             return
 
-        if self._continuous_translate_mode:
+        if self._continuous_translate_mode and not self._listen_original_override:
             # Modo traduzido: cada página passa pelo NLLB (via MainWindow)
             # antes de narrar; a cadeia continua em _on_audio_finished igual
             # ao modo normal (chain_continuous é setado por narrate_text lá).
+            # Exceção (achado B0): com o override "Ouvir original" ativo, a
+            # cadeia SEGUE no original — pula a tradução e narra o texto cru.
             self._begin_translation_feedback()  # item E: feedback imediato
             self.ai_action_requested.emit("read_translated_page_chained", page_text)
             return
@@ -2254,6 +2271,11 @@ class ReaderView(QWidget):
         if not page_text:
             self._show_status("⚠️ Página sem texto para narrar.", 4000)
             return
+        # Achado B0: "Ouvir original" liga o override de sessão — a cadeia (se
+        # houver um modo contínuo ligado) segue no ORIGINAL até o usuário parar,
+        # em vez do one-shot antigo. Harmless quando não há modo contínuo ou
+        # quando a Leitura Contínua Traduzida está desligada.
+        self._listen_original_override = True
         self.narrate_text(page_text, chain_continuous=True)
 
     def _on_read_translated_page(self):
@@ -2274,6 +2296,8 @@ class ReaderView(QWidget):
         if not page_text:
             self._show_status("⚠️ Página sem texto para traduzir/narrar.", 4000)
             return
+        # Pedido explícito de tradução limpa o override "Ouvir original" (B0).
+        self._listen_original_override = False
         self._begin_translation_feedback()  # item E: feedback imediato
         self.ai_action_requested.emit("read_translated_page", page_text)
 
@@ -2310,6 +2334,9 @@ class ReaderView(QWidget):
     def _toggle_continuous_translate_reading(self, checked: bool):
         """Liga/desliga a leitura contínua TRADUZIDA (persiste na config)."""
         self._continuous_translate_mode = bool(checked)
+        # Mudar o toggle é uma decisão explícita de modo → limpa o override
+        # "Ouvir original" (achado B0), em qualquer direção.
+        self._listen_original_override = False
         if self._continuous_translate_mode:
             # Áudio pré-sintetizado é do idioma ORIGINAL — inválido p/ tradução.
             self._invalidate_presynth()
@@ -2520,6 +2547,19 @@ class ReaderView(QWidget):
         if hasattr(self, "_audio_worker") and self._audio_worker:
             self._audio_worker.deleteLater()
             self._audio_worker = None
+
+    def _on_audio_stop_clicked(self):
+        """Stop MANUAL da narração (botão ⏹️ Parar — ação explícita do usuário).
+
+        Achado B0: limpa o override "Ouvir original" (a leitura em original só
+        segue "até o usuário parar") e então executa a parada assíncrona normal.
+        Distinto de ``_stop_audio_if_running`` cru, que também é chamado em
+        transições internas (virar página na cadeia, ``narrate_text``) e por
+        isso NÃO pode limpar o override — senão a própria virada de página da
+        cadeia o apagaria.
+        """
+        self._listen_original_override = False
+        self._stop_audio_if_running()
 
     def _stop_audio_if_running(self):
         """Para a narração SEM bloquear a GUI (perf/gui): drenagem assíncrona.
