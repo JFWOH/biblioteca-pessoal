@@ -6,6 +6,50 @@
 > Projeto NOVO (repo próprio para o cliente Flutter); o backend vive NESTE
 > repo. EXECUTAR SÓ COM GO EXPLÍCITO. Decisões em aberto ao final.
 
+## DIREÇÃO v2 (2026-07-20 — GO do usuário para ESTABELECER o projeto)
+
+O usuário estabeleceu o projeto com três diretrizes que ATUALIZAM o plano
+abaixo (onde houver conflito, esta seção prevalece):
+
+1. **Norte do produto: excelência em LEITURA e ÁUDIO.** Consequência
+   estrutural: o áudio SOBE de M2 para dentro do M1 — o primeiro cliente
+   utilizável já entrega leitor de excelência + narração streaming com
+   player persistente estilo podcast (leitura contínua incluída). A IA
+   conversacional (RAG/tradução/Word Wise) segue no M2.
+2. **IA máxima SEM peso no aparelho.** A arquitetura cliente-servidor já
+   garante isso (toda IA no PC); no cliente, "leve e agradável" vira
+   critério de aceitação permanente: **APK < 40 MB, cold start < 2 s,
+   60 fps na leitura, página sob demanda com cache**. Toda feature nova
+   passa por esse gate antes de entrar no mapa de paridade.
+3. **Design system próprio: "Nocturnal Scholar"** (gerado no Google
+   Stitch, 2026-07-20; arquivos versionados em `docs/design/mobile/` —
+   `nocturnal-scholar-design-system.md` + `stitch-layout-reference.html`).
+   Isto REVOGA a linha do plano v1 "MESMOS tokens de cor do styles.py":
+   o mobile segue o design system novo, não a paleta do desktop.
+   - Os tokens já usam nomenclatura **Material 3** (surface-container-*,
+     primary/on-primary etc.) → mapeamento direto para
+     `ThemeData`/`ColorScheme` no Flutter, sem tradução manual.
+   - Tipografia: Source Serif 4 (títulos) · Inter (corpo) · JetBrains
+     Mono (labels/metadados), via `google_fonts`; escala espacial de 8 px.
+   - Dark-first com camadas tonais ("lighter-is-higher"); temas
+     claro/sépia derivados do mesmo sistema em rodada posterior.
+   - O mockup de referência (3 painéis desktop) traduz-se no mobile para
+     a bottom nav já prevista: **Biblioteca · Documento · Assistente**
+     (o painel do assistente vira aba/tela). **Claude Design refina os
+     mockups de cada tela-chave (leitor, player, assistente) ANTES de
+     codá-la** — diretriz reafirmada.
+
+**Harness próprio (criar APÓS aprovação de nome/local — decisão nº 2):**
+pasta nova irmã deste repo com: `CLAUDE.md` do mobile (stack
+Flutter/Dart + Riverpod, protocolo de rodadas herdado — branch→testes
+widget/integration→PR→auditoria→CI→merge, referência ao backend NESTE
+repo e ao design system versionado aqui), `.claude/launch.json`
+(`flutter run`), `docs/adr/` próprio (ADR-M001 cliente-servidor,
+ADR-M002 design system Nocturnal Scholar, ADR-M003 estratégia offline),
+e memória de handoff própria. Ordem de execução da retomada mobile:
+**M0 (backend FastAPI, neste repo) → scaffold do repo novo + harness →
+M1 (leitor+áudio)**.
+
 ## Decisão de arquitetura (reafirmada da análise de 01/07)
 
 **Cliente-servidor**: núcleo de IA (RAG/TTS/tradução/indexação) fica no PC;
@@ -93,9 +137,12 @@ codar o leitor (diretriz registrada na memória do projeto).
 
 ## Decisões em aberto (usuário)
 
-1. Ordem: **MCP (jul/2026-D) antes do M0** — recomendado (ensaio barato da
-   service layer) — ou direto ao M0?
-2. Nome/local do repo Flutter novo.
+1. ~~Ordem: MCP antes do M0?~~ **RESOLVIDA** — MCP executado (ciclo
+   jul/2026-D, PRs #59–#61) com precedentes prontos para a service layer
+   (lock de serialização do RAG, envelope status/data|error, paths
+   configuráveis via `configure()`).
+2. Nome/local do repo Flutter novo (sugestão: `biblioteca-mobile`, pasta
+   irmã em `G:\PROGRAMAS PYTHON\biblioteca-mobile`).
 3. Tailscale vs LAN-only no MVP; formato do token.
 4. EPUB: aceitar conversão server-side como fallback se o spike falhar?
 
