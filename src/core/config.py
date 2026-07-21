@@ -124,6 +124,16 @@ DEFAULT_CONFIG = {
     "mcp": {
         "allow_writes": False,
     },
+    # Backend HTTP fino para o cliente mobile Flutter (rodada M0,
+    # src/api/main.py). Auth por bearer token estático — "token" vazio
+    # aqui significa "não configurado" (a API então recusa requisições
+    # autenticadas com 503, nunca abre sem token). Preferir a env var
+    # BIBLIOTECA_API_TOKEN em produção; este campo é o fallback persistido.
+    "api": {
+        "host": "0.0.0.0",
+        "port": 8765,
+        "token": "",
+    },
 }
 
 
