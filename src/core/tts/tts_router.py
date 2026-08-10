@@ -13,6 +13,7 @@ ADR-006 compliance: No PyQt6 imports.
 """
 
 import logging
+import time
 from typing import Optional
 
 from src.core.tts.base_tts_provider import (
@@ -23,6 +24,12 @@ from src.core.tts.voice_profile import VoiceProfile, NarrationRole
 from src.core.tts.text_preprocessor import TTSTextPreprocessor
 from src.core.tts.language_detect import detect_language_confident
 from src.core.tts.language_segments import split_language_runs
+
+# Espera de prontidão do Kokoro no início da narração (caso real 2026-08-10:
+# warmup concorrendo com OCR de PDF escaneado estourava os 3s e, sem Piper,
+# o play falhava duro — com o motor a segundos de ficar pronto).
+_READINESS_WAIT_FALLBACK_S = 3.0  # há reserva saudável: espera curta e cai p/ ela
+_READINESS_WAIT_SOLO_S = 20.0     # sem reserva: esperar > falhar (cancelável)
 
 logger = logging.getLogger(__name__)
 
@@ -378,13 +385,31 @@ class TTSRouter:
         if provider.name.lower() == "kokoro":
             logger.info("PROVIDER_READY: provider=Kokoro, is_ready=%s", getattr(provider, "is_ready", False))
             if not getattr(provider, "is_ready", False):
-                logger.info("TTS_ROUTER: Kokoro is not ready yet at startup. Waiting up to 3.0s for warmup...")
+                # Orçamento condicional (ADR-005): com reserva saudável, espera
+                # curta e cai para ela; SEM reserva, esperar mais é estritamente
+                # melhor que falhar — sob carga pesada (OCR/indexação em
+                # background) o warmup do Kokoro passa fácil dos 3s. A espera é
+                # cancelável via stop() em passos de 0,5s.
+                piper_probe = self._providers.get("piper")
+                has_fallback = bool(piper_probe and piper_probe.health_check())
+                budget = _READINESS_WAIT_FALLBACK_S if has_fallback else _READINESS_WAIT_SOLO_S
+                logger.info("TTS_ROUTER: Kokoro is not ready yet at startup. Waiting up to %.1fs for warmup (fallback=%s)...",
+                            budget, has_fallback)
                 warmup_event = getattr(provider, "_warmup_event", None)
-                if warmup_event:
-                    ready = warmup_event.wait(timeout=3.0)
-                    if not ready:
-                        logger.warning("READINESS_TIMEOUT: Kokoro readiness wait timed out after 3.0s")
-            
+                waited = 0.0
+                while waited < budget and not getattr(provider, "is_ready", False):
+                    if self._is_cancelled:
+                        logger.info("TTS_ROUTER: readiness wait cancelled by stop().")
+                        return 0
+                    step = min(0.5, budget - waited)
+                    if warmup_event is not None:
+                        warmup_event.wait(timeout=step)
+                    else:
+                        time.sleep(step)
+                    waited += step
+                if not getattr(provider, "is_ready", False):
+                    logger.warning("READINESS_TIMEOUT: Kokoro readiness wait timed out after %.1fs", budget)
+
             # Re-check readiness after wait
             if not getattr(provider, "is_ready", False):
                 logger.warning("TTS_ROUTER: Kokoro is not ready at startup after waiting.")
@@ -396,7 +421,11 @@ class TTSRouter:
                     was_fallback = True
                 else:
                     logger.error("TTS_ROUTER: Kokoro is not ready and Piper is not available.")
-                    raise TTSProviderError("Nenhum motor de voz (TTS) local pronto ou disponível no momento. Aguarde a inicialização do Kokoro ou instale o Piper.")
+                    raise TTSProviderError(
+                        "O motor de voz (Kokoro) ainda está inicializando e não há reserva (Piper) instalada. "
+                        "Tarefas pesadas em segundo plano (OCR/indexação) podem atrasar a inicialização — "
+                        "tente novamente em instantes."
+                    )
             else:
                 logger.info("PROVIDER_READY: provider=Kokoro, is_ready=True")
 
@@ -478,7 +507,6 @@ class TTSRouter:
             return spoken_count
         
         import threading
-        import time
         from src.core.audio.continuous_player import ContinuousAudioPlayer
 
         logger.info("PLAYER_STREAM_OPENING: sample_rate=%d", 24000 if provider.name.lower() == "kokoro" else 22050)
