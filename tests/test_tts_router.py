@@ -490,6 +490,74 @@ class TestRouterReadinessFallback:
             assert len(kokoro.spoken_texts) == 0
 
 
+class TestReadinessWaitBudget:
+    """Orçamento condicional da espera de prontidão do Kokoro (caso real
+    2026-08-10: warmup concorrendo com OCR estourava 3s e falhava duro)."""
+
+    def _make_router_with_kokoro(self, ready: bool = False):
+        import threading
+        router = TTSRouter()
+        kokoro = FakeProvider("Kokoro", "B")
+        kokoro.is_ready = ready
+        kokoro._warmup_event = threading.Event()
+        router.register_provider(kokoro)
+        profile = VoiceProfile(role=NarrationRole.BOOK_NARRATOR,
+                               preferred_provider="kokoro")
+        router.set_book_profile(profile)
+        return router, kokoro
+
+    def test_wait_extends_when_no_fallback(self):
+        """Sem Piper, a espera vai além dos 3s e o play conclui quando o
+        Kokoro fica pronto (era o cenário que falhava duro)."""
+        import threading
+        router, kokoro = self._make_router_with_kokoro()
+
+        def _become_ready():
+            kokoro.is_ready = True
+            kokoro._warmup_event.set()
+        threading.Timer(0.4, _become_ready).start()
+
+        with patch("src.core.tts.tts_router._READINESS_WAIT_SOLO_S", 3.0):
+            router.speak("Texto após warmup.")
+        assert len(kokoro.spoken_texts) > 0
+
+    def test_wait_short_with_healthy_fallback(self):
+        """Com Piper saudável, a espera continua curta e cai para a reserva."""
+        import time as _t
+        router, kokoro = self._make_router_with_kokoro()
+        piper = FakeProvider("Piper", "C")
+        router.register_provider(piper)
+
+        start = _t.monotonic()
+        with patch("src.core.tts.tts_router._READINESS_WAIT_FALLBACK_S", 0.4):
+            router.speak("Texto na reserva.")
+        elapsed = _t.monotonic() - start
+        assert len(piper.spoken_texts) > 0
+        assert len(kokoro.spoken_texts) == 0
+        assert elapsed < 3.0
+
+    def test_wait_cancelled_by_stop(self):
+        """stop() durante a espera aborta sem erro e sem narrar."""
+        import threading
+        router, kokoro = self._make_router_with_kokoro()
+        threading.Timer(0.3, router.stop).start()
+
+        with patch("src.core.tts.tts_router._READINESS_WAIT_SOLO_S", 10.0):
+            result = router.speak("Nunca deve tocar.")
+        assert result == 0
+        assert len(kokoro.spoken_texts) == 0
+
+    def test_wait_timeout_without_fallback_raises_clear_error(self):
+        """Esgotada a espera sem reserva, o erro explica a inicialização e a
+        carga pesada — não culpa o usuário nem exige reinstalação."""
+        from src.core.tts.base_tts_provider import TTSProviderError
+        router, kokoro = self._make_router_with_kokoro()
+
+        with patch("src.core.tts.tts_router._READINESS_WAIT_SOLO_S", 0.4):
+            with pytest.raises(TTSProviderError, match="inicializando"):
+                router.speak("Sem motor pronto.")
+
+
 class TestAdaptiveChunking:
     @pytest.mark.skipif(not HAS_AUDIO_OUTPUT,
                         reason="sem dispositivo de áudio (caminho de reprodução diverge)")
