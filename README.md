@@ -17,12 +17,13 @@ Gerenciador de biblioteca pessoal e leitor multi-formato sofisticado, desenvolvi
 - **MOBI** — Suporte básico (stub para integração futura)
 
 ### 📚 Gerenciamento de Biblioteca
-- Importação em lote com detecção automática de duplicatas (SHA-256)
+- Importação em lote com detecção automática de duplicatas (SHA-256) — por diálogo ou **arrastar-e-soltar** na janela
 - Extração automática de metadados (título, autor, capa, páginas)
-- Busca full-text ultrarrápida via **SQLite FTS5**
-- Coleções e tags personalizáveis
+- Busca full-text ultrarrápida via **SQLite FTS5** — inclusive no conteúdo (OCR de PDFs escaneados indexado na hora)
+- Prateleira **"Continuar lendo"** e % de progresso nas capas
+- Coleções e tags personalizáveis; menu de contexto nos cards
 - Avaliação com estrelas interativa (0-5)
-- Progresso de leitura persistido
+- Estatísticas vivas: sequência de dias lidos (streak) e minutos por semana
 
 ### 📝 Anotações e Destaques
 - Notas de texto por página
@@ -31,17 +32,29 @@ Gerenciador de biblioteca pessoal e leitor multi-formato sofisticado, desenvolvi
 - Navegação rápida entre anotações
 
 ### 🎨 Interface Premium
-- 3 temas: **Escuro**, **Claro** e **Sépia**
+- 3 temas: **Escuro**, **Claro** e **Sépia** — aplicados a todas as superfícies
+- Botão **Aa** no leitor: fonte, tamanho, entrelinha e margens ajustados ao vivo
+- Painel lateral recolhível com **Sumário** (miniaturas de capítulo) e **Marcadores**
 - Visualização em grade com capas extraídas automaticamente
 - Busca dentro do documento (Ctrl+F)
 - Modo tela cheia (F11)
 - Painel de estatísticas com dashboard visual
 - Diálogos ricos para importação e configurações
 
-### 🤖 Agentic RAG & Governança
-- Assistente local com inteligência contextual capaz de buscas vetoriais, pesquisas na web e referências cruzadas.
-- **UI Mutators Seguros**: A IA interage com a GUI (marcadores automáticos, texto destacado) validada estritamente pelo **Policy Engine** (ADR-003).
-- **Trace Logger**: Log estruturado das sessões do RAG persistido localmente em JSONL (ADR-004).
+### 🤖 Assistente de IA 100% local (Ollama)
+- **Chat com seus livros (RAG agentic)**: buscas vetoriais, full-text, no grafo de conceitos e na web — com **citações clicáveis** `[Título, p. X]` que saltam direto à página
+- **Agente proativo de leitura**: insights por página, com continuidade entre sessões e aprendizado com as suas dispensas e avaliações 👍/👎 (com motivo)
+- **Dossiê do livro**: síntese, conceitos centrais e livros relacionados da sua própria biblioteca
+- **X-Ray da página**: conceitos da página atual e onde mais aparecem — via grafo, sem custo de LLM
+- **Flashcards gerados por IA** (pergunta/resposta) com revisão SRS e **export para Anki**
+- **Word Wise**: definição rápida de qualquer palavra selecionada
+- Governança: **Policy Engine** (ADR-003) valida toda interação da IA com a GUI; **Trace Logger** (ADR-004) registra as sessões em JSONL
+
+### 🔊 Leitura em Áudio (TTS neural local)
+- Narração com voz neural local (**Kokoro**; reserva Piper → pyttsx3), estilos de narração e seleção de voz
+- Detecção automática de idioma (PT/EN) com voz adequada por sentença
+- **Leitura contínua** com virada de página automática e pré-síntese da próxima página
+- **"Ouvir original / Ouvir traduzido"**: narração da página traduzida (NLLB) em um clique
 
 ### 🌐 Tradução Offline Local-First
 - Tradução de trechos selecionados (em PDFs escaneados com OCR ou EPUBs) suportada pelo modelo **NLLB-200** (`facebook/nllb-200-distilled-600M`).
@@ -73,6 +86,18 @@ venv\Scripts\python.exe -m pip install -r requirements.txt      # Windows
 > do sistema. Use sempre o interpretador do venv do projeto
 > (`venv\Scripts\python.exe` no Windows, `./venv/bin/python` no Linux/Mac).
 > Para conferir qual está ativo: `python -c "import sys; print(sys.executable)"`.
+
+### 📦 App portátil (ZIP) — sem instalar Python
+
+Para gerar um pacote portátil (Python embutido + dependências CPU) e usar ou
+distribuir em máquinas sem nenhum pré-requisito:
+
+```bash
+venv\Scripts\python.exe -m src.tools.build_package --out build\BibliotecaPessoal
+```
+
+O roteiro de validação em máquina limpa está em
+`docs/agents/roteiro_validacao_pacote.md`.
 
 ### 🤖 Assistente de IA (Ollama) — instalação automática
 
@@ -167,50 +192,42 @@ obrigatória:
 
 | Atalho | Ação |
 |--------|------|
-| `Ctrl+I` | Importar documentos |
-| `Ctrl+O` | Importação rápida |
+| `Ctrl+I` / `Ctrl+O` / `Ctrl+Shift+O` | Importar documentos / arquivo / pasta |
 | `Ctrl+F` | Buscar no documento |
+| `Space` / `Shift+Space` | Próxima página / anterior |
+| `←` `→` / `PageUp` `PageDown` | Navegação de página |
+| `Ctrl+D` | Marcar/desmarcar página (bookmark) |
+| `Ctrl+B` | Mostrar/ocultar barra lateral |
+| `Ctrl+R` / `Ctrl+Shift+A` | Painel do assistente de IA |
+| `Ctrl+Shift+F` | Flashcards |
 | `Ctrl+,` | Configurações |
 | `F11` | Tela cheia |
-| `←` / `→` | Página anterior / próxima |
 | `Ctrl++` / `Ctrl+-` | Zoom in / out |
 | `Escape` | Voltar / sair de tela cheia |
+
+Lista completa dentro do app: **Ajuda → Atalhos de Teclado**.
 
 ## 🏗 Arquitetura
 
 ```
 src/
-├── core/           # Lógica de negócio
-│   ├── database.py     # SQLite + FTS5
-│   ├── library.py      # Gerenciamento de livros
-│   ├── metadata.py     # Extração de metadados
-│   ├── search.py       # Motor de busca
-│   └── config.py       # Configurações persistentes
-├── readers/        # Leitores de formato
-│   ├── base_reader.py  # Interface abstrata
-│   ├── pdf_reader.py   # PyMuPDF
-│   ├── epub_reader.py  # EbookLib
-│   ├── docx_reader.py  # python-docx
-│   ├── txt_reader.py   # TXT/Markdown
-│   └── reader_factory.py  # Factory pattern
-├── gui/            # Interface gráfica
-│   ├── main_window.py  # Janela principal
-│   ├── reader_view.py  # Visualizador de documentos
-│   ├── library_view.py # Grade de livros
-│   ├── sidebar.py      # Navegação lateral
-│   ├── styles.py       # Temas CSS/QSS
-│   └── widgets/        # Componentes reutilizáveis
-│       ├── annotation_panel.py
-│       ├── book_card.py
-│       ├── cover_widget.py
-│       ├── reading_progress.py
-│       ├── search_overlay.py
-│       ├── star_rating.py
-│       ├── stats_panel.py
-│       └── toc_widget.py
+├── core/           # Lógica de negócio (sem PyQt6 — ADR-006)
+│   ├── database.py / library.py / metadata.py / search.py / config.py
+│   ├── rag/            # RAG agentic: orchestrator, tools, PolicyEngine, traces
+│   ├── graph/          # Grafo de conceitos (X-Ray, livros relacionados)
+│   ├── tts/            # TTS: router, Kokoro/Piper, pré-síntese
+│   └── audio/          # Player contínuo de narração
+├── readers/        # Leitores de formato: PDF, EPUB, DOCX, TXT/MD (factory)
+├── gui/            # Interface PyQt6
+│   ├── main_window.py / reader_view.py / library_view.py / sidebar.py / styles.py
+│   ├── dialogs/        # Configurações, importação, dossiê, flashcards, atalhos…
+│   ├── widgets/        # Cards, painéis (RAG, anotações, insights), overlays
+│   └── workers/        # Threads de IA, áudio e indexação
+├── mcp/            # Servidor MCP local (stdio)
+├── tools/          # build_package, manual, trace_inspector, eval harness
 ├── utils/          # Utilitários
 └── main.py         # Entry point
-tests/              # Testes automatizados (pytest)
+tests/              # Suíte pytest (1590+ testes)
 ```
 
 ## 🛠️ Utilitários de Operabilidade (CLI)
