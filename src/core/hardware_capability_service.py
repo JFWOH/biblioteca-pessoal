@@ -7,13 +7,30 @@ import os
 import platform
 import ctypes
 
-try:
-    import torch
-    HAS_TORCH = True
-except (ImportError, OSError):
-    HAS_TORCH = False
-
 logger = logging.getLogger(__name__)
+
+_TORCH_NAO_TENTADO = object()
+_torch_mod = _TORCH_NAO_TENTADO
+
+
+def get_torch():
+    """Módulo ``torch``, ou ``None`` se indisponível (import tardio, com cache).
+
+    Substitui a antiga constante ``HAS_TORCH``: este módulo está na cadeia de
+    import da janela principal, e importar o torch no topo cobrava ~1,9s e
+    ~450MB de RSS em TODA abertura do app, mesmo sem ninguém usar GPU. Torch
+    ausente/quebrado (DLL CUDA incompatível) continua sendo degradação
+    graciosa, não erro (ADR-005).
+    """
+    global _torch_mod
+    if _torch_mod is _TORCH_NAO_TENTADO:
+        try:
+            import torch
+            _torch_mod = torch
+        except (ImportError, OSError) as e:
+            logger.debug(f"torch indisponível ({e}); seguindo sem detecção de GPU.")
+            _torch_mod = None
+    return _torch_mod
 
 
 class HardwareCapabilityService:
@@ -64,7 +81,8 @@ class HardwareCapabilityService:
         tier = "Tier B"  # Default
 
         try:
-            if HAS_TORCH and torch.cuda.is_available():
+            torch = get_torch()
+            if torch is not None and torch.cuda.is_available():
                 vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
                 if vram_gb > 10.0:
                     tier = "Tier A"
