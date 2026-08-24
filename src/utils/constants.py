@@ -1,5 +1,6 @@
 """Constantes globais da aplicação."""
 
+import os
 from pathlib import Path
 
 # ── Diretórios ─────────────────────────────────────────────────────────
@@ -10,8 +11,13 @@ APP_AUTHOR = "Jefferson"
 # Raiz do projeto (pasta onde está src/)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Diretório de dados (criado em runtime)
-DATA_DIR = PROJECT_ROOT / "data"
+# Diretório de dados (criado em runtime). Override via BIBLIOTECA_DATA_DIR
+# (rodada M0 da API mobile) — permite apontar o backend da API/testes para
+# uma pasta de dados isolada sem tocar em ``data/`` do app desktop.
+if os.environ.get("BIBLIOTECA_DATA_DIR"):
+    DATA_DIR = Path(os.environ["BIBLIOTECA_DATA_DIR"])
+else:
+    DATA_DIR = PROJECT_ROOT / "data"
 COVERS_DIR = DATA_DIR / "covers"
 CACHE_DIR = DATA_DIR / "cache"
 DB_PATH = DATA_DIR / "library.db"
