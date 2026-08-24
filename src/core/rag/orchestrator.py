@@ -6,7 +6,7 @@ import uuid
 from typing import List, Any, Optional, Generator
 
 from src.core import ollama_client
-from src.core.rag.agent_state import AgentState
+from src.core.rag.agent_state import AgentState, budget_for_tier
 from src.core.rag.tools.base import ToolOutput, create_tool_output
 from src.core.rag.trace_logger import TraceLogger
 
@@ -52,6 +52,33 @@ PORTUGUESE_STOPWORDS = {
 # AgentState.continuation_count) — uma resposta longa pode precisar de uma
 # retomada em cada um dos dois pontos.
 _MAX_CONTINUATIONS = 2
+
+
+# Tier de hardware resolvido UMA vez por processo. A detecção sonda a GPU e
+# importa o torch (lazy desde a Onda P) — caro demais para repetir a cada
+# pergunta, e o Orchestrator é reconstruído a cada ``RAGEngine.query_rag``,
+# então o cache tem de ser de módulo e não de instância.
+_TIER_NAO_RESOLVIDO = object()
+_tier_cache: Any = _TIER_NAO_RESOLVIDO
+
+
+def _hardware_tier() -> Optional[str]:
+    """Tier de hardware do HardwareCapabilityService, ou ``None`` se falhar.
+
+    Import tardio de propósito: ``hardware_capability_service`` puxa o torch na
+    primeira detecção de GPU, o que é aceitável DENTRO de uma query (segundos de
+    LLM adiante) mas não na cadeia de import do startup. Qualquer falha degrada
+    para ``None`` → orçamento padrão (Tier B), ADR-005.
+    """
+    global _tier_cache
+    if _tier_cache is _TIER_NAO_RESOLVIDO:
+        try:
+            from src.core.hardware_capability_service import HardwareCapabilityService
+            _tier_cache = HardwareCapabilityService().get_recommended_tier()
+        except Exception as exc:
+            logger.warning("Tier de hardware indetectável (%s); usando orçamento padrão.", exc)
+            _tier_cache = None
+    return _tier_cache
 
 
 class _ThinkingStatusTracker:
@@ -128,6 +155,17 @@ class Orchestrator:
         """
         self.engine = engine
         self._num_ctx = num_ctx
+        self._budget: Optional[tuple[int, int]] = None
+
+    def _agent_budget(self) -> tuple[int, int]:
+        """``(max_rounds, max_time_ms)`` do agente para ESTE hardware (§1.4).
+
+        Memo por instância sobre o cache de processo do tier — o orçamento nunca
+        é recalculado por pergunta.
+        """
+        if self._budget is None:
+            self._budget = budget_for_tier(_hardware_tier())
+        return self._budget
 
     def _reformulate_query(self, query: str) -> List[str]:
         """Gera uma lista de consultas (queries) alternativas para a busca web.
@@ -152,27 +190,13 @@ class Orchestrator:
                     {"role": "user", "content": f"Reescreva para busca: '{query}'"}
                 ]
                 
-                payload_dict = {
-                    "model": self.engine._llm_model.strip(),
-                    "messages": messages,
-                    "stream": False,
-                    "options": {"temperature": 0.1}
-                }
-
-                payload = json.dumps(payload_dict).encode("utf-8")
-                endpoint = f"{self.engine._ollama_url.rstrip('/')}/api/chat"
-                
-                import urllib.request
-                req = urllib.request.Request(
-                    endpoint,
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
+                # Cliente unificado (src/core/ollama_client): mesmo transporte
+                # e mesmo keep_alive das demais chamadas de /api/chat. Sem
+                # ``think`` — a reescrita herda o default do modelo, como antes.
+                reformulated = ollama_client.chat_once(
+                    self.engine._ollama_url, self.engine._llm_model.strip(),
+                    messages, temperature=0.1, timeout_s=5,
                 )
-                with urllib.request.urlopen(req, timeout=5) as resp:
-                    data = json.loads(resp.read())
-                
-                reformulated = data.get("message", {}).get("content", "").strip()
                 reformulated = reformulated.replace('"', '').replace("'", "").strip()
                 if reformulated:
                     alternatives.append(reformulated)
@@ -914,12 +938,20 @@ class Orchestrator:
         messages.append({"role": "user", "content": question})
 
         answer_acc: list[str] = []
-        # 25s (valor anterior) já era estourado por uma ÚNICA rodada de modelos
+        # 25s (valor original) já era estourado por uma ÚNICA rodada de modelos
         # locais de raciocínio (gemma4 gasta tokens "pensando" antes do
         # content — uma explicação de página observada em produção levou 49s
-        # só na 1ª rodada). Orçamento maior evita que is_budget_ok() aborte a
+        # só na 1ª rodada). Orçamento folgado evita que is_budget_ok() aborte a
         # retomada de uma resposta truncada por comprimento no meio do caminho.
-        state = AgentState(session_id=session_id, max_rounds=5, max_time_ms=150000)
+        # Os valores agora saem do tier de hardware (§1.4 da revisão de
+        # engenharia): 150s é referência do Tier B, não constante universal.
+        max_rounds, max_time_ms = self._agent_budget()
+        state = AgentState(session_id=session_id, max_rounds=max_rounds,
+                           max_time_ms=max_time_ms)
+        trace_logger.emit("agent_budget", step=1,
+                          payload={"tier": _hardware_tier() or "desconhecido",
+                                   "max_rounds": max_rounds,
+                                   "max_time_ms": max_time_ms})
 
         # Antes do 1º stream o modelo pode nem estar carregado — ou estar sendo
         # TROCADO (recarga de ~8 GB ao alternar entre gemma4 12B e e4b), o que

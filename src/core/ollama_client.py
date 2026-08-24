@@ -9,9 +9,12 @@ exatamente dessa duplicação; revisão de engenharia 2026-07-05 §3.1).
 revisão de tradução, flashcard QA, síntese do dossiê, agente proativo).
 ``stream_chat`` cobre o streaming token a token do Orchestrator, incluindo
 os campos ``thinking``/``tool_calls`` que modelos de raciocínio emitem.
+``embed``/``embed_legacy`` cobrem o outro endpoint que o RAG usa a cada
+indexação e a cada busca (``/api/embed`` e o legado ``/api/embeddings``).
 Cada chamador mantém sua própria lógica de negócio (cancelamento,
-continuação por comprimento, validação/parsing da resposta) — o cliente
-só resolve o transporte HTTP e o formato do payload.
+continuação por comprimento, retry/classificação de erro, validação/parsing
+da resposta) — o cliente só resolve o transporte HTTP e o formato do
+payload, e propaga as exceções de rede/HTTP intactas para quem chamou.
 """
 
 from __future__ import annotations
@@ -23,6 +26,9 @@ from typing import Any, Generator, Optional
 from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
 
 DEFAULT_TIMEOUT_S = 120
+# Embeddings são rápidos por natureza (bge-m3 num texto curto); o timeout dos
+# lotes grandes é responsabilidade do chamador, que passa o seu.
+DEFAULT_EMBED_TIMEOUT_S = 15
 
 
 def build_chat_payload(
@@ -107,6 +113,70 @@ def chat_once(
     with urllib.request.urlopen(req, timeout=timeout_s) as resp:
         data = json.loads(resp.read())
     return ((data.get("message", {}) or {}).get("content") or "").strip()
+
+
+def build_embed_payload(
+    model: str,
+    text: str | list[str],
+    *,
+    legacy: bool = False,
+    keep_alive: str = OLLAMA_KEEP_ALIVE,
+) -> dict[str, Any]:
+    """Payload de ``/api/embed`` (ou do legado ``/api/embeddings``).
+
+    O endpoint novo aceita ``input`` (str OU lista, para lotes); o legado só
+    aceita ``prompt`` com um texto por requisição. ``keep_alive`` evita o
+    descarregamento do modelo entre lotes (§1.1 da revisão de engenharia).
+    """
+    key = "prompt" if legacy else "input"
+    return {"model": model, key: text, "keep_alive": keep_alive}
+
+
+def _post_json(url: str, payload: dict, timeout_s: int) -> dict:
+    """POST JSON → dict da resposta. Exceções de rede/HTTP sobem intactas."""
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+        return json.loads(resp.read())
+
+
+def embed(
+    ollama_url: str,
+    model: str,
+    text: str | list[str],
+    *,
+    timeout_s: int = DEFAULT_EMBED_TIMEOUT_S,
+) -> list[list[float]]:
+    """``/api/embed``: lista de vetores (um por texto de entrada).
+
+    Devolve ``[]`` quando o Ollama responde sem ``embeddings`` — cabe ao
+    chamador decidir se isso é retry, fallback ou erro. ``HTTPError``/
+    ``URLError``/timeout propagam (o RAG classifica e faz backoff próprio).
+    """
+    data = _post_json(f"{ollama_url.rstrip('/')}/api/embed",
+                      build_embed_payload(model, text), timeout_s)
+    return data.get("embeddings") or []
+
+
+def embed_legacy(
+    ollama_url: str,
+    model: str,
+    text: str,
+    *,
+    timeout_s: int = DEFAULT_EMBED_TIMEOUT_S,
+) -> list[float]:
+    """``/api/embeddings`` (endpoint depreciado): um vetor, ou ``[]``.
+
+    Só serve de fallback para instalações antigas do Ollama, onde ``/api/embed``
+    responde 404. Não aceita lotes.
+    """
+    data = _post_json(f"{ollama_url.rstrip('/')}/api/embeddings",
+                      build_embed_payload(model, text, legacy=True), timeout_s)
+    return data.get("embedding") or []
 
 
 def stream_chat(

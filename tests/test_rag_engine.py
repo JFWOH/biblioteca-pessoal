@@ -924,3 +924,102 @@ class TestChatMemory:
         contents = [m.get("content", "") for m in captured["messages"]]
         assert any("Quem é Capitu?" in c for c in contents)        # histórico injetado
         assert any("E ela trai Bentinho?" in c for c in contents)  # pergunta atual
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TestClassificadorFalhaGPU — item 12 do feedback de tester (Onda Q)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _http_error(code: int, body: str):
+    """HTTPError com corpo lido a partir de um buffer (como o urllib real)."""
+    import io
+    import urllib.error
+    return urllib.error.HTTPError(
+        "http://localhost:11434/api/embed", code, "Internal Server Error",
+        {}, io.BytesIO(body.encode("utf-8")))
+
+
+@pytest.fixture
+def engine_sem_mock_de_embedding(test_db, chroma_path):
+    """RAGEngine com os métodos de embedding REAIS (o mock_engine os substitui).
+
+    Estes testes exercitam justamente o transporte + a classificação de erro
+    dentro de ``_get_embedding``/``_get_embeddings_batch``.
+    """
+    from src.core.rag_engine import RAGEngine
+    engine = RAGEngine(db_path=test_db, chroma_path=chroma_path,
+                       ollama_url="http://localhost:11434")
+    # Evita a consulta a /api/tags dentro do fluxo de embedding.
+    engine.get_exact_model_name = lambda name: name
+    return engine
+
+
+class TestClassificadorFalhaGPU:
+    """Erro CUDA/PTX do Ollama é definitivo: sem retry e com mensagem acionável.
+
+    Com driver NVIDIA antigo o Ollama devolve HTTP 500 com o erro do runner
+    CUDA no corpo. Antes isso passava pela heurística de erro TRANSITÓRIO,
+    gastava 4 tentativas com backoff e terminava num RuntimeError genérico.
+    """
+
+    def test_marcadores_reconhecidos_case_insensitive(self):
+        from src.core.rag_engine import _is_gpu_failure
+        assert _is_gpu_failure("CUDA error: no kernel image is available")
+        assert _is_gpu_failure("the provided PTX was compiled with an unsupported toolchain")
+        assert _is_gpu_failure("No Kernel Image is available for execution")
+        assert _is_gpu_failure("cuda")
+
+    def test_erro_de_rede_comum_nao_e_falha_de_gpu(self):
+        from src.core.rag_engine import _is_gpu_failure, _is_transient_net_error
+        corpo = "Post \"http://127.0.0.1:11434\": dial tcp: connection reset"
+        assert _is_gpu_failure(corpo) is False
+        assert _is_transient_net_error(corpo) is True
+
+    def test_lote_falha_na_primeira_tentativa_sem_retry(self, engine_sem_mock_de_embedding):
+        from src.core.rag_engine import OllamaGPUError
+        tentativas = {"n": 0}
+
+        def fake_urlopen(req, timeout=None):
+            tentativas["n"] += 1
+            raise _http_error(500, "CUDA error: no kernel image is available for execution")
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            with pytest.raises(OllamaGPUError) as exc:
+                engine_sem_mock_de_embedding._get_embeddings_batch(["um texto"])
+
+        assert tentativas["n"] == 1, "erro de GPU não pode ser re-tentado"
+        assert "driver NVIDIA" in str(exc.value)
+        assert "OLLAMA_NUM_GPU=0" in str(exc.value)
+
+    def test_embedding_unico_tambem_classifica(self, engine_sem_mock_de_embedding):
+        from src.core.rag_engine import OllamaGPUError
+
+        def fake_urlopen(req, timeout=None):
+            raise _http_error(500, "PTX was compiled with an unsupported toolchain")
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            with pytest.raises(OllamaGPUError) as exc:
+                engine_sem_mock_de_embedding._get_embedding("um texto")
+        assert "Falha de GPU no Ollama" in str(exc.value)
+
+    def test_erro_transitorio_continua_re_tentando(self, engine_sem_mock_de_embedding,
+                                                  monkeypatch):
+        """Regressão: a classificação de GPU não pode encurtar o retry de rede."""
+        monkeypatch.setattr("time.sleep", lambda *_a: None)
+        tentativas = {"n": 0}
+
+        def fake_urlopen(req, timeout=None):
+            tentativas["n"] += 1
+            if tentativas["n"] < 3:
+                raise _http_error(400, "health resp: dial tcp 127.0.0.1:11434")
+            resp = MagicMock()
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = MagicMock(return_value=False)
+            resp.read.return_value = json.dumps({"embeddings": [[0.1] * 8]}).encode()
+            return resp
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            out = engine_sem_mock_de_embedding._get_embeddings_batch(["um texto"])
+
+        assert tentativas["n"] == 3
+        assert out == [[0.1] * 8]
