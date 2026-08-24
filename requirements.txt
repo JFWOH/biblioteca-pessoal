@@ -25,7 +25,7 @@ pytest-asyncio>=0.21.1
 httpx>=0.25.0
 fastapi>=0.100.0
 uvicorn>=0.23.00
-ruff>=0.1.0
+ruff==0.15.17  # pinado na versão do lock — CI com ruff mais novo divergia do local (869 falsos apontamentos)
 
 # Servidor MCP local (stdio) — expõe a biblioteca a hosts MCP (Claude etc.)
 # Pin na série v1: a migração ao SDK v2 (spec 2026-07-28) é rodada própria.
