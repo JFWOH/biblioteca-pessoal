@@ -1879,7 +1879,13 @@ class ReaderView(QWidget):
         
         action_explain = QAction("🧠 Explicar Contexto", self)
         action_explain.triggered.connect(lambda: self.ai_action_requested.emit("explain", text))
-        
+
+        # Simplificar (Q.3 / candidato N.4, padrão Ghostreader): reescreve o
+        # trecho em linguagem simples. Mesmo fluxo do Explicar — emite
+        # ai_action_requested e a resposta cai no painel do assistente.
+        action_simplify = QAction("✨ Simplificar", self)
+        action_simplify.triggered.connect(lambda: self.ai_action_requested.emit("simplify", text))
+
         action_search = QAction("🔍 Buscar na Web", self)
         action_search.triggered.connect(lambda: self.ai_action_requested.emit("search", text))
         
@@ -1895,6 +1901,7 @@ class ReaderView(QWidget):
         menu.addAction(action_translate)
         menu.addAction(action_translate_audio)
         menu.addAction(action_explain)
+        menu.addAction(action_simplify)
         menu.addAction(action_search)
         menu.addAction(action_save)
         menu.addAction(action_flashcard)
@@ -2154,13 +2161,19 @@ class ReaderView(QWidget):
         """Exibe o popover de ações logo abaixo da seleção (PDF)."""
         if not hasattr(self, "_selection_popover"):
             return
-        actions = ["highlight", "explain", "translate", "search", "save_note", "flashcard"]
+        actions = ["highlight", "explain", "translate", "search",
+                   "save_note", "flashcard"]
         # Word Wise (3.4): só para seleção curta (palavra/termo) — seleções
         # maiores continuam pelo fluxo normal (Explicar/RAG).
         coords = self._last_selection_coords
         text = self._selection_text(coords) if coords else ""
         if text and len(text.split()) <= self._WORD_WISE_MAX_WORDS:
             actions.append("word_wise")
+        else:
+            # Simplificar (Q.3) é para TRECHO, não para termo solto: em seleção
+            # curta o Word Wise já resolve. Mutuamente exclusivas — a barra
+            # nunca passa de 7 botões (cabe em notebook 13", item 10 do backlog).
+            actions.insert(2, "simplify")
         self._selection_popover.set_actions(actions)
         # rect está em coordenadas do _image_label (pai da rubber band); mapeia p/ ReaderView.
         anchor_local = QPoint(rect.left(), rect.bottom() + 6)

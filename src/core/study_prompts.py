@@ -2,33 +2,62 @@
 
 Lógica pura (sem GUI / sem PyQt6 — ADR-006) e testável: dado um tipo de ação
 e o texto da página/trecho atual, devolve a instrução a ser enviada ao
-assistente RAG. Usado pelas ações "Estudar" do leitor.
+assistente RAG. Usado pelas ações "Estudar" do leitor e pela ação
+"Simplificar" do menu de seleção.
+
+Todos os templates seguem os mesmos critérios objetivos (revisão A/B Q.3):
+ancorados no trecho, com limite de tamanho explícito, citando a fonte quando
+recorrem à biblioteca, e sempre respondendo em pt-BR.
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
+# Regra de idioma comum a TODAS as ações de estudo (revisão A/B, critério
+# "idioma"): o trecho pode estar em qualquer língua (a biblioteca tem muito
+# livro em inglês), mas a resposta é para o leitor — sempre em pt-BR. Sem
+# esta linha o modelo tende a responder no idioma do trecho.
+_LANG_RULE = (
+    "Responda em português do Brasil, mesmo que o trecho esteja em outro idioma."
+)
+
 # Ações de estudo suportadas → instrução base (em PT-BR).
 _STUDY_TEMPLATES: dict[str, str] = {
     "explain_page": (
-        "Explique de forma didática e clara o conteúdo do trecho abaixo. "
+        "Explique de forma didática e clara o conteúdo do trecho abaixo, "
+        "em no máximo 200 palavras. "
         "Destaque os conceitos-chave e defina os termos técnicos que aparecerem. "
-        "Se a biblioteca tiver material relacionado, conecte-o citando a fonte."
+        "Explique o que está no trecho; se precisar de conhecimento externo, "
+        "marque a frase com '(fora do trecho)'. "
+        "Se a biblioteca tiver material relacionado, conecte-o citando a fonte. "
+        f"{_LANG_RULE}"
     ),
     "summarize": (
-        "Resuma os pontos principais do trecho abaixo em tópicos curtos e objetivos, "
-        "preservando a ordem das ideias e sem adicionar informação que não esteja no texto."
+        "Resuma os pontos principais do trecho abaixo em no máximo 5 tópicos "
+        "curtos (uma linha cada), "
+        "preservando a ordem das ideias e sem adicionar informação que não esteja "
+        f"no texto. {_LANG_RULE}"
     ),
     "glossary": (
-        "Extraia um glossário dos termos técnicos ou conceitos importantes do trecho abaixo. "
-        "Para cada item use o formato '- **termo** — definição curta'. "
-        "Inclua apenas termos que de fato apareçam no texto."
+        "Extraia um glossário de no máximo 8 termos técnicos ou conceitos "
+        "importantes do trecho abaixo. "
+        "Para cada item use o formato '- **termo** — definição curta (1 linha)'. "
+        f"Inclua apenas termos que de fato apareçam no texto. {_LANG_RULE}"
     ),
     "flashcards": (
         "Gere de 3 a 6 flashcards de estudo cobrindo os conceitos centrais do trecho abaixo. "
         "Use exatamente o formato, um por bloco:\nP: <pergunta>\nR: <resposta>\n"
-        "As perguntas devem ser respondíveis apenas com o conteúdo do trecho."
+        "As perguntas devem ser respondíveis apenas com o conteúdo do trecho. "
+        f"{_LANG_RULE}"
+    ),
+    "simplify": (
+        "Reescreva o trecho abaixo em linguagem simples, para quem não conhece o "
+        "assunto, em no máximo 4 frases. "
+        "Troque o jargão por palavras do dia a dia; se um termo técnico for "
+        "indispensável, explique-o entre parênteses na primeira vez. "
+        "Diga apenas o que está no trecho — não acrescente exemplos, opiniões nem "
+        f"informação de fora. {_LANG_RULE}"
     ),
 }
 

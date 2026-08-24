@@ -6,8 +6,8 @@ def test_popover_has_all_actions(qtbot):
     pop = SelectionActionPopover()
     qtbot.addWidget(pop)
     assert set(pop._buttons.keys()) == {
-        "highlight", "explain", "translate", "search", "save_note", "flashcard",
-        "word_wise",
+        "highlight", "explain", "simplify", "translate", "search", "save_note",
+        "flashcard", "word_wise",
     }
 
 
@@ -26,6 +26,22 @@ def test_popover_hides_after_action(qtbot):
     pop.show()
     pop._buttons["explain"].click()
     assert not pop.isVisible()
+
+
+def test_popover_simplify_button_is_labelled_in_ptbr(qtbot):
+    """Ação nova (Q.3 / N.4): rótulo PT-BR e chave 'simplify'."""
+    pop = SelectionActionPopover()
+    qtbot.addWidget(pop)
+    assert "Simplificar" in pop._buttons["simplify"].text()
+
+
+def test_popover_emits_simplify_key(qtbot):
+    pop = SelectionActionPopover()
+    qtbot.addWidget(pop)
+    received = []
+    pop.action_requested.connect(received.append)
+    pop._buttons["simplify"].click()
+    assert received == ["simplify"]
 
 
 def test_popover_set_actions_filters_buttons(qtbot):
