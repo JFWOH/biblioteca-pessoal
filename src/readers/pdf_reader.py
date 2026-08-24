@@ -4,6 +4,29 @@ from pathlib import Path
 from src.readers.base_reader import BaseReader, PageContent, TOCEntry
 
 
+def _lado_a_lado(pix, pix2) -> tuple[bytes, int, int]:
+    """Junta dois pixmaps lado a lado e devolve (PNG, largura, altura).
+
+    ADR-006 (Onda P, ago/2026): esta composição era feita com QImage/QPainter
+    DENTRO de ``get_page``, o que fazia ``src/readers/**`` importar PyQt6 —
+    violação da fronteira. O resultado é idêntico (fundo branco, página
+    esquerda na origem, direita deslocada pela largura da primeira), só que
+    agora em PyMuPDF puro: o leitor devolve bytes e quem monta ``QPixmap`` é a
+    GUI que consome (``reader_view._render_page``).
+    """
+    import fitz
+
+    width = pix.width + pix2.width
+    height = max(pix.height, pix2.height)
+    combinado = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, width, height), False)
+    combinado.clear_with(255)  # branco, como o antigo QImage.fill(white)
+    pix.set_origin(0, 0)
+    combinado.copy(pix, pix.irect)
+    pix2.set_origin(pix.width, 0)
+    combinado.copy(pix2, pix2.irect)
+    return combinado.tobytes("png"), width, height
+
+
 class PDFReader(BaseReader):
     """Leitor de PDF com renderização de alta qualidade."""
 
@@ -96,8 +119,6 @@ class PDFReader(BaseReader):
 
     def get_page(self, page_number: int, highlights: list = None) -> PageContent:
         import fitz
-        from PyQt6.QtGui import QImage, QPainter
-        from PyQt6.QtCore import Qt, QByteArray, QBuffer, QIODevice
 
         if not self._doc:
             return PageContent(page_number, self._total_pages, b"", "image")
@@ -135,28 +156,12 @@ class PDFReader(BaseReader):
                 except Exception:
                     pass
             
-            img1 = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888)
-            img2 = QImage(pix2.samples, pix2.width, pix2.height, pix2.stride, QImage.Format.Format_RGB888)
-            
-            width = img1.width() + img2.width()
-            height = max(img1.height(), img2.height())
-            combined = QImage(width, height, QImage.Format.Format_RGB888)
-            combined.fill(Qt.GlobalColor.white)
-            
-            painter = QPainter(combined)
-            painter.drawImage(0, 0, img1)
-            painter.drawImage(img1.width(), 0, img2)
-            painter.end()
-            
-            ba = QByteArray()
-            buf = QBuffer(ba)
-            buf.open(QIODevice.OpenModeFlag.WriteOnly)
-            combined.save(buf, "PNG")
-            
+            png, width, height = _lado_a_lado(pix, pix2)
+
             return PageContent(
                 page_number=page_number,
                 total_pages=self._total_pages,
-                content=ba.data(),
+                content=png,
                 content_type="image",
                 width=width,
                 height=height,
