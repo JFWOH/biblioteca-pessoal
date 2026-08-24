@@ -37,6 +37,15 @@ from src.gui.watcher import DirectoryWatcher
 
 logger = logging.getLogger(__name__)
 
+# Atraso (ms) entre o fim da carga de startup (_post_show_init) e o início do
+# registro/warmup do TTS. O warmup é caro (import kokoro → torch, ~5,6 s de CPU)
+# e NÃO pode competir com o caminho crítico: antes ele era disparado por um
+# singleShot(0), ou seja, no MESMO tick das tarefas pós-show. Aqui o timer só é
+# ARMADO no fim do _post_show_init — o atraso curto conta a partir de um event
+# loop já ocioso, e a espera cancelável do TTSRouter cobre o caso raro de uma
+# narração pedida antes de o warmup terminar.
+TTS_WARMUP_IDLE_DELAY_MS = 1500
+
 
 class MainWindow(QMainWindow):
     """Janela principal da Biblioteca Pessoal."""
@@ -68,19 +77,21 @@ class MainWindow(QMainWindow):
         # Solução: (1) o trabalho pesado roda numa QThread (o roteador é o MESMO
         # objeto passado ao ReaderView, então os provedores aparecem nele assim
         # que a thread termina, muito antes de o usuário abrir um livro e clicar
-        # em Ouvir); (2) o START da thread é adiado com singleShot(0) para
-        # DEPOIS de o event loop começar (i.e., após window.show()). Isso é
-        # essencial: o import é CPU-bound e disputa o GIL; iniciado ainda no
-        # __init__ (pré-show), a disputa inflava o próprio __init__ e atrasava a
-        # janela. Adiado para depois do show, a janela já apareceu e o loop
-        # segue pumpando entre as fatias de GIL → sem "Não está respondendo".
-        from PyQt6.QtCore import QTimer
+        # em Ouvir); (2) o START da thread é adiado para DEPOIS de o event loop
+        # começar (i.e., após window.show()). Isso é essencial: o import é
+        # CPU-bound e disputa o GIL; iniciado ainda no __init__ (pré-show), a
+        # disputa inflava o próprio __init__ e atrasava a janela.
+        #
+        # Rodada UX P.3: o singleShot(0) que fazia esse start caía no MESMO tick
+        # do _post_show_init (grade + watcher + sonda de IA), ou seja, ainda
+        # competia com o fim do startup. Agora o start vem de um timer de idle
+        # armado NO FIM do _post_show_init (ver _setup_tts_init_timer).
         from src.core.tts.tts_router import TTSRouter
         from src.core.tts.text_preprocessor import TTSTextPreprocessor
         from src.gui.workers.tts_init_worker import TTSInitWorker
         self._tts_router = TTSRouter(TTSTextPreprocessor())
         self._tts_init_worker = TTSInitWorker(self._tts_router, parent=self)
-        QTimer.singleShot(0, self._tts_init_worker.start)
+        self._setup_tts_init_timer()
 
         # RAG engine: criação ADIADA para depois do show (rodada E1). Importar
         # chromadb e abrir o client persistente custa ~27 s em disco frio
@@ -129,7 +140,36 @@ class MainWindow(QMainWindow):
         # loop ativo (mesma justificativa do start adiado do TTSInitWorker
         # acima). Em disco frio isso tira dezenas de segundos do caminho
         # entre o duplo-clique e a janela visível.
+        from PyQt6.QtCore import QTimer
         QTimer.singleShot(0, self._post_show_init)
+
+    def _setup_tts_init_timer(self) -> None:
+        """Cria (SEM armar) o timer de idle que dispara o warmup do TTS.
+
+        Rodada UX P.3. O timer é filho da janela de propósito: fechar/destruir a
+        janela antes de ele disparar o destrói junto, então não há worker
+        nascendo durante o shutdown (o ``closeEvent`` ainda o para explicitamente,
+        já que ``close()`` sozinho não destrói a janela).
+        """
+        from PyQt6.QtCore import QTimer
+        self._tts_init_timer = QTimer(self)
+        self._tts_init_timer.setSingleShot(True)
+        self._tts_init_timer.setInterval(TTS_WARMUP_IDLE_DELAY_MS)
+        self._tts_init_timer.timeout.connect(self._start_tts_init)
+
+    def _start_tts_init(self) -> None:
+        """Inicia o registro/warmup do TTS em prioridade baixa (rodada UX P.3).
+
+        Prioridade baixa: o import do kokoro/torch é CPU-bound e o usuário já
+        está interagindo com a janela — o warmup deve ceder CPU a qualquer
+        trabalho de foreground. (A síntese em si roda depois, sob demanda, em
+        outra thread e com prioridade normal.)
+        """
+        from PyQt6.QtCore import QThread
+        worker = getattr(self, "_tts_init_worker", None)
+        if worker is None or worker.isRunning():
+            return
+        worker.start(QThread.Priority.LowPriority)
 
     def _is_narration_active(self) -> bool:
         """True quando o ReaderView está narrando (TTS) a página atual.
@@ -1098,6 +1138,10 @@ class MainWindow(QMainWindow):
         # o startup). Gracioso: Ollama fora do ar vira log debug, nunca erro.
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(3000, self._start_llm_warmup)
+        # Idem para o TTS (rodada UX P.3): o timer só é armado AQUI, no fim da
+        # carga de startup, então o atraso curto conta a partir de um event loop
+        # já ocioso — e não do mesmo tick em que a grade/watcher/IA carregam.
+        self._tts_init_timer.start()
 
     def _start_llm_warmup(self) -> None:
         """Pré-carrega LLM e embeddings na VRAM para a 1ª ação de IA ser quente."""
@@ -1956,6 +2000,11 @@ class MainWindow(QMainWindow):
             self._auto_index_service.shutdown()
         except Exception as exc:
             logger.warning(f"Falha ao encerrar a auto-indexação (ignorado): {exc}")
+        # Fechar antes de o timer de idle disparar (rodada UX P.3) não pode
+        # fazer o worker NASCER durante o shutdown: para o timer primeiro.
+        timer = getattr(self, "_tts_init_timer", None)
+        if timer is not None:
+            timer.stop()
         # Aguarda (limitado) o worker de init do TTS: nunca destruir um QThread
         # cuja thread do SO ainda vive (lição do PR #32/SIGABRT). Em geral o
         # import já terminou muito antes do fechamento.

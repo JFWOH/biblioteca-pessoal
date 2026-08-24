@@ -7,15 +7,22 @@ injeção tardia do RAGEngine e a guarda estrutural do __init__ da MainWindow
 """
 
 import ast
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+from PyQt6.QtCore import QThread
+from PyQt6.QtWidgets import QMainWindow
 
 from src.core.database import LibraryDB
 from src.gui.auto_index_service import AutoIndexService
 # QtWebEngineWidgets (via reader_view) precisa ser importado ANTES de o
 # pytest-qt criar o QApplication — por isso o import fica no topo do módulo.
 from src.gui.reader_view import ReaderView
+from src.gui.main_window import MainWindow, TTS_WARMUP_IDLE_DELAY_MS
 from src.gui.workers.rag_init_worker import RagInitWorker
 
 
@@ -230,3 +237,146 @@ class TestGuardaEstruturalStartup:
         # a sonda bloqueante vive no worker; o método da GUI só o dispara
         assert "is_ollama_available()" not in check
         assert "RagInitWorker" in check
+
+    def test_warmup_do_tts_sai_do_tick_zero(self):
+        """Rodada UX P.3: o start do TTS não pode voltar ao tick do startup."""
+        defs = self._main_window_defs()
+        assert "singleShot(0, self._tts_init_worker.start)" not in defs["__init__"]
+        assert "self._setup_tts_init_timer()" in defs["__init__"]
+        # armado só no FIM da carga pós-show, e parado no fechamento
+        assert "self._tts_init_timer.start()" in defs["_post_show_init"]
+        assert "timer.stop()" in defs["closeEvent"]
+
+
+_FILHO = """
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import {modulo}
+print("torch_carregado=%s" % ("torch" in sys.modules))
+sys.stdout.flush()
+os._exit(0)
+"""
+
+
+def _torch_veio_junto(modulo: str) -> bool:
+    """Importa ``modulo`` num interpretador NOVO e diz se o torch veio junto.
+
+    Só um processo limpo mede isso: o do pytest já teria o torch em
+    ``sys.modules`` por causa de outros testes. O filho sai por ``os._exit``
+    para que o teardown de Qt não contamine o código de retorno.
+    """
+    raiz = Path(__file__).resolve().parent.parent
+    env = dict(os.environ)
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    env["PYTHONIOENCODING"] = "utf-8"
+    proc = subprocess.run(
+        [sys.executable, "-c", _FILHO.format(modulo=modulo), str(raiz)],
+        cwd=str(raiz), env=env, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=300,
+    )
+    marcador = "torch_carregado="
+    linha = next((ln for ln in proc.stdout.splitlines()
+                  if ln.startswith(marcador)), None)
+    assert linha is not None, (
+        f"o subprocesso não reportou (rc={proc.returncode}).\n"
+        f"stdout:\n{proc.stdout[-1500:]}\nstderr:\n{proc.stderr[-1500:]}")
+    return linha[len(marcador):].strip() == "True"
+
+
+@pytest.mark.slow
+class TestTorchForaDoStartup:
+    """Onda P (rodada UX ago/2026): o torch não pode voltar ao import da janela.
+
+    Medido antes da correção: o import de ``main_window`` custava 2107ms /
+    1367 módulos / 513MB de RSS, e a única causa era o ``import torch`` no
+    topo de ``hardware_capability_service`` (cadeia main → main_window →
+    reader_view → proactive_reader_service). Qualquer import de torch em
+    nível de módulo nessa cadeia derruba estes testes.
+    """
+
+    def test_hardware_capability_nao_arrasta_torch(self):
+        assert _torch_veio_junto("src.core.hardware_capability_service") is False
+
+    def test_cadeia_da_janela_principal_nao_arrasta_torch(self):
+        assert _torch_veio_junto("src.gui.main_window") is False
+
+
+class _FakeTTSWorker:
+    """Stand-in do TTSInitWorker: registra os starts e a prioridade pedida."""
+
+    def __init__(self):
+        self.starts = []
+        self.rodando = False
+
+    def isRunning(self):
+        return self.rodando
+
+    def start(self, priority=None):
+        self.starts.append(priority)
+
+
+class _StubWindow(QMainWindow):
+    """Janela mínima que reusa APENAS o agendamento do warmup de TTS.
+
+    Instanciar a ``MainWindow`` real num teste abriria banco, leitor e IA de
+    verdade; aqui só interessa QUANDO o worker é iniciado, então os dois
+    métodos reais são reusados sobre um ``QMainWindow`` vazio.
+    """
+
+    _setup_tts_init_timer = MainWindow._setup_tts_init_timer
+    _start_tts_init = MainWindow._start_tts_init
+
+    def __init__(self, worker):
+        super().__init__()
+        self._tts_init_worker = worker
+        self._setup_tts_init_timer()
+
+
+class TestWarmupTTSEmIdle:
+    """Onda P (P.3): o warmup do TTS roda em idle REAL, não no fim do startup."""
+
+    def _janela(self, qtbot, worker=None):
+        win = _StubWindow(worker or _FakeTTSWorker())
+        qtbot.addWidget(win)
+        return win
+
+    def test_nao_dispara_no_tick_zero(self, qtbot):
+        worker = _FakeTTSWorker()
+        win = self._janela(qtbot, worker)
+        # Vários ticks do event loop: o antigo singleShot(0) já teria disparado
+        # aqui. O timer nem sequer está armado — quem arma é o _post_show_init.
+        qtbot.wait(60)
+        assert worker.starts == []
+        assert not win._tts_init_timer.isActive()
+
+    def test_atraso_de_idle_configurado_e_single_shot(self, qtbot):
+        win = self._janela(qtbot)
+        assert win._tts_init_timer.isSingleShot()
+        assert win._tts_init_timer.interval() == TTS_WARMUP_IDLE_DELAY_MS
+        assert 1500 <= TTS_WARMUP_IDLE_DELAY_MS <= 3000
+
+    def test_dispara_apos_o_atraso_em_prioridade_baixa(self, qtbot):
+        worker = _FakeTTSWorker()
+        win = self._janela(qtbot, worker)
+        win._tts_init_timer.setInterval(20)  # mesmo mecanismo, teste rápido
+        win._tts_init_timer.start()          # é o que o _post_show_init faz
+        assert worker.starts == []           # ainda não: o atraso é real
+        qtbot.waitUntil(lambda: bool(worker.starts), timeout=2000)
+        assert worker.starts == [QThread.Priority.LowPriority]
+
+    def test_worker_ja_rodando_nao_reinicia(self, qtbot):
+        worker = _FakeTTSWorker()
+        worker.rodando = True
+        win = self._janela(qtbot, worker)
+        win._start_tts_init()
+        assert worker.starts == []
+
+    def test_destruir_a_janela_antes_do_disparo_nao_inicia_worker(self, qtbot):
+        """Fechamento imediato: o timer é filho da janela e morre com ela."""
+        worker = _FakeTTSWorker()
+        win = _StubWindow(worker)
+        win._tts_init_timer.setInterval(20)
+        win._tts_init_timer.start()
+        win.deleteLater()
+        qtbot.wait(200)
+        assert worker.starts == []
