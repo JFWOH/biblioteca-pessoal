@@ -156,7 +156,71 @@ upgrade possível — decisão: manter); catálogo Piper do app lista só `faber
 
 ---
 
-## Onda P — (em execução)
+## Onda P — Otimização de leitura (CONCLUÍDA)
+
+Harness de medição COMMITADO em `tools/perf/` (lição de julho: scripts no scratchpad se
+perderam). PDF de referência sintético (117,1MB/780pág/80 TOC) regenerável com
+`measure_pdf_open.py gen`; números absolutos NÃO são comparáveis ao livro real de julho —
+a forma bate (miniaturas = 88% do custo frio, idêntico), o A/B da onda usa sempre o sintético.
+
+### Números antes → depois (mesma máquina, mesmos scripts)
+
+| métrica | ANTES | DEPOIS | Δ |
+|---|---|---|---|
+| `import src.gui.main_window` | 2107,8ms / 1367 módulos / torch=True / RSS 513,8MB | **508,7ms / 526 módulos / torch=False / RSS 66,6MB** | −76% (meta de julho: ~500ms — atingida) |
+| Janela (offscreen, `measure_time_to_window`) | 2706,0ms (import 1972,7) | **1053–1099ms** (import ~424–435) | −59–61% |
+| Sumário na thread da GUI (PDF pesado, frio) | 1376,1ms (90,7% do total; NUNCA melhorava com cache: quente 1283,7ms) | **12,6–38,5ms** (placeholder + worker async) | ~35–110× |
+| Congelamento total da abertura (thread GUI) | ~1517,6ms | **~109–179ms** | −88% |
+| Reabertura do mesmo livro (cache disco) | igual à 1ª (sem cache) | **90,8–112,4ms** (40/40 do cache) | 14–16× vs async sem cache |
+| 40 miniaturas prontas (total, async, cache vazio) | 1376ms (bloqueando) | 1490–1645ms (em background, LowPriority) | custo movido p/ fora da GUI |
+| TTFB Kokoro warm | 92,13ms | **86,57ms** | preservado (Δ dentro do ruído) |
+| TTFB 1ª síntese pós-warmup | 114,19ms | 126,08ms | preservado |
+
+### O que mudou
+
+- **P.1 (torch lazy):** `hardware_capability_service.py` — `import torch` de módulo virou
+  `get_torch()` tardio com cache e sentinela; `HAS_TORCH` REMOVIDO (único consumidor eram
+  testes; scripts externos que o importem quebram — intencional). ADR-005 preservado
+  (torch ausente/DLL quebrada = degradação, não erro). Guard-tests em subprocess
+  (`tests/test_startup_deferred.py::TestTorchForaDoStartup`, marcados `slow`) garantem que
+  torch não volta à cadeia `main_window`. Custo do torch agora é pago no 1º uso real
+  (ex.: 1º `process_page_context` do proativo) — movido, não eliminado (é o objetivo).
+- **P.2 (miniaturas + ADR-006):** novos `src/core/thumbnail_cache.py` (disco, chave
+  caminho|tamanho|mtime_ns|página|largura, escrita atômica, poda por teto de 2000) e
+  `src/gui/workers/thumbnail_worker.py` (QThread, cancelamento cooperativo, abre o próprio
+  leitor via `reader_factory.create_reader` — fitz não é thread-safe). `toc_widget.load_toc`
+  não renderiza mais nada (placeholder transparente reserva layout; `set_thumbnail` trata
+  entrega atrasada/itens destruídos). `reader_view` liga tudo com guard por `sender()` e
+  teardown na política do PR #32 (wait limitado, abandono sem deleteLater). **ADR-006:**
+  `pdf_reader.get_page` perdeu o import de PyQt6 (página dupla composta em fitz puro,
+  resultado idêntico); bônus: `src/mcp/server.py` deixa de puxar PyQt6 via `get_page`.
+  Teste AST `TestFronteiraADR006` varre `src/readers/**` inteiro (pega import em função).
+- **P.3 (warmup em idle real):** `TTS_WARMUP_IDLE_DELAY_MS=1500`; timer single-shot filho
+  da janela, ARMADO no fim de `_post_show_init` (precedente: `singleShot(3000)` do warmup
+  de LLM na mesma função); start do worker em `QThread.Priority.LowPriority`; `closeEvent`
+  para o timer antes do wait. Espera cancelável do PR #68 intocada.
+
+### Validação da onda
+
+- Suíte completa no worktree: **1622 passed, 2 failed** — as 2 falhas
+  (`test_build_package.py::TestManualPdf::test_pdf_tem_fontes_e_texto_de_verdade`,
+  `test_drag_drop_import.py::test_drop_overlay_cover_shows_and_hide`) são PRÉ-EXISTENTES e
+  ambientais deste Windows offscreen: reproduzidas byte a byte na main limpa `51f3c7e` em
+  worktree de verificação (fontes ausentes p/ o PDF do manual; plugin offscreen sem
+  `propagateSizeHints`). O CI (Ubuntu) as passa. Endurecimento (skip com razão) vai na Onda S.
+- Ruff: limpo em todos os arquivos tocados. ADR-006 (grep PyQt6 em src/core, src/data,
+  src/mcp, src/api, src/readers, src/utils): zero imports.
+- Riscos aceitos e registrados: janela de ~1,5s pós-startup com `_providers` vazio se o
+  usuário pedir narração instantaneamente (na prática inalcançável; o router responde com
+  erro explícito, não silêncio); poda do cache de miniaturas só roda ao fim de cada lote;
+  validação com o app REAL (não offscreen) fica no roteiro do usuário.
+
+### Infra consertada durante a onda
+
+CI da main estava VERMELHO desde antes da rodada (3 runs): `requirements.txt` tinha
+`ruff>=0.1.0` e o CI instalava ruff mais novo que o do lock (869 apontamentos de regras
+novas em código que o 0.15.17 aprova). Fix: pino `ruff==0.15.17` (PR #73). Local e CI
+voltam a julgar com a mesma régua.
 
 ## Onda Q — (pendente)
 

@@ -1,6 +1,9 @@
 """Testes do módulo de leitores."""
 
+import ast
+from pathlib import Path
 
+import pytest
 
 from src.readers.base_reader import PageContent, TOCEntry
 from src.readers.txt_reader import TXTReader
@@ -117,3 +120,82 @@ class TestPageContent:
         entry = TOCEntry(title="Chapter 1", page=0, level=0)
         assert entry.title == "Chapter 1"
         assert entry.children == []
+
+
+class TestFronteiraADR006:
+    """ADR-006: ``src/readers/**`` devolve dados puros — Qt só na GUI.
+
+    Até a Onda P (ago/2026), ``PDFReader.get_page`` importava PyQt6 no corpo do
+    método para montar a página dupla com QImage/QPainter. A composição passou
+    a ser feita em PyMuPDF e a conversão para ``QPixmap`` ficou onde já estava:
+    em ``src/gui/reader_view.py``.
+    """
+
+    PROIBIDOS = ("PyQt6", "PySide2", "PySide6", "src.gui")
+
+    @staticmethod
+    def _imports(node):
+        if isinstance(node, ast.Import):
+            return [alias.name for alias in node.names]
+        if isinstance(node, ast.ImportFrom):
+            return [node.module or ""]
+        return []
+
+    def _checa(self, caminho: Path):
+        arvore = ast.parse(caminho.read_text(encoding="utf-8"), filename=str(caminho))
+        for node in ast.walk(arvore):  # walk: pega import DENTRO de função também
+            for mod in self._imports(node):
+                for banido in self.PROIBIDOS:
+                    assert not (mod == banido or mod.startswith(banido + ".")), (
+                        f"{caminho.name}: import proibido pela ADR-006: {mod}")
+
+    def test_pdf_reader_sem_pyqt6(self):
+        self._checa(Path(__file__).resolve().parent.parent
+                    / "src" / "readers" / "pdf_reader.py")
+
+    def test_nenhum_leitor_importa_gui(self):
+        readers_dir = Path(__file__).resolve().parent.parent / "src" / "readers"
+        arquivos = list(readers_dir.rglob("*.py"))
+        assert arquivos, "src/readers vazio?"
+        for f in arquivos:
+            self._checa(f)
+
+
+class TestPaginaDuplaPDF:
+    """A composição lado a lado (antes QImage/QPainter, agora PyMuPDF)."""
+
+    @staticmethod
+    def _pdf(tmp_path, paginas=2, largura=200, altura=300):
+        fitz = pytest.importorskip("fitz")
+        caminho = tmp_path / "duplo.pdf"
+        doc = fitz.open()
+        for _ in range(paginas):
+            doc.new_page(width=largura, height=altura)
+        doc.save(str(caminho))
+        doc.close()
+        return caminho
+
+    def test_pagina_dupla_junta_as_duas_lado_a_lado(self, tmp_path):
+        from src.readers.pdf_reader import PDFReader
+
+        reader = PDFReader(self._pdf(tmp_path))
+        reader.open()
+        simples = reader.get_page(0)
+        reader.set_double_page(True)
+        dupla = reader.get_page(0)
+        reader.close()
+
+        assert dupla.content.startswith(b"\x89PNG")
+        assert dupla.width == simples.width * 2
+        assert dupla.height == simples.height
+
+    def test_ultima_pagina_impar_cai_no_caminho_simples(self, tmp_path):
+        from src.readers.pdf_reader import PDFReader
+
+        reader = PDFReader(self._pdf(tmp_path, paginas=3))
+        reader.open()
+        reader.set_double_page(True)
+        ultima = reader.get_page(2)  # não há página 3 para parear
+        reader.close()
+
+        assert ultima.content.startswith(b"\x89PNG")

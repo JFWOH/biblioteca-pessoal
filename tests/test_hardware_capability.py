@@ -10,15 +10,20 @@ def _svc_without_gpu() -> HardwareCapabilityService:
     return svc
 
 
+def _sem_torch(monkeypatch):
+    """Simula máquina sem torch — o acessor tardio devolve None."""
+    monkeypatch.setattr(hw_mod, "get_torch", lambda: None)
+
+
 def test_low_ram_machine_is_tier_c(monkeypatch):
-    monkeypatch.setattr(hw_mod, "HAS_TORCH", False)
+    _sem_torch(monkeypatch)
     svc = _svc_without_gpu()
     with patch.object(HardwareCapabilityService, "_get_total_ram_gb", return_value=4.0):
         assert svc.get_recommended_tier() == "Tier C"
 
 
 def test_normal_ram_machine_is_tier_b(monkeypatch):
-    monkeypatch.setattr(hw_mod, "HAS_TORCH", False)
+    _sem_torch(monkeypatch)
     svc = _svc_without_gpu()
     with patch.object(HardwareCapabilityService, "_get_total_ram_gb", return_value=16.0):
         assert svc.get_recommended_tier() == "Tier B"
@@ -26,7 +31,7 @@ def test_normal_ram_machine_is_tier_b(monkeypatch):
 
 def test_ram_detection_failure_defaults_to_tier_b(monkeypatch):
     """RAM indetectável (plataforma exótica) → tier padrão, nunca crash (ADR-005)."""
-    monkeypatch.setattr(hw_mod, "HAS_TORCH", False)
+    _sem_torch(monkeypatch)
     svc = _svc_without_gpu()
     with patch.object(HardwareCapabilityService, "_get_total_ram_gb", return_value=None):
         assert svc.get_recommended_tier() == "Tier B"

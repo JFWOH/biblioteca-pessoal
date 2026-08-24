@@ -136,6 +136,9 @@ class ReaderView(QWidget):
         self._pending_narration = None            # callable de lançamento adiado
         self._pending_narration_timer = None      # watchdog de segurança
         self._resume_banner = None  # banner "retomar leitura" (tarefa 3.7)
+        # Onda P: miniaturas do sumário saem da thread da GUI (ver
+        # _start_thumbnail_worker). Um worker por livro aberto, no máximo.
+        self._thumbnail_worker = None
         # Tarefa 5.2 — cronômetro de leitura por página: timestamp monotônico
         # de quando a página atual entrou em exibição (None = nada correndo)
         # e o último (page, total) emitido, para o flush no fechamento.
@@ -998,10 +1001,15 @@ class ReaderView(QWidget):
         self._reader.open()
 
         # Carrega TOC — sem entradas órfãs (números soltos) e com miniaturas
-        # de capítulo quando o leitor renderiza páginas (PDF).
+        # de capítulo quando o leitor renderiza páginas (PDF). As miniaturas
+        # NÃO são renderizadas aqui (Onda P): o sumário aparece na hora e o
+        # ThumbnailWorker as entrega em background.
         from src.readers.toc_utils import clean_toc
         toc = clean_toc(self._reader.get_toc())
-        self._toc_widget.load_toc(toc, thumb_provider=self._reader.render_thumbnail)
+        renderiza_miniatura = (
+            type(self._reader).render_thumbnail is not BaseReader.render_thumbnail)
+        self._toc_widget.load_toc(toc, with_thumbnails=renderiza_miniatura)
+        self._start_thumbnail_worker(filepath)
 
         # Vai para a página inicial
         self._go_to_page(start_page)
@@ -1360,11 +1368,82 @@ class ReaderView(QWidget):
         elif self._content_stack.currentIndex() == 1:
             self._web_view.setZoomFactor(self._web_view.zoomFactor() - 0.1)
 
+    # ── Miniaturas do sumário (Onda P) ────────────────────────────────
+
+    def _start_thumbnail_worker(self, filepath: str) -> None:
+        """Dispara a renderização das miniaturas do sumário em background.
+
+        Só é chamado depois de ``load_toc``: as páginas a renderizar são
+        exatamente as que o widget marcou com placeholder. Sem páginas (leitor
+        sem miniatura, sumário vazio) não há worker.
+        """
+        self._stop_thumbnail_worker()
+        pages = self._toc_widget.pending_thumbnails()
+        if not pages:
+            return
+        try:
+            from src.gui.workers.thumbnail_worker import ThumbnailWorker
+            from src.gui.widgets.toc_widget import THUMB_WIDTH
+
+            worker = ThumbnailWorker(filepath, pages, width=THUMB_WIDTH)
+            worker.thumbnail_ready.connect(self._on_thumbnail_ready)
+            self._thumbnail_worker = worker
+            worker.start()
+        except Exception:  # ADR-005: sem miniatura o sumário segue em texto
+            logger.warning("Não foi possível iniciar as miniaturas do sumário",
+                           exc_info=True)
+            self._thumbnail_worker = None
+
+    def _on_thumbnail_ready(self, page: int, png: bytes) -> None:
+        """Aplica uma miniatura recém-renderizada no item do sumário.
+
+        O guarda por ``sender()`` descarta entregas de um worker já aposentado:
+        desconectar não cancela os eventos de sinal JÁ postados na fila da GUI,
+        então uma miniatura do livro anterior ainda pode chegar aqui.
+        """
+        if self.sender() is not self._thumbnail_worker:
+            return
+        try:
+            self._toc_widget.set_thumbnail(page, png)
+        except Exception:
+            logger.debug("Miniatura da página %s descartada", page, exc_info=True)
+
+    def _stop_thumbnail_worker(self) -> None:
+        """Encerra o worker de miniaturas (troca de livro / fechar leitor).
+
+        O ``wait`` é bloqueante de propósito e custa pouco: o cancelamento é
+        cooperativo no limite da PÁGINA, e uma miniatura leva dezenas de ms.
+        Se ainda assim expirar, a referência é abandonada sem ``deleteLater``
+        — destruir um QThread cuja thread do SO ainda vive é exatamente o
+        SIGABRT do PR #32 (mesma política do teardown de áudio).
+        """
+        worker = self._thumbnail_worker
+        self._thumbnail_worker = None
+        if worker is None:
+            return
+        try:
+            worker.cancel()
+            worker.thumbnail_ready.disconnect(self._on_thumbnail_ready)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            if worker.isRunning() and not worker.wait(2000):
+                logger.warning("Miniaturas: worker não encerrou em 2s; "
+                               "referência abandonada sem deleteLater.")
+                return
+        except RuntimeError:
+            return  # objeto C++ já destruído
+        try:
+            worker.deleteLater()
+        except RuntimeError:
+            pass
+
     def close_reader(self):
         """Fecha o leitor atual."""
         # Tarefa 5.2: o tempo da última página lida é descarregado no
         # fechamento (senão a última página de cada sessão nunca contaria).
         self._flush_reading_time()
+        self._stop_thumbnail_worker()
         # Teardown: espera (bloqueante, limitado) os workers de áudio — aqui é
         # encerramento, não interação, então nenhum worker órfão pode sobreviver.
         self._listen_original_override = False  # fechar leitor reseta o override (B0)
