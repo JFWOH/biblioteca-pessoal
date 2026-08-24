@@ -44,42 +44,62 @@ do feedback do usuário. **NADA de mobile nesta rodada** (ver §IV).
 ### Onda R — Reconhecimento e FECHAMENTO DO ESCOPO (read-only, 2-3 agentes)
 Produz a lista FECHADA de pendências — a promessa "zero em aberto" é auditada aqui,
 contra o repo real, não contra memória. Inventariar:
-- [ ] **R.1** Checkboxes não marcados e débitos "segue como está" de TODOS os
+- [x] **R.1** Checkboxes não marcados e débitos "segue como está" de TODOS os
   contratos em `docs/agents/*execution_contract*.md` e `*_plan_*.md` (programa
   jul/2026, ciclos B/C/D/E, packaging) + Onda 6 (novidades) nunca iniciada.
-- [ ] **R.2** Backlog do tester (memória `backlog-ajustes-ux`, itens ABERTOS):
+- [x] **R.2** Backlog do tester (memória `backlog-ajustes-ux`, itens ABERTOS):
   (10) texto cortado em notebook 13" (DPI × alturas px no QSS — hipótese confirmada
   por print; aba Narração some); (11) TTS degradou até pyttsx3 SEM AVISAR na UI;
   (12) Ollama crasha embeddings em driver antigo (CUDA/PTX) + modal indevido durante
   tarefa de background. Item (9) seleção multilinha ao vivo — verificar status real.
-- [ ] **R.3** Plano de otimização com baselines MEDIDOS (memória
+- [x] **R.3** Plano de otimização com baselines MEDIDOS (memória
   `perf-baselines-jul2026` e, se existir no clone principal,
   `docs/agents/plano_otimizacao_2026-07.md`): torch custa ~1,9s do startup por cadeia
   acidental de import; 40 miniaturas do sumário = ~88% do congelamento ao abrir PDF
   pesado; TTFB da narração (SLO 3s; caso real 4,79s sob carga).
-- [ ] **R.4** Reserva de TTS: Piper ausente na prática (caso real 2026-08-10 — sem
+- [x] **R.4** Reserva de TTS: Piper ausente na prática (caso real 2026-08-10 — sem
   fallback pt quando o Kokoro demora). Decidir mecanismo: pré-seed no pacote OU
   download guiado com aviso honesto.
-- [ ] **R.5** `TODO/FIXME` novos em `src/` + bugs registrados nas memórias
+- [x] **R.5** `TODO/FIXME` novos em `src/` + bugs registrados nas memórias
   (`bugs-conhecidos-rag` e afins) ainda sem fix.
-- [ ] **R.6** Saída: tabela item → destino (Onda P/Q/S/T) neste contrato. Item só
+- [x] **R.6** Saída: tabela item → destino (Onda P/Q/S/T) neste contrato. Item só
   pode ficar de fora se for FEATURE NOVA de escopo futuro (registrada no §IV como
   decisão de versão — não como pendência). Defeito ou pendência conhecida NUNCA
   fica de fora.
 
+**R.6 — EXECUTADO (2026-08-24).** Tabela de destino (evidências, file:line e detalhes em
+`docs/agents/rodada_ux_2026-08_registro.md`):
+
+| item | destino |
+|---|---|
+| Torch no startup (cadeia única via `hardware_capability_service.py:11`) | P.1 |
+| Miniaturas síncronas sem cache (`toc_widget.py:84-94`) + ADR-006 em `pdf_reader.py:99` | P.2 |
+| Warmup Kokoro fora de idle real (`main_window.py:81-83`) + TTFB | P.3 |
+| Proativo: frequência/continuidade | Q.1 |
+| Orçamentos RAG por tier (§1.4; `orchestrator.py:922`) + defaults divergentes `agent_state` | Q.2 |
+| Preload do modelo ao abrir leitor/chat + consolidação cliente Ollama + prompts A/B + "Simplificar" | Q.3 |
+| Classificador CUDA/PTX (item 12b) + coexistência FAST_TASK + retry "database is locked" | Q.4 |
+| Item 10a (aba Narração some — overflow QTabBar) e 10b (DPI: fixed→minimum + smoke scale) | S.1 |
+| Item 11 (degradação TTS visível; pyttsx3 sai do topo do menu) | S.2 |
+| Item 12a (zero modal de background: RAG, wizard Ollama, Anki) | S.3 |
+| Reserva Piper: dirs configuráveis + catálogo 4 vozes pt-BR (pré-seed na Onda T) + gate qwen3_tts | S.4 |
+| Popover EPUB, preset conforto, chips X-Ray, shimmer+timeline, degradação graciosa PDF/EPUB corrompido, contraste dos temas | S.5 |
+| Build ZIP + seed_piper + smoke + docs stale (packaging:142, feedback §9) + roteiro do usuário | T |
+| Item 9 (seleção multilinha): JÁ FECHADO na main (Sprint B2) — sem ação | — |
+
 ### Onda N — PESQUISA: atualização das possibilidades de melhoria (2-3 agentes, WebSearch)
 Roda em paralelo à Onda R. A revisão de 2026-07-16 é o piso, não o teto — esta onda
 atualiza o mapa de oportunidades com o estado da arte de AGORA. Somente desktop.
-- [ ] **N.1** Apps de leitura/biblioteca (Readwise Reader, KOReader, Calibre,
+- [x] **N.1** Apps de leitura/biblioteca (Readwise Reader, KOReader, Calibre,
   Kindle/Apple Books, Zotero e novos entrantes): o que lançaram de relevante desde
   jul/2026 em UX de leitura, organização e estudo?
-- [ ] **N.2** Ferramentas de IA para leitura/estudo (NotebookLM, Ghostreader,
+- [x] **N.2** Ferramentas de IA para leitura/estudo (NotebookLM, Ghostreader,
   ChatPDF/afins, recursos de estudo com SRS + IA): padrões novos que caibam num app
   100% local com a infra existente (RAG/grafo/dossiê/TTS/tradução).
-- [ ] **N.3** Stack local: novidades executáveis na classe de hardware do usuário
+- [x] **N.3** Stack local: novidades executáveis na classe de hardware do usuário
   (RTX 5060 Ti/16GB) — modelos Ollama melhores para as tarefas atuais, vozes/versões
   novas de TTS local (incl. pt-BR), OCR, embeddings — SEM trocar a arquitetura.
-- [ ] **N.4** Saída: tabela de candidatos com score (valor × esforço × aderência
+- [x] **N.4** Saída: tabela de candidatos com score (valor × esforço × aderência
   local-first × não-redundância com o que o app já tem), verificada contra o código.
   O orquestrador seleciona: itens P/M entram nas Ondas P/Q/S desta rodada; itens G
   vão para o §IV como candidatos da próxima versão (com justificativa). Máx. 8 buscas
@@ -146,6 +166,24 @@ atualiza o mapa de oportunidades com o estado da arte de AGORA. Somente desktop.
 ## IV. Fora desta rodada (decisão de versão — NÃO são pendências)
 - Novidades §4 da revisão de produto (Audio Overview local, STT/voz, Vocabulary
   Builder, Leitura aumentada, Study Guide): continuam gated para a versão pós-feedback.
+- **Candidatos da Onda N remetidos à próxima versão** (scores, fontes e justificativa
+  individual em `docs/agents/rodada_ux_2026-08_registro.md`, seção N.4): realce
+  sincronizado com a narração; busca global de anotações; régua de leitura/modo foco;
+  temas editáveis; flags de busca; stats por livro; paleta de comandos; seleção por
+  teclado; controles de imagem em PDF escaneado; leitura lado a lado; "o que ler a
+  seguir"; OPDS 2.0 (colide com a iniciativa api-m0); provedor OpenAI-compatible;
+  SRS de destaques/revisão temática/quiz/cloze/FSRS/tabela comparativa; citação que
+  rola ao trecho; UI de histórico do chat; persona por livro; upgrade RapidOCR 3.x
+  (pede A/B com scans reais); troca de embeddings (reindex + armadilha de dimensão
+  igual); NLLB→LLM na tradução (aguarda validação §8.3); Supertonic/kokoro-onnx;
+  piper-tts 1.7; vision-OCR 2º passe; seletor de modelo na UI.
+- Onda 6 (novidades) segue exigindo GO explícito do usuário; MCP M3 em rodada própria;
+  "Outro…" via LLM, aprendizado de traces, conceitos do grafo no proativo, throttling
+  de dispensas, assinatura digital/auto-update/lojas: mantidos fora (decisões antigas).
+- Conversão em massa das 551 regras `font-size: px` do QSS: a rodada corrige o
+  MECANISMO verificável (alturas fixas → mínimas, elide de abas, smoke com scale
+  1.25/1.5); a conversão integral px→pt só com a máquina/print do tester validando
+  (roteiro do usuário) — mexer às cegas em 551×3 regras arrisca regressão visual geral.
 - **MOBILE: FORA POR COMPLETO.** A rodada não toca em NADA de mobile — nem código
   (`src/api/`, `feat/api-m0`), nem docs/planos de mobile, nem itens de pesquisa
   voltados a mobile (a Onda N descarta candidatos mobile sem registrá-los). A
