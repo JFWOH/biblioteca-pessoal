@@ -106,13 +106,18 @@ atualiza o mapa de oportunidades com o estado da arte de AGORA. Somente desktop.
   por agente; toda afirmação de mercado com fonte.
 
 ### Onda P — Otimização de LEITURA (desempenho percebido, com medição antes/depois)
-- [ ] **P.1** Startup: quebrar a cadeia acidental de import do torch (lazy import) —
+- [x] **P.1** Startup: quebrar a cadeia acidental de import do torch (lazy import) —
   meta: janela visível sem o custo de ~1,9s; medir com o mesmo método do baseline.
-- [ ] **P.2** Abertura de PDF pesado: miniaturas do sumário assíncronas/lazy com
+  *(2107,8→508,7ms de import; janela 2706→1053ms; registro §Onda P)*
+- [x] **P.2** Abertura de PDF pesado: miniaturas do sumário assíncronas/lazy com
   cache em disco — meta: eliminar o congelamento (~88% do custo medido).
-- [ ] **P.3** Narração: warmup do Kokoro em idle pós-startup (nunca competindo com
+  *(GUI thread 1376→12-39ms; reabertura ~0,1s; +ADR-006 no pdf_reader)*
+- [x] **P.3** Narração: warmup do Kokoro em idle pós-startup (nunca competindo com
   OCR/indexação em prioridade); manter a espera cancelável do PR #68; medir TTFB.
-- [ ] **P.4** O que mais as Ondas R/N classificarem como perf/UX de leitura.
+  *(timer idle 1500ms pós _post_show_init, LowPriority; TTFB warm 86,6ms preservado)*
+- [x] **P.4** O que mais as Ondas R/N classificarem como perf/UX de leitura.
+  *(R/N não classificaram itens extras de perf de leitura além de P.1-P.3; harness de
+  medição commitado em `tools/perf/`)*
 - Critério: números antes/depois REGISTRADOS no registro da onda.
 
 ### Onda Q — Otimização de IA (latência percebida e qualidade)
