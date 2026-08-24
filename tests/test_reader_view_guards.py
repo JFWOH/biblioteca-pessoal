@@ -70,3 +70,37 @@ def test_epub_selection_anchor_accounts_for_zoom():
                        src, re.DOTALL).group(0)
     assert "zoomFactor" in anchor
     assert "mapTo" in anchor
+
+
+# ── Ação "Simplificar" (Q.3 / candidato N.4) — fiação estática ───────────
+
+def test_selection_menu_offers_simplify_in_ptbr():
+    """"Simplificar" no menu de contexto das ações de seleção.
+
+    Segue o padrão das existentes: um QAction que emite ai_action_requested
+    com a chave da ação — nenhum worker novo.
+    """
+    src = _reader_src()
+    menu = re.search(r"def _populate_ai_menu\(self.*?\n    def ", src,
+                     re.DOTALL).group(0)
+    assert "Simplificar" in menu
+    assert 'ai_action_requested.emit("simplify", text)' in menu
+    assert "menu.addAction(action_simplify)" in menu
+
+
+def test_selection_popover_includes_simplify_action():
+    """A barra flutuante (PDF) também oferece Simplificar, ao lado de Explicar."""
+    src = _reader_src()
+    show = re.search(r"def _show_selection_popover\(self.*?\n    def ", src,
+                     re.DOTALL).group(0)
+    assert '"simplify"' in show
+    # Excludente do Word Wise: seleção curta → definição; trecho → simplificar.
+    # Sem isso a barra iria a 8 botões (~1180px) e cortaria em notebook 13".
+    assert 'actions.append("word_wise")' in show
+    assert 'actions.insert(2, "simplify")' in show
+    # Cai no fallback genérico (emite ai_action_requested), igual ao Explicar:
+    # nenhum ramo dedicado no handler — é isso que evita um worker novo.
+    handler = re.search(r"def _on_selection_popover_action\(self.*?\n    def ",
+                        src, re.DOTALL).group(0)
+    assert '"simplify"' not in handler
+    assert "ai_action_requested.emit(action, text)" in handler

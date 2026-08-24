@@ -64,6 +64,33 @@ def test_orchestrator_chat_payload(monkeypatch):
     assert captured[0][1]["keep_alive"] == OLLAMA_KEEP_ALIVE
 
 
+def test_orchestrator_reformulate_payload():
+    """_reformulate_query também passou a usar o cliente unificado (Onda Q).
+
+    Era o último /api/chat montado à mão no core: ia sem keep_alive (§1.1) e
+    duplicava o transporte. O ``think`` continua ausente — a reescrita herda o
+    default do modelo, como antes.
+    """
+    from src.core.rag.orchestrator import Orchestrator
+    engine = MagicMock()
+    engine._llm_model = "gemma4:e4b"
+    engine._ollama_url = "http://localhost:11434"
+    engine.is_ollama_available.return_value = True
+    captured = []
+    fake = _capture_urlopen(captured, {"/api/chat": {
+        "message": {"content": "palavras chave cirurgicas"}}})
+    with patch("urllib.request.urlopen", side_effect=fake):
+        alternativas = Orchestrator(engine)._reformulate_query("o que é a metafísica?")
+
+    url, payload = captured[0]
+    assert url.endswith("/api/chat")
+    assert payload["keep_alive"] == OLLAMA_KEEP_ALIVE
+    assert payload["options"]["temperature"] == 0.1
+    assert payload["stream"] is False
+    assert "think" not in payload
+    assert "palavras chave cirurgicas" in alternativas
+
+
 def _fake_stream_urlopen(captured):
     """urlopen fake que grava o payload e responde um stream mínimo do /api/chat."""
     def fake(req, timeout=None):

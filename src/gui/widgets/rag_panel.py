@@ -7,6 +7,7 @@ fontes bibliográficas e controle de indexação — tudo rodando localmente.
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 
 from PyQt6.QtCore import Qt, QEvent, pyqtSignal
@@ -20,6 +21,20 @@ from PyQt6.QtWidgets import (
 from src.gui.styles import emoji_icon
 
 logger = logging.getLogger(__name__)
+
+# Intervalo mínimo entre dois re-warms do modelo (rodada UX ago/2026, onda Q).
+#
+# O warmup do MainWindow roda UMA vez, ~3s após o app abrir. Com o app aberto
+# por horas o keep_alive do Ollama (30 min, ver ollama_defaults) expira e a
+# PRÓXIMA pergunta volta a pagar o load a frio (5-30s) antes de o modelo
+# começar a responder. Abrir/focar o chat é o sinal mais barato de "vou
+# perguntar agora", então re-aquecemos nesse momento.
+#
+# 5 min é muito menor que o keep_alive (uma visita ao painel já mantém o
+# modelo residente) e grande o bastante para que abrir/fechar o painel várias
+# vezes seguidas — ou alternar entre leitor e biblioteca — não vire uma rajada
+# de requisições ao daemon.
+REWARM_MIN_INTERVAL_S = 5 * 60.0
 
 
 class RAGPanel(QWidget):
@@ -83,7 +98,16 @@ class RAGPanel(QWidget):
         # Fontes clicáveis (Tarefa 3.1): provedor da lista de livros do banco,
         # usado para resolver citações [Título, p. X] → book_id (fuzzy match).
         self._books_provider = None
+        # Re-warm do modelo (onda Q): o relógio do debounce já começa contando
+        # na criação do painel, porque o warmup de startup do MainWindow cobre
+        # os primeiros minutos — abrir o chat logo depois não precisa repetir.
+        self._rewarm_worker = None
+        self._last_rewarm_ts = time.monotonic()
         self._setup_ui()
+        # FocusIn no campo de pergunta também conta como "vou usar o chat":
+        # cobre o painel que já estava aberto/visível há horas, onde showEvent
+        # nunca mais dispara.
+        self._question_input.installEventFilter(self)
 
     # ── Construção da UI ───────────────────────────────────────────────────────
 
@@ -556,6 +580,44 @@ class RAGPanel(QWidget):
         collapsed = config.get("rag.sidebar_collapsed", True) if config else True
         self._apply_sidebar_collapsed(collapsed)
 
+    # ── Re-warm do modelo (onda Q) ────────────────────────────────────────────
+
+    def showEvent(self, event):  # noqa: N802 (assinatura do Qt)
+        """Abrir o painel re-aquece o modelo em background (não bloqueante)."""
+        super().showEvent(event)
+        self._maybe_rewarm()
+
+    def _maybe_rewarm(self) -> bool:
+        """Re-carrega LLM/embeddings na VRAM, com debounce. True se disparou.
+
+        Chamado ao abrir o painel e ao focar o campo de pergunta. Nunca
+        bloqueia a GUI (o trabalho vai para um QThread) e nunca mostra erro:
+        Ollama fora do ar, modelo ausente ou falha de rede viram log debug
+        (ADR-005) — o re-warm é otimização, não requisito.
+        """
+        if self._config is None:
+            return False  # sem config não há como saber url/modelos
+        now = time.monotonic()
+        if now - self._last_rewarm_ts < REWARM_MIN_INTERVAL_S:
+            return False
+        try:
+            from src.gui.workers.warmup_worker import spawn_warmup
+            worker = spawn_warmup(
+                self,
+                ollama_url=self._config.get("rag.ollama_url", "http://localhost:11434"),
+                llm_model=self._config.get("rag.llm_model", "gemma4:e4b"),
+                embed_model=self._config.get("rag.embed_model", "bge-m3"),
+                previous=self._rewarm_worker,
+            )
+        except Exception as exc:  # config esquisita, import falho, Qt sem thread…
+            logger.debug("Re-warm do modelo ignorado: %s", exc)
+            return False
+        if worker is None:
+            return False  # warmup anterior ainda rodando — nada a fazer
+        self._rewarm_worker = worker
+        self._last_rewarm_ts = now
+        return True
+
     def set_indexed_count(self, count: int) -> None:
         """Atualiza o contador de chunks indexados."""
         self._indexed_count_lbl.setText(f"{count:,} chunks indexados".replace(",", "."))
@@ -844,6 +906,12 @@ class RAGPanel(QWidget):
         ):
             self._cancel_reason_other()
             return True
+        # Clicar/tabular para o campo de pergunta re-aquece o modelo (onda Q).
+        # Não consome o evento: só observa. getattr defensivo porque o filtro
+        # já recebe eventos durante _setup_ui, antes do campo existir.
+        if (event.type() == QEvent.Type.FocusIn
+                and obj is getattr(self, "_question_input", None)):
+            self._maybe_rewarm()
         return super().eventFilter(obj, event)
 
     def _on_flashcard_clicked(self) -> None:

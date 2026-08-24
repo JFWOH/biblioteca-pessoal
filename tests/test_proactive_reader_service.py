@@ -255,3 +255,144 @@ def test_broken_dismissal_provider_degrades_gracefully(qtbot):
         svc.process_page_context("Texto longo " * 30, 5, book_id=7)
         MockWorker.assert_called_once()
         assert MockWorker.call_args.kwargs.get("preference_block") == ""
+
+
+# ── Onda Q: custo por página (memo de sessão + blocos memoizados) ─────────
+
+def test_revisited_page_does_not_reprocess(qtbot):
+    """(a) Voltar à mesma página não paga banco nem LLM de novo."""
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    svc.intensity = "Estudo"
+    obs_calls = []
+    svc.set_observations_provider(
+        lambda book_id, page=None: obs_calls.append(page) or [])
+    text = "Texto longo " * 30
+    w, hw, trg, inst = _svc_ready(svc)
+    with w as MockWorker, hw, trg, inst:
+        MockWorker.return_value.isRunning.return_value = False
+        svc.process_page_context(text, 5, book_id=7)
+        assert MockWorker.call_count == 1
+        calls_after_first = len(obs_calls)
+
+        svc.process_page_context(text, 5, book_id=7)  # leitor volta à página
+        svc.process_page_context(text, 5, book_id=7)
+        assert MockWorker.call_count == 1  # nenhuma chamada nova ao modelo
+        assert len(obs_calls) == calls_after_first  # nem ao banco
+
+
+def test_toggling_intensity_does_not_reanalyze_the_same_page(qtbot):
+    """Ligar/desligar o proativo reseta a cadência — mas a página atual já foi
+    analisada e não pode ser paga de novo (cadência real, sem patch no trigger)."""
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    text = "Palavra " * 200
+    with patch("src.gui.proactive_reader_service.ProactiveWorker") as MockWorker, \
+         patch.object(svc.hardware_service, "get_proactive_model_name",
+                      return_value="gemma4:e4b"), \
+         patch.object(svc, "_installed_models", return_value=["gemma4:e4b"]):
+        MockWorker.return_value.isRunning.return_value = False
+        svc.set_intensity("Moderado")
+        svc.process_page_context(text, 12, book_id=7)
+        assert MockWorker.call_count == 1
+
+        svc.set_intensity("Desligado")
+        svc.set_intensity("Moderado")  # reset da cadência
+        svc.process_page_context(text, 12, book_id=7)
+        assert MockWorker.call_count == 1  # mesma página: nada de segunda conta
+
+
+def test_page_observed_in_db_is_memoized(qtbot):
+    """Página pulada pela continuidade só consulta o banco uma vez na sessão."""
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    svc.intensity = "Estudo"
+    calls = []
+
+    def observations(book_id, page=None):
+        calls.append(page)
+        return [{"content": "já disse", "dismissed": 0}]
+
+    svc.set_observations_provider(observations)
+    text = "Texto longo " * 30
+    w, hw, trg, inst = _svc_ready(svc)
+    with w as MockWorker, hw, trg, inst:
+        svc.process_page_context(text, 5, book_id=7)
+        svc.process_page_context(text, 5, book_id=7)
+        MockWorker.assert_not_called()
+        assert calls == [5]  # a 2ª visita nem chega ao banco
+
+
+def test_failed_generation_frees_the_page_for_retry(qtbot):
+    """Falha de rede não "queima" a página: uma nova visita tenta de novo."""
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    svc.intensity = "Estudo"
+    svc.error_occurred.connect(lambda _msg: None)
+    text = "Texto longo " * 30
+    w, hw, trg, inst = _svc_ready(svc)
+    with w as MockWorker, hw, trg, inst:
+        MockWorker.return_value.isRunning.return_value = False
+        svc.process_page_context(text, 5, book_id=7)
+        assert MockWorker.call_count == 1
+        svc._on_worker_error("Ollama offline")
+
+        svc.process_page_context(text, 5, book_id=7)
+        assert MockWorker.call_count == 2
+
+
+def test_prompt_blocks_are_not_rebuilt_every_page(qtbot):
+    """(b) Blocos de prompt vêm do cache: 1 consulta por acervo, não por página."""
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    svc.intensity = "Estudo"
+    book_lookups = []
+    history_lookups = []
+
+    def observations(book_id, page=None):
+        if page is None:
+            book_lookups.append(book_id)
+            return [{"content": "O autor conecta entropia à seta do tempo.", "page": 3}]
+        return []
+
+    def history():
+        history_lookups.append(1)
+        return [{"kind": "Contexto externo", "dismissed": 1} for _ in range(5)]
+
+    svc.set_observations_provider(observations)
+    svc.set_dismissal_history_provider(history)
+    w, hw, trg, inst = _svc_ready(svc)
+    with w as MockWorker, hw, trg, inst:
+        MockWorker.return_value.isRunning.return_value = False
+        for page in range(5, 10):
+            svc.process_page_context(f"Texto longo {page} " * 30, page, book_id=7)
+
+        assert MockWorker.call_count == 5
+        assert len(book_lookups) == 1  # antes: 5 (uma por página)
+        assert len(history_lookups) == 1  # antes: 5 × 200 linhas do SQLite
+        # O conteúdo entregue ao worker continua o mesmo em todas as páginas.
+        assert "entropia à seta do tempo" in MockWorker.call_args.kwargs["memory_block"]
+        assert "Contexto externo" in MockWorker.call_args.kwargs["preference_block"]
+
+
+def test_new_observation_invalidates_prompt_caches(qtbot):
+    """Observação nova muda o acervo → os blocos são refeitos na próxima página."""
+    from src.gui.proactive_reader_service import ProactiveReaderService
+    svc = ProactiveReaderService()
+    svc.intensity = "Estudo"
+    book_lookups = []
+
+    def observations(book_id, page=None):
+        if page is None:
+            book_lookups.append(book_id)
+            return [{"content": "algo", "page": 3}]
+        return []
+
+    svc.set_observations_provider(observations)
+    w, hw, trg, inst = _svc_ready(svc)
+    with w as MockWorker, hw, trg, inst:
+        MockWorker.return_value.isRunning.return_value = False
+        svc.process_page_context("Texto longo A " * 30, 5, book_id=7)
+        svc._on_worker_finished({"tipo": "x", "confianca": "Alta", "texto": "y"})
+        svc.process_page_context("Texto longo B " * 30, 6, book_id=7)
+        assert len(book_lookups) == 2

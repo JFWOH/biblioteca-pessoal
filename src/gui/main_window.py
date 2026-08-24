@@ -1392,7 +1392,10 @@ class MainWindow(QMainWindow):
             return
 
         elif action_type == "explain":
-            question = f"Explique o contexto e o significado deste trecho detalhadamente: '{text}'"
+            # Onda Q (critérios das ações de leitura): resposta curta e ancorada
+            # — o "detalhadamente" antigo gerava respostas 2-3x maiores sem teto.
+            question = ("Explique o significado deste trecho com base no livro, "
+                        f"em no máximo 200 palavras: '{text}'")
         elif action_type == "search":
             question = f"Busque na web informações complementares sobre: '{text}' e resuma os achados."
         elif action_type == "save_note":
@@ -1417,7 +1420,8 @@ class MainWindow(QMainWindow):
             # Página inteira como TEXTO: cartão no painel, sem narrar.
             self._translate_page_as_text(text)
             return
-        elif action_type in ("explain_page", "summarize", "glossary", "flashcards"):
+        elif action_type in ("explain_page", "summarize", "glossary", "flashcards",
+                             "simplify"):
             from src.core.study_prompts import build_study_prompt
             # Tarefa 3.3: injeta os conceitos-chave do livro (grafo) no prompt de
             # geração de flashcards. Grafo vazio → concepts=[] → prompt igual ao

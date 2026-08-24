@@ -222,7 +222,88 @@ CI da main estava VERMELHO desde antes da rodada (3 runs): `requirements.txt` ti
 novas em código que o 0.15.17 aprova). Fix: pino `ruff==0.15.17` (PR #73). Local e CI
 voltam a julgar com a mesma régua.
 
-## Onda Q — (pendente)
+## Onda Q — Otimização de IA (CONCLUÍDA)
+
+### Q.1/Q.2 — proativo e orçamentos (evidência por trace/teste, sem Ollama vivo)
+
+- **Proativo**: memoização dos blocos de prompt (invalidada só por observação nova),
+  memo de sessão por `(book_id, página, hash)`, dedup de observações equivalentes na
+  memória do prompt, teto de 6000 chars p/ página patológica. Trace de sessão medido
+  (30 eventos, nível Moderado): chamadas LLM **12→8**, consultas SQLite **36→10**,
+  varreduras de 200 linhas da Fase 6 **12→1**. Cadência documentada em `_POLICY`
+  (`proactive_trigger_engine.py`): Leve 5→8 de gap (−37% chamada/página), Moderado 2→3
+  (−33%), Estudo intacto (contrato do nível). Regressão nova protege o `think`
+  inviolável (`test_payload_never_disables_thinking`).
+- **Orçamentos por tier (§1.4)**: `agent_state.TIER_BUDGETS` — A `(6, 90s)`,
+  B `(5, 150s)` (comportamento atual preservado como referência), C `(3, 300s)`;
+  desconhecido→B (ADR-005). Divergência de defaults do `AgentState` (20s vs 150s)
+  eliminada. Tier cacheado em módulo; import tardio (guard do torch da Onda P verde).
+  Trace novo `agent_budget` por query — a próxima calibração sai de dado, não palpite.
+
+### Q.3 — prompts das ações de leitura (A/B REAL: 22 pares, gemma4:e4b local, 275s)
+
+| ação | veredito | evidência |
+|---|---|---|
+| Explicar página | mudado | A: 723/732/957 palavras (EN truncou no teto de tokens); B: 267/252/287 (~2,8× menor, sem truncar) |
+| Resumir | teto explícito | efeito neutro medido; seguro p/ outros modelos |
+| Glossário | teto explícito | A gerou 9 itens sem teto; B parou em 8 |
+| Flashcards | só regra de idioma | formato P:/R: intacto |
+| Word Wise | MANTIDO | já cumpria ancoragem/tamanho/idioma |
+| Explicar (seleção, inline no main_window) | mudado na integração | pedia "detalhadamente" sem teto; agora ancorado + máx. 200 palavras (flui pelo system prompt do RAG, que já impõe grounding/citação) |
+
+Achado honesto: a regra de idioma é PREVENTIVA (gemma4 já respondia pt em 100% dos
+pares, até no trecho EN); o teto de 200 palavras melhora 2,8× mas não é obedecido ao
+pé da letra (267-287) — endurecer exigiria `num_predict` no chamador.
+
+- **"Simplificar" (novo, padrão Ghostreader)**: template ancorado/curto/leigo em
+  `study_prompts.py`; menu de contexto + barra flutuante (`SelectionActionPopover`);
+  exclusão mútua com Word Wise (termo curto → Definição; trecho → Simplificar) — juntas
+  a barra teria 1176px e cortaria em notebook 13". Manual do usuário atualizado.
+
+### Q.4 — robustez e stack de IA
+
+- **Preload/re-warm do chat** (candidato N.4): re-warm não-bloqueante com debounce de
+  5min ao abrir/focar o painel de chat (`showEvent` + FocusIn no campo), via
+  `spawn_warmup` (nunca reinicia QThread vivo). Cobre o modelo descarregado pelo
+  keep_alive após horas de app aberto.
+- **Coexistência FAST_TASK** (candidato N.4): `qwen3.5:4b` (3,4GB) preferido para
+  tarefas rápidas QUANDO instalado (sonda `/api/tags` com cache de classe TTL 10min,
+  tag EXATO — base não vale). Gate da integração: `resolve_llm_model(fast_task=False)`
+  por default — fluxos de QUALIDADE (revisão de tradução, síntese de dossiê) NUNCA
+  trocam de modelo silenciosamente; os rápidos chegam via `get_model_for_task("fast")`.
+  **Hoje inerte**: `qwen3.5:4b` não está instalado (18 modelos detectados no daemon
+  real; e4b=9,61GB + 12b=7,56GB confirmam que o par atual NÃO cabe em 16GB →
+  pré-requisito do usuário no roteiro: `ollama pull qwen3.5:4b`).
+- **Classificador CUDA/PTX (item 12b)**: `OllamaGPUError(RuntimeError)` tipado, com
+  marcadores case-insensitive checados ANTES do classificador transitório — falha na
+  1ª tentativa (sem tempestade de retry) com mensagem PT-BR acionável (driver antigo →
+  atualizar ou `OLLAMA_NUM_GPU=0`). Aplicado nos 3 pontos de HTTPError dos embeddings.
+  A Onda S reconhece o TIPO (sem casar string) para a UI sem modal.
+- **"database is locked" — RESOLVIDO na main (implementação independente)**:
+  `busy_timeout` 15s aplicado ANTES do WAL + retry com backoff (4 tentativas,
+  50→100→200ms, rollback pré-repetição, guarda anti-acúmulo — nunca 4×15s) nos 9
+  métodos de escrita expostos a outros processos; `add_chat_exchange` transacional
+  (2 inserts + poda num commit) ligado no `rag_engine.append_chat_turn` — o trio que o
+  MCP disputava virou UMA janela de contenção. 14 testes novos de contenção real.
+- **Consolidação do cliente Ollama**: embeddings (`/api/embed` + legado) e
+  `_reformulate_query` migrados para `ollama_client`; proactive_worker delega ao
+  `build_chat_payload` público. `keep_alive` agora presente no último call site que o
+  descartava. Payloads comportamentalmente idênticos (testes de contrato).
+
+### Validação da onda
+
+Suíte completa no tree integrado: ver seção de validação final (1707+ verdes, mesmas 2
+falhas ambientais pré-existentes). Ruff limpo. ADR-006 limpo. Integração do orquestrador
+(6 ajustes): par atômico DB↔rag_engine, gate fast_task, pergunta do Explicar-seleção,
+manual, testes do gate e da transação — 158 testes focados verdes.
+
+### Não coberto (Onda Q)
+
+Média móvel de latência por rodada dos traces (§1.4 "melhor"): o trace `agent_budget`
+foi criado exatamente para isso — fica para calibração pós-feedback com dado real.
+Classificação CUDA no caminho de chat/geração (o tester bateu em embeddings; chat fica
+observado). `main_window._start_llm_warmup` segue com disparo próprio (não migrado ao
+`spawn_warmup` — arquivo fora do escopo do executor; funcionalmente equivalente).
 
 ## Onda S — (pendente)
 

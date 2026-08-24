@@ -132,8 +132,9 @@ nenhuma configuração.
 - **🖍️ Modo Marca-Texto** (em "Mais opções ⋯"): passe o mouse sobre o texto
   para destacar, como um marca-texto de verdade.
 - **Selecionar texto** abre uma barrinha de ações rápidas: **Destacar**,
-  **Anotar**, **Explicar** (a IA explica o trecho), **Traduzir**,
-  **Flashcard**, **Definição rápida** e busca na **Web**.
+  **Anotar**, **Explicar** (a IA explica o trecho), **Simplificar** (versão
+  em linguagem simples, sem jargão), **Traduzir**, **Flashcard**,
+  **Definição rápida** (para 1-2 palavras) e busca na **Web**.
 - **Painel de Anotações**: lista tudo do livro atual em ordem de página;
   clique para ir até a página; renomeie ou apague o que quiser.
 - Notas criadas pelo Assistente IA aparecem com o ícone 🤖 ("Nota da IA").

@@ -12,8 +12,8 @@ class SelectionActionPopover(QFrame):
     """Pequena barra flutuante com ações rápidas para o texto selecionado.
 
     Emite ``action_requested`` com a chave da ação escolhida e se oculta.
-    Chaves: ``highlight``, ``explain``, ``translate``, ``search``,
-    ``save_note``, ``flashcard``, ``word_wise``.
+    Chaves: ``highlight``, ``explain``, ``simplify``, ``translate``,
+    ``search``, ``save_note``, ``flashcard``, ``word_wise``.
 
     ``word_wise`` (Tarefa 3.4 — definição rápida) só deve ser incluída pelo
     chamador via :meth:`set_actions` quando a seleção for curta (palavra/
@@ -25,6 +25,7 @@ class SelectionActionPopover(QFrame):
     _ACTIONS = [
         ("🖍️", "Destacar", "highlight"),
         ("🧠", "Explicar", "explain"),
+        ("✨", "Simplificar", "simplify"),
         ("🌐", "Traduzir", "translate"),
         ("🔍", "Web", "search"),
         ("📝", "Anotar", "save_note"),

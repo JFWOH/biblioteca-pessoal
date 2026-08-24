@@ -6,8 +6,22 @@ desligado no ConceptExtractor) quando não há override explícito em config
 """
 from unittest.mock import patch
 
+import pytest
+
 from src.core.database import LibraryDB
+from src.core.hardware_capability_service import HardwareCapabilityService
 from src.gui.workers.graph_worker import GraphWorker
+
+
+@pytest.fixture(autouse=True)
+def _sem_coexistencia():
+    """Onda Q: a sonda de modelo coexistente tem cache de CLASSE — zerar aqui
+    garante que o roteamento testado não dependa do que está instalado na
+    máquina que roda a suíte (o urlopen mockado de cada teste responde por ela).
+    """
+    HardwareCapabilityService.reset_fast_task_probe()
+    yield
+    HardwareCapabilityService.reset_fast_task_probe()
 
 
 def _book(db, title="Livro", path="/tmp/x.pdf") -> int:

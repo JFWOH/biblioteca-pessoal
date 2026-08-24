@@ -1,9 +1,11 @@
 """Banco de dados SQLite com FTS5 para a biblioteca."""
 
+import functools
 import hashlib
 import logging
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from datetime import date, datetime
 
@@ -31,11 +33,79 @@ def page_translation_fingerprint(text: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+# ── Concorrência ENTRE PROCESSOS ──────────────────────────────────────────
+# O mesmo arquivo .db é escrito pela GUI, pelo servidor MCP (processo à
+# parte) e por ferramentas de linha de comando. ``LibraryDB._write_lock`` é
+# um ``threading.Lock`` — serializa só as threads do processo atual, então o
+# SQLite ainda devolve "database is locked" quando OUTRO processo está com o
+# lock de escrita (caso real: ``append_chat_turn`` via MCP com a GUI aberta).
+# Defesa em duas camadas:
+#   1) ``busy_timeout``: o próprio SQLite espera o lock ser solto (cobre a
+#      grande maioria dos bloqueios);
+#   2) ``_retry_on_lock``: repete a escrita no resíduo em que o SQLite
+#      devolve SQLITE_BUSY na hora, sem consultar o busy handler (ex.: um
+#      upgrade de lock que poderia virar deadlock).
+
+
+def _is_lock_error(exc: sqlite3.OperationalError) -> bool:
+    """True para os erros de contenção ("database is locked"/"busy")."""
+    msg = str(exc).lower()
+    return "locked" in msg or "busy" in msg
+
+
+def _retry_on_lock(func):
+    """Repete o método de escrita enquanto o SQLite responder locked/busy.
+
+    Poucas tentativas e backoff crescente (dezenas → centenas de ms); erro
+    persistente PROPAGA (nada de loop infinito). Faz ``rollback`` antes de
+    repetir porque métodos com vários ``execute`` podem ter deixado trabalho
+    pendente na transação — sem isso a repetição duplicaria linhas já
+    inseridas. Ajustável em teste via ``_LOCK_RETRIES``/``_LOCK_BACKOFF_S``.
+    """
+
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        retries = max(0, int(getattr(self, "_LOCK_RETRIES", 3)))
+        backoff = max(0.0, float(getattr(self, "_LOCK_BACKOFF_S", 0.05)))
+        for attempt in range(retries + 1):
+            started = time.monotonic()
+            try:
+                return func(self, *args, **kwargs)
+            except sqlite3.OperationalError as exc:
+                if attempt >= retries or not _is_lock_error(exc):
+                    raise
+                # Só repete o caso que o busy_timeout NÃO cobre: SQLITE_BUSY
+                # devolvido na hora. Se a tentativa já gastou o busy_timeout
+                # inteiro esperando, repetir apenas multiplicaria a espera
+                # (GUI congelada por minutos) sem chance real de sucesso.
+                if time.monotonic() - started >= float(self._BUSY_TIMEOUT_S):
+                    raise
+                try:
+                    self.conn.rollback()
+                except sqlite3.Error:
+                    pass
+                delay = backoff * (2 ** attempt)
+                logger.warning(
+                    "SQLite ocupado em %s (tentativa %d/%d): %s — repetindo em %.0f ms",
+                    func.__name__, attempt + 1, retries + 1, exc, delay * 1000)
+                time.sleep(delay)
+
+    return wrapper
+
+
 class LibraryDB:
     """Gerencia o banco de dados SQLite da biblioteca."""
 
     _write_lock = threading.Lock()
     _local = threading.local()
+
+    # Quanto o SQLite espera pelo lock de escrita de outro processo antes de
+    # desistir, e a política de repetição do resíduo (ver ``_retry_on_lock``).
+    # São atributos de classe para dar injeção em teste por subclasse, sem
+    # mexer na assinatura do ``__init__``.
+    _BUSY_TIMEOUT_S = 15.0
+    _LOCK_RETRIES = 3          # 4 tentativas no total
+    _LOCK_BACKOFF_S = 0.05     # 50ms → 100ms → 200ms
 
     def __init__(self, db_path: str | Path | None = None):
         self._db_path = Path(db_path) if db_path else DB_PATH
@@ -46,8 +116,12 @@ class LibraryDB:
     @property
     def conn(self) -> sqlite3.Connection:
         if not hasattr(self._local, "conn") or self._local.conn is None:
-            c = sqlite3.connect(str(self._db_path), timeout=5.0)
+            c = sqlite3.connect(str(self._db_path), timeout=self._BUSY_TIMEOUT_S)
             c.row_factory = sqlite3.Row
+            # Antes de qualquer PRAGMA que escreva (journal_mode também pega
+            # lock): garante que este processo ESPERE o lock do outro em vez
+            # de estourar "database is locked" na hora.
+            c.execute(f"PRAGMA busy_timeout={int(self._BUSY_TIMEOUT_S * 1000)}")
             c.execute("PRAGMA journal_mode=WAL")
             c.execute("PRAGMA synchronous=NORMAL")
             c.execute("PRAGMA foreign_keys=ON")
@@ -350,6 +424,7 @@ class LibraryDB:
             sql += f" LIMIT {limit} OFFSET {offset}"
         return [dict(r) for r in self.conn.execute(sql).fetchall()]
 
+    @_retry_on_lock
     def update_book(self, book_id: int, **kwargs) -> None:
         kwargs["date_modified"] = datetime.now().isoformat()
         sets = ", ".join(f"{k} = :{k}" for k in kwargs.keys())
@@ -425,6 +500,7 @@ class LibraryDB:
 
     # ── Progresso ──────────────────────────────────────────────────────
 
+    @_retry_on_lock
     def update_reading_progress(self, book_id: int, current_page: int,
                                 total_pages: int, time_spent: int = 0,
                                 today: str | None = None) -> None:
@@ -607,6 +683,7 @@ class LibraryDB:
 
     # ── Coleções ───────────────────────────────────────────────────────
 
+    @_retry_on_lock
     def create_collection(self, name: str, description="", icon="📁",
                           color="#6366f1") -> int:
         with self._write_lock:
@@ -620,6 +697,7 @@ class LibraryDB:
         return [dict(r) for r in
                 self.conn.execute("SELECT * FROM collections ORDER BY name").fetchall()]
 
+    @_retry_on_lock
     def add_book_to_collection(self, book_id: int, collection_id: int) -> None:
         try:
             with self._write_lock:
@@ -669,6 +747,7 @@ class LibraryDB:
 
     # ── Tags ───────────────────────────────────────────────────────────
 
+    @_retry_on_lock
     def create_tag(self, name: str, color="#8b5cf6") -> int:
         with self._write_lock:
             cur = self.conn.execute("INSERT INTO tags (name, color) VALUES (?,?)", (name, color))
@@ -678,6 +757,7 @@ class LibraryDB:
     def get_tags(self) -> list[dict]:
         return [dict(r) for r in self.conn.execute("SELECT * FROM tags ORDER BY name").fetchall()]
 
+    @_retry_on_lock
     def add_tag_to_book(self, book_id: int, tag_id: int) -> None:
         try:
             with self._write_lock:
@@ -704,6 +784,7 @@ class LibraryDB:
 
     # ── Anotações ──────────────────────────────────────────────────────
 
+    @_retry_on_lock
     def add_annotation(self, book_id: int, page_number: int, content="",
                        highlight_color="#fbbf24", annotation_type="highlight",
                        position_data="{}", title="") -> int:
@@ -924,6 +1005,7 @@ class LibraryDB:
     # ── Memória conversacional (chat_turns) ────────────────────────────────
     # book_id NULL = histórico global (sem livro aberto).
 
+    @_retry_on_lock
     def add_chat_turn(self, book_id, role: str, content: str, session_id: str = "") -> None:
         with self._write_lock:
             self.conn.execute(
@@ -942,19 +1024,42 @@ class LibraryDB:
                 "ORDER BY id DESC LIMIT ?", (book_id, limit)).fetchall()
         return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
 
+    @_retry_on_lock
     def prune_chat_turns(self, book_id, keep: int) -> None:
         """Mantém apenas os ``keep`` turnos mais recentes do livro (ou do global)."""
         with self._write_lock:
-            if book_id is None:
+            self._prune_chat_turns_stmt(book_id, keep)
+            self.conn.commit()
+
+    def _prune_chat_turns_stmt(self, book_id, keep: int) -> None:
+        """Só o DELETE da poda, sem lock nem commit — para compor transações."""
+        if book_id is None:
+            self.conn.execute(
+                "DELETE FROM chat_turns WHERE book_id IS NULL AND id NOT IN "
+                "(SELECT id FROM chat_turns WHERE book_id IS NULL ORDER BY id DESC LIMIT ?)",
+                (keep,))
+        else:
+            self.conn.execute(
+                "DELETE FROM chat_turns WHERE book_id=? AND id NOT IN "
+                "(SELECT id FROM chat_turns WHERE book_id=? ORDER BY id DESC LIMIT ?)",
+                (book_id, book_id, keep))
+
+    @_retry_on_lock
+    def add_chat_exchange(self, book_id, user_content: str, assistant_content: str,
+                          keep: int = 6, session_id: str = "") -> None:
+        """Persiste pergunta+resposta e poda o excesso numa transação ÚNICA.
+
+        O fluxo do chat fazia 3 escritas separadas (2 ``add_chat_turn`` +
+        ``prune_chat_turns``) — três janelas de contenção com o servidor MCP
+        escrevendo no mesmo arquivo. Num commit só, o retry de lock repete o
+        trio inteiro sem risco de turno duplicado ou histórico sem poda.
+        """
+        with self._write_lock:
+            for role, content in (("user", user_content), ("assistant", assistant_content)):
                 self.conn.execute(
-                    "DELETE FROM chat_turns WHERE book_id IS NULL AND id NOT IN "
-                    "(SELECT id FROM chat_turns WHERE book_id IS NULL ORDER BY id DESC LIMIT ?)",
-                    (keep,))
-            else:
-                self.conn.execute(
-                    "DELETE FROM chat_turns WHERE book_id=? AND id NOT IN "
-                    "(SELECT id FROM chat_turns WHERE book_id=? ORDER BY id DESC LIMIT ?)",
-                    (book_id, book_id, keep))
+                    "INSERT INTO chat_turns (book_id, role, content, session_id) VALUES (?,?,?,?)",
+                    (book_id, role, (content or "")[:2000], session_id))
+            self._prune_chat_turns_stmt(book_id, keep)
             self.conn.commit()
 
     def clear_chat_turns(self, book_id=None) -> None:

@@ -10,6 +10,8 @@ próprios testes de regressão inalterados.
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from src.core import ollama_client
 from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
 
@@ -174,3 +176,69 @@ class TestStreamChat:
         assert captured["payload"]["options"]["repeat_penalty"] == 1.15
         assert captured["payload"]["options"]["repeat_last_n"] == 512
         assert captured["timeout"] == 120
+
+
+class TestEmbed:
+    """Transporte de /api/embed (e do legado /api/embeddings) — Onda Q.
+
+    O RAGEngine montava esses payloads à mão em três lugares; aqui fica o
+    contrato único. A lógica de negócio (retry, classificação de erro,
+    fallback 404) continua no chamador.
+    """
+
+    def _capture(self, captured: dict, body: dict):
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            captured["payload"] = json.loads(req.data.decode("utf-8"))
+            captured["timeout"] = timeout
+            return _mock_response(body)
+        return fake_urlopen
+
+    def test_build_embed_payload_novo_e_legado(self):
+        novo = ollama_client.build_embed_payload("bge-m3", "texto")
+        assert novo == {"model": "bge-m3", "input": "texto",
+                        "keep_alive": OLLAMA_KEEP_ALIVE}
+        legado = ollama_client.build_embed_payload("bge-m3", "texto", legacy=True)
+        assert legado == {"model": "bge-m3", "prompt": "texto",
+                          "keep_alive": OLLAMA_KEEP_ALIVE}
+
+    def test_embed_posta_no_endpoint_novo_e_devolve_vetores(self):
+        captured = {}
+        with patch("urllib.request.urlopen",
+                   side_effect=self._capture(captured, {"embeddings": [[0.1, 0.2]]})):
+            out = ollama_client.embed("http://localhost:11434/", "bge-m3", "texto")
+        assert out == [[0.1, 0.2]]
+        assert captured["url"] == "http://localhost:11434/api/embed"
+        assert captured["payload"]["input"] == "texto"
+        assert captured["timeout"] == ollama_client.DEFAULT_EMBED_TIMEOUT_S
+
+    def test_embed_aceita_lote_e_timeout_do_chamador(self):
+        captured = {}
+        with patch("urllib.request.urlopen",
+                   side_effect=self._capture(captured, {"embeddings": [[0.1], [0.2]]})):
+            out = ollama_client.embed("http://localhost:11434", "bge-m3",
+                                      ["a", "b"], timeout_s=120)
+        assert len(out) == 2
+        assert captured["payload"]["input"] == ["a", "b"]
+        assert captured["timeout"] == 120
+
+    def test_embed_sem_embeddings_devolve_lista_vazia(self):
+        """Quem decide se isso é retry/fallback/erro é o chamador, não o cliente."""
+        with patch("urllib.request.urlopen", return_value=_mock_response({})):
+            assert ollama_client.embed("http://localhost:11434", "bge-m3", "t") == []
+
+    def test_embed_legacy_usa_prompt_no_endpoint_antigo(self):
+        captured = {}
+        with patch("urllib.request.urlopen",
+                   side_effect=self._capture(captured, {"embedding": [0.5]})):
+            out = ollama_client.embed_legacy("http://localhost:11434", "bge-m3", "t")
+        assert out == [0.5]
+        assert captured["url"] == "http://localhost:11434/api/embeddings"
+        assert captured["payload"]["prompt"] == "t"
+
+    def test_erros_http_sobem_intactos(self):
+        import urllib.error
+        with patch("urllib.request.urlopen",
+                   side_effect=urllib.error.HTTPError("u", 500, "boom", {}, None)):
+            with pytest.raises(urllib.error.HTTPError):
+                ollama_client.embed("http://localhost:11434", "bge-m3", "t")

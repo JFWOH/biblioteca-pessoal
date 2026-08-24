@@ -121,16 +121,25 @@ atualiza o mapa de oportunidades com o estado da arte de AGORA. Somente desktop.
 - Critério: números antes/depois REGISTRADOS no registro da onda.
 
 ### Onda Q — Otimização de IA (latência percebida e qualidade)
-- [ ] **Q.1** Custo do proativo por página: usar a continuidade (Fases 5/6) para não
+- [x] **Q.1** Custo do proativo por página: usar a continuidade (Fases 5/6) para não
   reprocessar o já dito; revisar frequência por nível SEM tocar em `think` (inviolável).
-- [ ] **Q.2** Latência percebida do RAG: revisar `max_rounds`/orçamentos por hardware
+  *(LLM 12→8 chamadas/sessão; SQLite 36→10; cadência em `_POLICY`; regressão do think)*
+- [x] **Q.2** Latência percebida do RAG: revisar `max_rounds`/orçamentos por hardware
   (§1.4 da revisão de engenharia — item nunca executado) e prefetch/cache onde a
   Onda R apontar (ex.: dossiê pré-aquecido ao abrir o livro).
-- [ ] **Q.3** Qualidade dos prompts das ações de leitura (Explicar, Word Wise,
+  *(TIER_BUDGETS A/B/C + trace agent_budget; re-warm do chat com debounce 5min; cache
+  do dossiê já existia — validado)*
+- [x] **Q.3** Qualidade dos prompts das ações de leitura (Explicar, Word Wise,
   Estudar): revisão A/B leve pelos agentes com critérios objetivos (fidelidade ao
   contexto, tamanho, citação de fonte).
-- [ ] **Q.4** O que mais as Ondas R/N classificarem como IA (ex.: limiares do feedback 👎
+  *(A/B REAL 22 pares no gemma4 local; Explicar ~2,8× mais curto sem truncar; Word Wise
+  mantido; + ação nova "Simplificar")*
+- [x] **Q.4** O que mais as Ondas R/N classificarem como IA (ex.: limiares do feedback 👎
   se ainda não aplicados; polimento do X-Ray).
+  *(classificador CUDA/PTX tipado; retry de "database is locked" + add_chat_exchange
+  atômico; coexistência FAST_TASK gated por disponibilidade; consolidação do cliente
+  Ollama; limiares do 👎 já estavam aplicados — verificado; chips do X-Ray ficaram
+  para a Onda S por serem GUI)*
 - Critério: cada mudança de prompt/parâmetro com teste ou trace comparativo registrado.
 
 ### Onda S — UX final e robustez do tester

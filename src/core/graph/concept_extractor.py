@@ -36,12 +36,24 @@ Use no máximo {max_concepts} conceitos, relevance entre 0 e 1."""
 
 
 def resolve_llm_model(ollama_url: str = "http://localhost:11434",
-                      preferred: str | None = None, timeout: int = 3) -> str | None:
+                      preferred: str | None = None, timeout: int = 3,
+                      fast_task: bool = False) -> str | None:
     """Escolhe um modelo instalado no Ollama para o refino (ou None).
 
     Mesma filosofia do agente proativo: favorece modelos leves/rápidos.
     Falha (Ollama fora) devolve None — o extrator segue só com a heurística.
+
+    Onda Q (rodada UX ago/2026): com ``fast_task=True`` o modelo de
+    coexistência entra na frente da cadeia padrão, mas SÓ quando instalado —
+    ele cabe na VRAM ao lado do modelo de chat e evita a recarga de ~8GB a
+    cada troca. O default é ``False`` porque esta função também serve fluxos
+    de QUALIDADE (revisão de tradução, síntese de dossiê), que não podem
+    trocar de modelo silenciosamente — os chamadores de tarefa rápida já
+    chegam com o coexistente via ``get_model_for_task("fast")`` no
+    ``preferred``, que continua vindo antes de tudo.
     """
+    from src.core.hardware_capability_service import HardwareCapabilityService
+    coexist = HardwareCapabilityService.FAST_TASK_COEXIST_MODEL if fast_task else None
     try:
         req = urllib.request.Request(f"{ollama_url.rstrip('/')}/api/tags")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -54,11 +66,16 @@ def resolve_llm_model(ollama_url: str = "http://localhost:11434",
     installed_bases = {}
     for name in installed:
         installed_bases.setdefault(name.split(":")[0], name)
-    for pref in (preferred, "gemma4:e4b", "gemma3:4b", "gemma2:2b"):
+    for pref in (preferred, coexist, "gemma4:e4b", "gemma3:4b", "gemma2:2b"):
         if not pref:
             continue
         if pref in installed:
             return pref
+        if coexist is not None and pref == coexist:
+            # Coexistência é sobre um tag EXATO (~3,4GB, cabe junto do chat).
+            # Aceitar outro tag da mesma base (ex.: qwen3.5:14b) traria de
+            # volta exatamente a recarga de VRAM que se quer evitar.
+            continue
         base = pref.split(":")[0]
         if base in installed_bases:
             return installed_bases[base]

@@ -455,3 +455,86 @@ class TestConfidenceFromDistances:
         orch = Orchestrator(mock_engine)
         out = orch.execute_vector_search("q", book_id=1)
         assert out["confidence_score"] == 1.0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TestOrcamentoPorTier — Onda Q (revisão de engenharia 2026-07-05 §1.4)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestOrcamentoPorTier:
+    """Orçamentos do agente derivados do tier de hardware.
+
+    Antes: ``max_rounds=5``/``max_time_ms=150000`` hardcoded no orchestrator,
+    calibrados numa máquina só — "num Tier C (CPU), 150s ainda corta; num Tier
+    A, é folga demais" — e defaults do AgentState divergentes (20000).
+    """
+
+    @staticmethod
+    def _limpa_cache_de_tier():
+        from src.core.rag import orchestrator as orch_mod
+        orch_mod._tier_cache = orch_mod._TIER_NAO_RESOLVIDO
+
+    def _orquestrador_com_tier(self, tier):
+        """Orchestrator novo com o tier forçado; devolve (orch, mock do detector)."""
+        from src.core.hardware_capability_service import HardwareCapabilityService
+        self._limpa_cache_de_tier()
+        detector = MagicMock(return_value=tier)
+        patcher = patch.object(HardwareCapabilityService, "get_recommended_tier", detector)
+        patcher.start()
+        return Orchestrator(MagicMock()), detector, patcher
+
+    def test_mapa_cobre_os_tres_tiers(self):
+        from src.core.rag.agent_state import TIER_BUDGETS, budget_for_tier
+        assert set(TIER_BUDGETS) == {"Tier A", "Tier B", "Tier C"}
+        rounds_a, tempo_a = budget_for_tier("Tier A")
+        rounds_b, tempo_b = budget_for_tier("Tier B")
+        rounds_c, tempo_c = budget_for_tier("Tier C")
+        # Tier A: mais rodadas, menos folga de tempo. Tier C: o inverso.
+        assert rounds_a > rounds_b > rounds_c
+        assert tempo_a < tempo_b < tempo_c
+
+    def test_tier_desconhecido_cai_no_padrao(self):
+        from src.core.rag.agent_state import budget_for_tier
+        padrao = budget_for_tier("Tier B")
+        assert budget_for_tier(None) == padrao
+        assert budget_for_tier("Tier Z") == padrao
+
+    def test_defaults_do_agent_state_batem_com_o_tier_b(self):
+        """A divergência histórica (20000 no AgentState vs 150000 no call site)."""
+        from src.core.rag.agent_state import budget_for_tier
+        state = AgentState(session_id="s")
+        assert (state.max_rounds, state.max_time_ms) == budget_for_tier("Tier B")
+
+    def test_orquestrador_usa_o_orcamento_do_tier(self):
+        from src.core.rag.agent_state import budget_for_tier
+        for tier in ("Tier A", "Tier B", "Tier C"):
+            orch, _detector, patcher = self._orquestrador_com_tier(tier)
+            try:
+                assert orch._agent_budget() == budget_for_tier(tier)
+            finally:
+                patcher.stop()
+                self._limpa_cache_de_tier()
+
+    def test_tier_e_detectado_uma_vez_so(self):
+        """O Orchestrator é recriado a cada query_rag: o cache tem de ser global."""
+        orch, detector, patcher = self._orquestrador_com_tier("Tier A")
+        try:
+            orch._agent_budget()
+            orch._agent_budget()
+            Orchestrator(MagicMock())._agent_budget()  # "outra pergunta"
+            assert detector.call_count == 1
+        finally:
+            patcher.stop()
+            self._limpa_cache_de_tier()
+
+    def test_falha_na_deteccao_degrada_para_o_padrao(self):
+        """Detecção quebrada (torch ausente/DLL CUDA) não pode derrubar a query."""
+        from src.core.hardware_capability_service import HardwareCapabilityService
+        from src.core.rag.agent_state import budget_for_tier
+        self._limpa_cache_de_tier()
+        try:
+            with patch.object(HardwareCapabilityService, "get_recommended_tier",
+                              side_effect=OSError("DLL do CUDA quebrada")):
+                assert Orchestrator(MagicMock())._agent_budget() == budget_for_tier("Tier B")
+        finally:
+            self._limpa_cache_de_tier()

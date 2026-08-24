@@ -38,6 +38,40 @@ def _is_transient_net_error(text: str) -> bool:
     return any(m in t for m in _TRANSIENT_NET_MARKERS)
 
 
+# ── Falha de GPU no Ollama (NÃO transitória) ───────────────────────────────────
+# Item 12 do feedback de tester (jul/2026): com driver NVIDIA antigo o Ollama
+# aborta a geração de embeddings no runner CUDA e devolve HTTP 500 com o erro do
+# driver no corpo. Isso NÃO se resolve com retry — repetir só multiplica a
+# espera antes do mesmo RuntimeError genérico. Classificar permite falhar rápido
+# e com uma instrução que o usuário consegue seguir.
+_GPU_FAILURE_MARKERS = (
+    "cuda",
+    "ptx",
+    "no kernel image",
+    "cuda error",
+)
+
+GPU_FAILURE_MESSAGE = (
+    "Falha de GPU no Ollama (driver NVIDIA antigo ou incompatível). "
+    "Atualize o driver ou configure o Ollama para CPU (OLLAMA_NUM_GPU=0)."
+)
+
+
+class OllamaGPUError(RuntimeError):
+    """Falha de GPU/driver no Ollama — definitiva, não adianta repetir.
+
+    Subclasse de ``RuntimeError`` para não quebrar nenhum ``except RuntimeError``
+    existente; o tipo próprio permite que a camada de UI reconheça o caso sem
+    inspecionar strings (a decisão de COMO avisar é de outra onda).
+    """
+
+
+def _is_gpu_failure(text: str) -> bool:
+    """Heurística para falha de GPU/driver reportada pelo Ollama (case-insensitive)."""
+    t = (text or "").lower()
+    return any(m in t for m in _GPU_FAILURE_MARKERS)
+
+
 # ── Constantes de configuração ─────────────────────────────────────────────────
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_EMBED_MODEL = "bge-m3"
@@ -424,65 +458,41 @@ class RAGEngine:
         O endpoint legado /api/embeddings foi depreciado e retorna null em
         versões recentes, causando falha silenciosa na indexação.
         """
-        import json
-        import urllib.request
         import urllib.error
         import socket
 
-        # Garante a resolução exata da tag do modelo de embedding antes da requisição
+        from src.core import ollama_client
+
         # Garante a resolução exata da tag do modelo de embedding antes da requisição
         if ":" not in self._embed_model:
             exact_embed = self.get_exact_model_name(self._embed_model)
             if exact_embed:
                 self._embed_model = exact_embed
 
-        # Tenta o endpoint novo: /api/embed
-        from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
-        payload = json.dumps({
-            "model": self._embed_model,
-            "input": text,
-            "keep_alive": OLLAMA_KEEP_ALIVE,
-        }).encode()
-        req = urllib.request.Request(
-            f"{self._ollama_url}/api/embed",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read())
-            embeddings = data.get("embeddings")
+            # Endpoint novo (/api/embed) via cliente unificado.
+            embeddings = ollama_client.embed(self._ollama_url, self._embed_model, text)
             if embeddings and embeddings[0]:
                 return embeddings[0]
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 # Fallback para o endpoint antigo /api/embeddings
-                payload_legacy = json.dumps({
-                    "model": self._embed_model,
-                    "prompt": text,
-                    "keep_alive": OLLAMA_KEEP_ALIVE,
-                }).encode()
-                req_legacy = urllib.request.Request(
-                    f"{self._ollama_url}/api/embeddings",
-                    data=payload_legacy,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
                 try:
-                    with urllib.request.urlopen(req_legacy, timeout=15) as resp:
-                        data = json.loads(resp.read())
-                    embedding = data.get("embedding")
+                    embedding = ollama_client.embed_legacy(
+                        self._ollama_url, self._embed_model, text)
                     if embedding:
                         return embedding
                 except urllib.error.HTTPError as e2:
                     error_body = e2.read().decode('utf-8')
                     logger.error("HTTPError %s no Fallback de Embedding: %s", e2.code, error_body)
+                    if _is_gpu_failure(error_body):
+                        raise OllamaGPUError(GPU_FAILURE_MESSAGE) from e2
                     raise RuntimeError(f"Ollama retornou erro HTTP {e2.code} ao gerar embeddings: {error_body}") from e2
             else:
                 error_body = e.read().decode('utf-8')
                 logger.error("HTTPError %s em Embedding: %s", e.code, error_body)
+                if _is_gpu_failure(error_body):
+                    raise OllamaGPUError(GPU_FAILURE_MESSAGE) from e
                 raise RuntimeError(f"Ollama retornou erro HTTP {e.code} ao gerar embeddings: {error_body}") from e
         except (TimeoutError, urllib.error.URLError, socket.timeout, ConnectionError) as e:
             raise TimeoutError(f"Ollama não respondeu em 15s ao gerar embeddings. {str(e)}")
@@ -499,36 +509,22 @@ class RAGEngine:
         efêmeras no Windows durante reindexações grandes): tenta novamente com
         backoff exponencial curto antes de desistir.
         """
-        import json
-        import urllib.request
         import urllib.error
         import socket
         import time
+
+        from src.core import ollama_client
 
         if ":" not in self._embed_model:
             exact_embed = self.get_exact_model_name(self._embed_model)
             if exact_embed:
                 self._embed_model = exact_embed
 
-        from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
-        payload = json.dumps({
-            "model": self._embed_model,
-            "input": texts,
-            "keep_alive": OLLAMA_KEEP_ALIVE,
-        }).encode()
-
         for attempt in range(1, _EMBED_MAX_ATTEMPTS + 1):
-            req = urllib.request.Request(
-                f"{self._ollama_url}/api/embed",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
             try:
                 # Tempo limite maior para lotes (e.g. 50 chunks)
-                with urllib.request.urlopen(req, timeout=120) as resp:
-                    data = json.loads(resp.read())
-                embeddings = data.get("embeddings")
+                embeddings = ollama_client.embed(
+                    self._ollama_url, self._embed_model, texts, timeout_s=120)
                 if embeddings and len(embeddings) == len(texts):
                     return embeddings
                 raise ValueError("Ollama não retornou embeddings para o lote inteiro.")
@@ -541,6 +537,11 @@ class RAGEngine:
                     error_body = e.read().decode("utf-8")
                 except Exception:
                     pass
+                # Falha de GPU/driver NÃO é transitória: repetir só multiplica a
+                # espera. Falha na 1ª tentativa, com instrução acionável.
+                if _is_gpu_failure(error_body):
+                    logger.error("Falha de GPU no Ollama ao gerar embeddings: %s", error_body[:200])
+                    raise OllamaGPUError(GPU_FAILURE_MESSAGE) from e
                 if _is_transient_net_error(error_body) and attempt < _EMBED_MAX_ATTEMPTS:
                     logger.warning(
                         "Embedding em lote: erro transitório do Ollama (tentativa %d/%d), aguardando…: %s",
@@ -880,10 +881,10 @@ class RAGEngine:
         if not (assistant_content or "").strip():
             return
         try:
-            db = self._chat_db()
-            db.add_chat_turn(book_id, "user", (user_content or "")[:2000])
-            db.add_chat_turn(book_id, "assistant", assistant_content)
-            db.prune_chat_turns(book_id, max_messages)
+            # Transação única (Onda Q): 3 escritas separadas eram 3 janelas de
+            # "database is locked" contra o servidor MCP no mesmo arquivo.
+            self._chat_db().add_chat_exchange(
+                book_id, user_content or "", assistant_content, keep=max_messages)
         except Exception as exc:
             logger.warning("append_chat_turn falhou: %s", exc)
 
