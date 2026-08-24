@@ -69,6 +69,57 @@ class TestProactiveWorkerPayload:
         assert "Trecho para análise:\nTRECHO_XYZ" in prompt
 
 
+class TestProactiveWorkerPayloadSource:
+    """Onda Q: o payload sai do cliente unificado, não de um dict à mão."""
+
+    def test_payload_comes_from_ollama_client(self):
+        from src.core.ollama_client import build_chat_payload
+        w = ProactiveWorker("gemma4:e4b", "Texto.", "http://localhost:11434")
+        kwargs = w._chat_kwargs()
+        expected = build_chat_payload(
+            kwargs["model"], kwargs["messages"], stream=False,
+            response_format=kwargs["response_format"],
+            temperature=kwargs["temperature"], num_predict=kwargs["num_predict"],
+        )
+        assert w._build_payload() == expected
+
+    def test_payload_keeps_keep_alive_of_the_project(self):
+        from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
+        w = ProactiveWorker("m", "Texto.", "http://localhost:11434")
+        assert w._build_payload()["keep_alive"] == OLLAMA_KEEP_ALIVE
+
+    def test_payload_never_disables_thinking(self):
+        """INVIOLÁVEL: o proativo é tarefa profunda — nunca think=False."""
+        w = ProactiveWorker("m", "Texto.", "http://localhost:11434")
+        payload = w._build_payload()
+        assert payload.get("think") is not False
+        assert "think" not in payload  # omitido = default do modelo
+        assert w._chat_kwargs().get("think") is None
+
+    def test_run_sends_the_same_parameters_it_builds(self):
+        """O que o teste inspeciona é o que a requisição envia (sem divergência)."""
+        w = ProactiveWorker("gemma4:e4b", "Texto.", "http://localhost:11434")
+        obs = {"tipo": "Observação do texto", "confianca": "Alta", "texto": "x"}
+        with patch("src.core.ollama_client.chat_once", return_value=json.dumps(obs)) as chat:
+            w.run()
+        sent = chat.call_args
+        payload = w._build_payload()
+        assert sent.args[1] == payload["model"]
+        assert sent.args[2] == payload["messages"]
+        assert sent.kwargs["response_format"] == payload["format"]
+        assert sent.kwargs["temperature"] == payload["options"]["temperature"]
+        assert sent.kwargs["num_predict"] == payload["options"]["num_predict"]
+        assert "think" not in sent.kwargs
+
+    def test_pathological_page_is_capped_in_the_prompt(self):
+        """Página gigante (OCR de tabelão) não vira prompt gigante."""
+        page = "INICIO " + ("x" * 40000) + " FIM"
+        w = ProactiveWorker("m", page, "http://localhost:11434")
+        prompt = w._build_payload()["messages"][0]["content"]
+        assert len(prompt) < len(page) / 5
+        assert "INICIO" in prompt and "FIM" in prompt
+
+
 class TestProactiveWorkerRun:
     def test_run_emits_observation_on_success(self, qtbot):
         w = ProactiveWorker("m", "Texto da página.", "http://localhost:11434")

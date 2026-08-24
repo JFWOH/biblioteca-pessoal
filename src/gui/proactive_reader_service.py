@@ -6,11 +6,15 @@ de hardware e heurística de disparo) permanece em ``src/core/`` (ADR-006: o cor
 não importa GUI/PyQt6).
 """
 
+import logging
+
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from src.core.hardware_capability_service import HardwareCapabilityService
 from src.core.proactive_trigger_engine import ProactiveTriggerEngine
 from src.gui.workers.proactive_worker import ProactiveWorker
+
+logger = logging.getLogger(__name__)
 
 
 class ProactiveReaderService(QObject):
@@ -27,10 +31,20 @@ class ProactiveReaderService(QObject):
         self._cross_ref_fn = None  # função injetada: page_text -> hits vetoriais
         self._observations_fn = None  # função injetada: (book_id, page=None) -> list[dict]
         self._dismissal_history_fn = None  # função injetada: () -> list[dict] (com dispensadas)
+        # Memo de sessão: páginas já resolvidas (analisadas ou puladas por já
+        # terem observação). Evita repagar banco + LLM quando o leitor volta
+        # à página — e funciona sem book_id, onde a continuidade não alcança.
+        self._resolved_pages: set[str] = set()
+        self._pending_page_key = None  # página do worker em voo (liberada se falhar)
+        # Blocos de prompt memoizados: dependem só do acervo de observações,
+        # que muda quando UMA nova observação nasce — não a cada página virada.
+        self._memory_cache = None  # (book_id, bloco)
+        self._preference_cache = None  # bloco (global ao leitor)
 
     def set_intensity(self, intensity: str):
         self.intensity = intensity
         self.trigger_engine.reset()
+        self._invalidate_prompt_caches()
 
     def set_cross_reference(self, fn):
         """Injeta a busca vetorial usada para conectar a página a outros livros."""
@@ -59,6 +73,16 @@ class ProactiveReaderService(QObject):
         if self.intensity == "Desligado":
             return
 
+        # Memo de sessão (Onda Q): esta página, com este texto, já foi resolvida
+        # nesta sessão — nada a fazer. Vem antes de tudo (é só um hash) e antes
+        # do trigger engine de propósito: revisitar página não pode consumir o
+        # orçamento de cadência das páginas novas.
+        from src.core.proactive_continuity import page_cache_key
+        page_key = page_cache_key(book_id, page_number, page_text)
+        if page_key in self._resolved_pages:
+            logger.debug("Proativo: página %s já resolvida nesta sessão (skip).", page_number)
+            return
+
         # Se uma observação ainda está sendo gerada, ignora este disparo. Isso
         # evita acúmulo de threads e substitui o antigo QThread.terminate() (que
         # podia corromper estado/derrubar o app). A heurística de cadência do
@@ -80,26 +104,19 @@ class ProactiveReaderService(QObject):
         # antes, sem memória (ADR-005).
         memory_block = ""
         if self._observations_fn is not None and book_id:
-            from src.core.proactive_continuity import (
-                already_observed_page, build_memory_block,
-            )
+            from src.core.proactive_continuity import already_observed_page
             try:
                 if already_observed_page(self._observations_fn(book_id, page_number)):
+                    self._resolved_pages.add(page_key)
                     return
-                memory_block = build_memory_block(self._observations_fn(book_id))
+                memory_block = self._memory_block_for(book_id)
             except Exception:
                 memory_block = ""
 
         # Aprendizado (Fase 6): os tipos que o leitor costuma dispensar entram
         # no prompt como orientação (nunca supressão). Falha do provider →
         # segue sem preferência (ADR-005).
-        preference_block = ""
-        if self._dismissal_history_fn is not None:
-            from src.core.proactive_learning import build_preference_block
-            try:
-                preference_block = build_preference_block(self._dismissal_history_fn())
-            except Exception:
-                preference_block = ""
+        preference_block = self._preference_block()
 
         model = self._resolve_model(tier_model)
         if not model:
@@ -115,9 +132,46 @@ class ProactiveReaderService(QObject):
             search_fn=self._cross_ref_fn, book_id=book_id,
             memory_block=memory_block, preference_block=preference_block,
         )
+        self._resolved_pages.add(page_key)
+        self._pending_page_key = page_key
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.error.connect(self._on_worker_error)
         self._worker.start()
+
+    # ── Blocos de prompt memoizados (Onda Q) ──────────────────────────────
+    #
+    # Antes, cada página virada refazia duas consultas ao SQLite (as 5
+    # observações recentes do livro + as 200 últimas de TODA a biblioteca) e
+    # reconstruía blocos de texto idênticos aos da página anterior. As duas
+    # respostas só mudam quando nasce uma observação nova, então o cache é
+    # invalidado exatamente aí.
+
+    def _memory_block_for(self, book_id) -> str:
+        """Bloco de continuidade do livro (uma consulta por acervo, não por página)."""
+        if self._memory_cache is not None and self._memory_cache[0] == book_id:
+            return self._memory_cache[1]
+        from src.core.proactive_continuity import build_memory_block
+        block = build_memory_block(self._observations_fn(book_id))
+        self._memory_cache = (book_id, block)
+        return block
+
+    def _preference_block(self) -> str:
+        """Bloco de preferência aprendida ("" sem provider ou em falha, ADR-005)."""
+        if self._preference_cache is not None:
+            return self._preference_cache
+        if self._dismissal_history_fn is None:
+            return ""
+        from src.core.proactive_learning import build_preference_block
+        try:
+            block = build_preference_block(self._dismissal_history_fn())
+        except Exception:
+            return ""  # falha não vira cache: a próxima página tenta de novo
+        self._preference_cache = block
+        return block
+
+    def _invalidate_prompt_caches(self):
+        self._memory_cache = None
+        self._preference_cache = None
 
     def _resolve_model(self, tier_model: str):
         """Escolhe um modelo instalado no Ollama para o proativo.
@@ -155,10 +209,22 @@ class ProactiveReaderService(QObject):
             return []
 
     def _on_worker_finished(self, obs: dict):
+        # Nasceu observação nova → o acervo mudou e os blocos memoizados
+        # (continuidade e preferência) precisam ser refeitos na próxima página.
+        self._pending_page_key = None
+        self._invalidate_prompt_caches()
         self.observation_ready.emit(obs)
 
     def _on_worker_error(self, msg: str):
+        # A página não produziu observação: devolve ao pool para que uma nova
+        # visita possa tentar de novo (falha de rede/Ollama não é resultado).
+        self._release_pending_page()
         self.error_occurred.emit(f"Agente proativo: {msg}")
+
+    def _release_pending_page(self):
+        if self._pending_page_key is not None:
+            self._resolved_pages.discard(self._pending_page_key)
+            self._pending_page_key = None
 
     def stop(self):
         """Cancelamento cooperativo (sem terminate): descarta o resultado pendente.
@@ -173,4 +239,7 @@ class ProactiveReaderService(QObject):
             except (TypeError, RuntimeError):
                 pass
             self._worker.wait(2000)
+        # O resultado foi descartado: a página não ficou observada, então volta
+        # a ser elegível se o leitor retornar a ela.
+        self._release_pending_page()
         self._worker = None

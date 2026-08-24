@@ -36,13 +36,15 @@ class ProactiveWorker(QThread):
         """
         self._is_cancelled = True
 
-    def _build_payload(self) -> dict:
-        """Monta o payload do /api/chat. Isolado para ser testável."""
+    def _build_prompt(self) -> str:
+        """Monta o prompt único enviado ao modelo."""
+        from src.core.proactive_continuity import trim_page_excerpt
+
         # Continuidade (Fase 5) e aprendizado (Fase 6) entram entre as regras
         # e o trecho — sem os blocos, o prompt é idêntico ao anterior.
         preference = f"{self.preference_block}\n\n" if self.preference_block else ""
         memory = f"{self.memory_block}\n\n" if self.memory_block else ""
-        prompt = (
+        return (
             "Você é um Assistente Proativo de Leitura discreto e útil. "
             "Sua tarefa é analisar o trecho fornecido e gerar UMA ÚNICA observação curta (1 a 4 frases). "
             "A observação DEVE ser útil, como dar contexto externo, levantar uma hipótese interpretativa ou notar algo interessante. "
@@ -53,40 +55,58 @@ class ProactiveWorker(QThread):
             '- "texto": (A observação em si, 1 a 4 frases)\n\n'
             f"{preference}"
             f"{memory}"
-            f"Trecho para análise:\n{self.page_text}"
+            f"Trecho para análise:\n{trim_page_excerpt(self.page_text)}"
         )
 
-        from src.core.ollama_defaults import OLLAMA_KEEP_ALIVE
+    def _chat_kwargs(self) -> dict:
+        """Parâmetros da chamada — fonte única do payload E da requisição.
+
+        Antes o worker montava o dict de ``/api/chat`` à mão e depois repassava
+        pedaços dele para ``chat_once``: os dois podiam divergir (``keep_alive``
+        já era montado e descartado). Agora ambos saem daqui.
+        """
         return {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "keep_alive": OLLAMA_KEEP_ALIVE,
+            "messages": [{"role": "user", "content": self._build_prompt()}],
             # Structured output do Ollama: garante JSON válido na resposta,
             # tornando o parsing robusto sem depender de limpeza de markdown.
-            "format": "json",
+            "response_format": "json",
+            "temperature": 0.2,
             # num_predict é um TETO, não uma reserva: o modelo para em done=stop ao
             # terminar (gera só o necessário). Modelos de raciocínio (ex.: gemma4:e4b)
             # consomem tokens "pensando" ANTES do content; um teto baixo (256)
             # estourava no meio do raciocínio e devolvia content vazio ("Resposta
             # vazia da IA"). Mantemos o raciocínio (qualidade) com teto folgado.
-            "options": {"temperature": 0.2, "num_predict": 4096},
+            "num_predict": 4096,
+            # NUNCA passar think=False aqui: o proativo é tarefa profunda e
+            # mantém o raciocínio por decisão de qualidade (lição do commit
+            # a1cc513, reafirmada na Onda Q). Omitir = default do modelo.
         }
+
+    def _build_payload(self) -> dict:
+        """Payload real de ``/api/chat`` (mesma função pública que chat_once usa)."""
+        from src.core.ollama_client import build_chat_payload
+        kwargs = self._chat_kwargs()
+        return build_chat_payload(
+            kwargs["model"], kwargs["messages"], stream=False,
+            response_format=kwargs["response_format"],
+            temperature=kwargs["temperature"],
+            num_predict=kwargs["num_predict"],
+        )
 
     def run(self):
         if not self.model:
             self.error.emit("Nenhum modelo suportado pelo hardware.")
             return
 
-        payload = self._build_payload()
-
         try:
             from src.core import ollama_client
+            kwargs = self._chat_kwargs()
             content = ollama_client.chat_once(
-                self.ollama_url, payload["model"], payload["messages"],
-                response_format=payload.get("format"),
-                temperature=payload["options"].get("temperature"),
-                num_predict=payload["options"].get("num_predict", 4096),
+                self.ollama_url, kwargs["model"], kwargs["messages"],
+                response_format=kwargs["response_format"],
+                temperature=kwargs["temperature"],
+                num_predict=kwargs["num_predict"],
                 timeout_s=45,
             )
 
