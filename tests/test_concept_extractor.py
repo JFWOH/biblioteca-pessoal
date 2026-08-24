@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from src.core.graph.concept_extractor import ConceptExtractor
+from src.core.graph.concept_extractor import ConceptExtractor, resolve_llm_model
 
 
 @pytest.fixture
@@ -139,3 +139,51 @@ def test_llm_not_used_without_model(monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _fail)
     _, method = ex.extract(PAGE_PT, use_llm=True)
     assert method == "heuristic"
+
+
+# ── Cadeia de fallback do resolve_llm_model (onda Q: coexistência de VRAM) ──
+
+def _fake_tags(*models):
+    def _urlopen(req, timeout=0):
+        return io.BytesIO(
+            json.dumps({"models": [{"name": m} for m in models]}).encode())
+    return _urlopen
+
+
+def test_resolve_prefers_coexisting_model_when_installed(monkeypatch):
+    """Com fast_task, qwen3.5:4b entra na FRENTE — cabe junto do modelo de chat."""
+    monkeypatch.setattr("urllib.request.urlopen",
+                        _fake_tags("gemma4:e4b", "gemma3:4b", "qwen3.5:4b"))
+    assert resolve_llm_model(fast_task=True) == "qwen3.5:4b"
+
+
+def test_resolve_default_never_uses_coexisting_model(monkeypatch):
+    """Default (fast_task=False) IGNORA o coexistente mesmo instalado.
+
+    resolve_llm_model também serve fluxos de QUALIDADE (revisão de tradução,
+    síntese de dossiê) — trocar o modelo deles silenciosamente mudaria o
+    resultado de fluxos validados. Só tarefa rápida opta pela coexistência.
+    """
+    monkeypatch.setattr("urllib.request.urlopen",
+                        _fake_tags("gemma4:e4b", "gemma3:4b", "qwen3.5:4b"))
+    assert resolve_llm_model() == "gemma4:e4b"
+
+
+def test_resolve_keeps_old_chain_without_coexisting_model(monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen",
+                        _fake_tags("gemma3:4b", "gemma4:e4b"))
+    assert resolve_llm_model(fast_task=True) == "gemma4:e4b"
+
+
+def test_resolve_coexisting_requires_exact_tag(monkeypatch):
+    """qwen3.5:14b não coexiste com o chat — não vale como qwen3.5:4b."""
+    monkeypatch.setattr("urllib.request.urlopen",
+                        _fake_tags("qwen3.5:14b", "gemma3:4b"))
+    assert resolve_llm_model(fast_task=True) == "gemma3:4b"
+
+
+def test_resolve_explicit_preferred_still_wins(monkeypatch):
+    """Config explícita do usuário continua acima da coexistência."""
+    monkeypatch.setattr("urllib.request.urlopen",
+                        _fake_tags("qwen3.5:4b", "gemma2:2b"))
+    assert resolve_llm_model(preferred="gemma2:2b", fast_task=True) == "gemma2:2b"

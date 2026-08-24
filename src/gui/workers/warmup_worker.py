@@ -8,6 +8,10 @@ abrir, um load do LLM (/api/generate sem prompt) e do modelo de embeddings
 
 Totalmente gracioso (ADR-005): Ollama fora do ar ou modelo ausente viram um
 log debug, nunca erro visível — o warmup é uma otimização, não um requisito.
+
+Rodada UX ago/2026 (onda Q): o warmup deixou de ser evento único de startup.
+``spawn_warmup`` permite re-disparar o mesmo trabalho quando o usuário volta a
+usar a IA depois de horas com o app aberto (ver ``RAGPanel._maybe_rewarm``).
 """
 
 import json
@@ -57,3 +61,26 @@ class WarmupWorker(QThread):
                 logger.info("Warmup dos embeddings '%s' concluído.", self._embed_model)
             except Exception as exc:
                 logger.debug("Warmup dos embeddings ignorado: %s", exc)
+
+
+def spawn_warmup(parent, ollama_url: str = "http://localhost:11434",
+                 llm_model: str | None = None, embed_model: str | None = None,
+                 previous: "WarmupWorker | None" = None) -> "WarmupWorker | None":
+    """Cria e inicia um warmup NOVO — ou devolve ``None`` se ainda há um vivo.
+
+    Re-disparo seguro de QThread: ``start()`` num QThread que ainda roda é
+    ignorado pelo Qt (com aviso no console) e mexer no objeto vivo é receita de
+    crash. Então cada re-warm ganha uma instância nova, e o único caso em que
+    nada acontece é quando o warmup anterior ainda não terminou — situação em
+    que o re-warm seria redundante de qualquer forma.
+
+    O chamador deve guardar a referência devolvida (o ``parent`` também mantém
+    o objeto vivo do lado do Qt) para poder consultar ``isRunning()`` depois.
+    """
+    if previous is not None and previous.isRunning():
+        logger.debug("Re-warm ignorado: warmup anterior ainda em execução.")
+        return None
+    worker = WarmupWorker(ollama_url=ollama_url, llm_model=llm_model,
+                          embed_model=embed_model, parent=parent)
+    worker.start()
+    return worker

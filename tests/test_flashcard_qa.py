@@ -113,7 +113,12 @@ def test_worker_without_explicit_model_prefers_fast_task_model(qtbot, monkeypatc
     """Sem model= explícito, o worker roteia para o modelo "fast" do tier e
     desliga o thinking (§1.3 da revisão: flashcard P/R é tarefa estruturada;
     benchmark 2026-07-06: e4b 9,8s → 3,3s com think=false)."""
+    from src.core.hardware_capability_service import HardwareCapabilityService
     from src.gui.workers.flashcard_qa_worker import FlashcardQAWorker
+
+    # Onda Q: cache de CLASSE da sonda de coexistência — zera para o
+    # roteamento não depender dos modelos instalados na máquina da suíte.
+    HardwareCapabilityService.reset_fast_task_probe()
 
     captured = {}
 
