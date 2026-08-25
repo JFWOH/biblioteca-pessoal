@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
-from check_contrast import (  # noqa: E402
+from contrast_qss import (  # noqa: E402
     _parse_hex,
     analisa_tema,
     classifica,

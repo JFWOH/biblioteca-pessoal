@@ -394,7 +394,8 @@ retângulo do teste) — CI Linux continua cobrindo ambos.
 
 ### S.5 — contraste MEDIDO pela primeira vez (débito da revisão §7)
 
-`tools/check_contrast.py` (WCAG, parser de QSS com strip de comentários regressionado)
+`tools/contrast_qss.py` (WCAG, parser de QSS com strip de comentários regressionado;
+nome evita o padrão `check_*.py` do .gitignore, que é para scripts descartáveis)
 + 10 testes. Resultado: dark 22 pares/0 FAIL; light e sépia 23 pares — **1 FAIL cada**
 (`QPushButton#ragIndexBtn` #10b981 sobre claro: 2,54:1 e 2,15:1) → CORRIGIDO para
 #047857 (tom -700 da mesma paleta): **0 FAIL nos 3 temas**, par agora AA. Limite: só
