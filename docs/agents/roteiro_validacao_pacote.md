@@ -12,9 +12,11 @@ venv\Scripts\python.exe -m src.tools.build_package --out build\BibliotecaPessoal
 Conferir ao final: `runtime\` (python embutido + deps CPU), `src\`,
 `resources\`, `Manual - Biblioteca Pessoal.pdf`, `LEIA-ME.txt`,
 `Biblioteca Pessoal.bat`, `Diagnostico.bat`, `portable.flag`,
-`data\hf_cache\hub\models--hexgrad--Kokoro-82M\` (pré-seed) e o `.zip` ao
-lado da pasta. **Vetos:** nada de `venv\`, `data\chroma_db`, `library.db`,
-`tests\`, `docs\agents\`, `.git`.
+`data\hf_cache\hub\models--hexgrad--Kokoro-82M\` (pré-seed),
+`data\piper\models\pt_BR-faber-medium.onnx` + `.onnx.json` (voz de RESERVA,
+rodada ago/2026 — os DOIS arquivos, um `.onnx` órfão quebra a síntese) e o
+`.zip` ao lado da pasta. **Vetos:** nada de `venv\`, `data\chroma_db`,
+`library.db`, `tests\`, `docs\agents\`, `.git`.
 
 Sanidade rápida ainda na máquina de build:
 `build\BibliotecaPessoal\runtime\python.exe -c "import src.main"` (deve sair
