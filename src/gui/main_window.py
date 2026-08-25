@@ -46,6 +46,39 @@ logger = logging.getLogger(__name__)
 # narração pedida antes de o warmup terminar.
 TTS_WARMUP_IDLE_DELAY_MS = 1500
 
+# Rodada UX ago/2026 (Onda S) — tarefas em SEGUNDO PLANO não interrompem quem
+# está lendo com caixas de diálogo modais: a informação vai para a barra de
+# status e para o painel correspondente. As durações abaixo são o "quanto tempo
+# a mensagem fica legível" de cada caso.
+#
+# Falha de GPU/driver do Ollama é definitiva e a mensagem carrega uma INSTRUÇÃO
+# que o usuário precisa ler inteira antes de agir — por isso a duração longa.
+GPU_ERROR_STATUS_MS = 20000
+# IA ausente nas execuções seguintes à primeira: aviso discreto, sem modal.
+OLLAMA_ABSENT_STATUS_MS = 10000
+# Falha do envio ao Anki: o card já está salvo localmente, só informa.
+ANKI_ERROR_STATUS_MS = 8000
+# Flag de onboarding: o assistente do Ollama abre sozinho UMA vez (o roteiro de
+# validação do pacote depende disso); depois só a pedido do usuário.
+ONBOARDING_WIZARD_KEY = "onboarding.ollama_wizard_shown"
+
+
+def gpu_failure_message(err) -> str:
+    """Mensagem orientativa se ``err`` for falha de GPU do Ollama, senão ``""``.
+
+    O sinal ``error_occurred`` do RAGWorker transporta ``str`` (a exceção morre
+    na worker thread), então o tipo só sobrevive nas chamadas diretas — por
+    isso o reconhecimento aceita as duas formas: a exceção ``OllamaGPUError``
+    e o texto que ela carrega (``GPU_FAILURE_MESSAGE``).
+    """
+    try:
+        from src.core.rag_engine import GPU_FAILURE_MESSAGE, OllamaGPUError
+    except Exception:  # pragma: no cover - core de IA indisponível
+        return ""
+    if isinstance(err, OllamaGPUError) or GPU_FAILURE_MESSAGE in str(err):
+        return GPU_FAILURE_MESSAGE
+    return ""
+
 
 class MainWindow(QMainWindow):
     """Janela principal da Biblioteca Pessoal."""
@@ -412,6 +445,9 @@ class MainWindow(QMainWindow):
         # Tarefa 3.1 — fontes clicáveis: resolve citações [Título, p. X] → book_id
         # e abre o livro na página citada.
         self._rag_panel.set_books_provider(self._db.get_all_books)
+        # Onda S — chips de perguntas sugeridas por página: mesma fonte de
+        # conceitos do X-Ray (grafo local, custo de LLM zero).
+        self._rag_panel.set_concepts_provider(self._book_graph_concepts)
         self._rag_panel.source_clicked.connect(self._on_rag_source_clicked)
         self._main_stack.addWidget(self._rag_panel)  # index 3
 
@@ -457,6 +493,9 @@ class MainWindow(QMainWindow):
     def _setup_statusbar(self):
         self._statusbar = QStatusBar()
         self.setStatusBar(self._statusbar)
+        # Botão discreto "Configurar IA…" — criado sob demanda, só quando o
+        # Ollama está ausente FORA da primeira execução (ver _on_rag_status_ready).
+        self._ollama_wizard_btn = None
         self._update_statusbar()
 
     def _apply_theme(self):
@@ -657,7 +696,16 @@ class MainWindow(QMainWindow):
         progress = self._db.get_reading_progress(book_id)
         start_page = progress["current_page"] if progress else 0
 
-        self._reader_view.open_book(book, start_page)
+        # Onda S (robustez): arquivo danificado/incompleto vira aviso claro na
+        # statusbar, nunca traceback cru na GUI (contrato BookOpenError dos
+        # readers, ADR-005).
+        from src.readers.base_reader import BookOpenError
+        try:
+            self._reader_view.open_book(book, start_page)
+        except BookOpenError as exc:
+            logger.error(f"Falha ao abrir livro {filepath}: {exc}")
+            self._statusbar.showMessage(f"⚠️ {exc}", 8000)
+            return
         
         # Injeta o RAGPanel no leitor e o esconde por padrão
         if self._rag_panel.parentWidget() != self._reader_view:
@@ -1191,19 +1239,20 @@ class MainWindow(QMainWindow):
             self._rag_panel.set_ollama_status(False)
             return
 
-        # Se não detectado e usuário abriu o assistente de IA — o wizard agora
-        # abre PÓS-show (janela visível), mesmo fluxo de antes.
+        # Ollama ausente. Este método é chamado a partir do RagInitWorker, ou
+        # seja, de uma tarefa de SEGUNDO PLANO (rodada UX ago/2026, Onda S):
+        #  • 1ª execução — o assistente ainda abre sozinho: é onboarding
+        #    legítimo e o roteiro de validação do pacote depende dele.
+        #  • execuções seguintes — nada de modal em cima de quem está lendo;
+        #    fica um aviso na barra de status + botão discreto sob demanda.
         if not available:
-            from PyQt6.QtWidgets import QDialog
-            from src.gui.dialogs.ollama_wizard import OllamaWizardDialog
-            wizard = OllamaWizardDialog(self)
-            if wizard.exec() == QDialog.DialogCode.Accepted:
-                # Pós-instalação o daemon responde imediatamente — sonda curta.
-                available = engine.is_ollama_available()
-                if available:
-                    models = engine.list_local_models()
+            if not self._config.get(ONBOARDING_WIZARD_KEY, False):
+                available, models = self._run_ollama_wizard(engine)
+            else:
+                self._show_ollama_wizard_button()
 
         if available:
+            self._hide_ollama_wizard_button()
             installed_names = [m["name"] for m in models]
             self._rag_panel.update_model_list(installed_names)
             # Daemon presente mas SEM modelos (instalado por fora / wizard
@@ -1215,6 +1264,73 @@ class MainWindow(QMainWindow):
         model = self._config.get("rag.llm_model", "gemma4:e4b")
         self._rag_panel.set_ollama_status(available, model if available else "")
         self._rag_panel.set_indexed_count(indexed_count)
+
+    def _run_ollama_wizard(self, engine):
+        """Abre o assistente do Ollama e devolve ``(available, models)``.
+
+        Marca a flag de onboarding ANTES do ``exec()``: o critério é "o
+        assistente foi EXIBIDO", não "foi concluído com sucesso" — senão o
+        usuário que fecha o assistente o veria de novo a cada abertura do app,
+        que é exatamente a interrupção que a Onda S remove.
+        """
+        from PyQt6.QtWidgets import QDialog
+        from src.gui.dialogs.ollama_wizard import OllamaWizardDialog
+
+        self._config.set(ONBOARDING_WIZARD_KEY, True)
+        wizard = OllamaWizardDialog(self)
+        if wizard.exec() == QDialog.DialogCode.Accepted:
+            # Pós-instalação o daemon responde imediatamente — sonda curta.
+            if engine.is_ollama_available():
+                return True, engine.list_local_models()
+        return False, []
+
+    def _show_ollama_wizard_button(self) -> None:
+        """Aviso não-bloqueante de IA ausente: barra de status + botão discreto.
+
+        Substitui a abertura automática do assistente nas execuções seguintes à
+        primeira. O botão fica à direita da barra (``addPermanentWidget``) e só
+        abre o assistente quando o usuário clica.
+        """
+        self._statusbar.showMessage(
+            "🤖 Assistente de IA indisponível (Ollama não respondeu).",
+            OLLAMA_ABSENT_STATUS_MS,
+        )
+        if self._ollama_wizard_btn is not None:
+            self._ollama_wizard_btn.show()
+            return
+        from PyQt6.QtWidgets import QPushButton
+
+        btn = QPushButton("Configurar IA…")
+        btn.setFlat(True)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setToolTip("Abrir o assistente de instalação do Ollama")
+        btn.clicked.connect(self._open_ollama_wizard)
+        self._statusbar.addPermanentWidget(btn)
+        self._ollama_wizard_btn = btn
+
+    def _hide_ollama_wizard_button(self) -> None:
+        """Esconde o botão de configuração quando a IA volta a responder."""
+        if self._ollama_wizard_btn is not None:
+            self._ollama_wizard_btn.hide()
+
+    def _open_ollama_wizard(self) -> None:
+        """Abre o assistente do Ollama a pedido explícito do usuário (clique)."""
+        engine = self._rag_engine
+        if engine is None:
+            self._statusbar.showMessage(
+                "⚠️ Motor de IA ainda não inicializado — tente de novo em instantes.",
+                5000,
+            )
+            return
+        available, models = self._run_ollama_wizard(engine)
+        if available:
+            self._hide_ollama_wizard_button()
+            installed_names = [m["name"] for m in models]
+            self._rag_panel.update_model_list(installed_names)
+            if not installed_names:
+                self._start_model_pull()
+            self._rag_panel.set_ollama_status(
+                True, self._config.get("rag.llm_model", "gemma4:e4b"))
 
     def _on_model_changed(self, model_id: str) -> None:
         """Salva a preferência de modelo do usuário e atualiza o motor RAG."""
@@ -1725,7 +1841,6 @@ class MainWindow(QMainWindow):
         from src.core.anki_service import AnkiService
         from src.gui.widgets.anki_export_dialog import AnkiExportDialog
         from src.gui.workers.anki_worker import AnkiAddNoteWorker
-        from PyQt6.QtWidgets import QMessageBox
 
         service = AnkiService()
         dialog = AnkiExportDialog(service=service, initial_front=front, initial_back=back, parent=self)
@@ -1758,12 +1873,21 @@ class MainWindow(QMainWindow):
                 else:
                     self._statusbar.showMessage("⚠️ Anki fechado. Flashcard salvo na fila local de fallback.", 5000)
             
-            def on_error(err):
-                QMessageBox.warning(self, "Erro no Anki", f"Falha ao salvar flashcard:\n{err}")
-                
             self._anki_worker.finished.connect(on_finished)
-            self._anki_worker.error.connect(on_error)
+            self._anki_worker.error.connect(self._on_anki_error)
             self._anki_worker.start()
+
+    def _on_anki_error(self, err) -> None:
+        """Falha ao enviar o flashcard ao Anki — sem modal (rodada UX ago/2026).
+
+        O envio roda em segundo plano, depois de o diálogo já ter fechado; o
+        antigo ``QMessageBox.warning`` aparecia por cima da leitura. O card já
+        foi persistido localmente ANTES do envio, então a falha não perde
+        trabalho — basta informar na barra de status e registrar no log.
+        """
+        logger.error("Falha ao salvar flashcard no Anki: %s", err)
+        self._statusbar.showMessage(
+            f"⚠️ Falha ao enviar o flashcard ao Anki: {err}", ANKI_ERROR_STATUS_MS)
 
     def _on_rag_index_all(self) -> None:
         """Reindexação completa da biblioteca em background."""
@@ -1795,12 +1919,29 @@ class MainWindow(QMainWindow):
         except Exception as e:
             import traceback
             traceback.print_exc()
-            self._handle_rag_error(str(e))
+            # Exceção crua (não a string): preserva o tipo para o caminho de GPU.
+            self._handle_rag_error(e)
 
-    def _handle_rag_error(self, err: str) -> None:
-        self._statusbar.showMessage(f"⚠️ Erro RAG: {err}", 5000)
-        self._rag_panel.on_error(err)
-        QMessageBox.critical(self, "Falha na IA", f"Ocorreu um erro no processamento do assistente:\n\n{err}")
+    def _handle_rag_error(self, err) -> None:
+        """Erro do worker de RAG — nunca abre diálogo (rodada UX ago/2026).
+
+        A reindexação roda em SEGUNDO PLANO, sem o usuário ter pedido nada
+        naquele instante; o antigo ``QMessageBox.critical`` interrompia a
+        leitura. Aqui a informação segue o mesmo caminho que o chat já usava:
+        barra de status + painel do assistente.
+
+        Aceita ``str`` (como o sinal ``error_occurred`` entrega) ou a exceção.
+        """
+        texto = str(err)
+        gpu_msg = gpu_failure_message(err)
+        if gpu_msg:
+            # Falha de driver: definitiva e acionável — fica legível por mais
+            # tempo, porque a instrução precisa ser lida inteira.
+            self._statusbar.showMessage(f"⚠️ {gpu_msg}", GPU_ERROR_STATUS_MS)
+        else:
+            self._statusbar.showMessage(f"⚠️ Erro RAG: {texto}", 5000)
+        self._rag_panel.on_error(texto)
+        logger.error("Erro no processamento do assistente: %s", texto)
 
     def _on_rag_stop(self) -> None:
         """Para o worker RAG em andamento."""

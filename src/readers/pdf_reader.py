@@ -1,7 +1,7 @@
 """Leitor de documentos PDF usando PyMuPDF."""
 
 from pathlib import Path
-from src.readers.base_reader import BaseReader, PageContent, TOCEntry
+from src.readers.base_reader import BaseReader, BookOpenError, PageContent, TOCEntry
 
 
 def _lado_a_lado(pix, pix2) -> tuple[bytes, int, int]:
@@ -59,8 +59,14 @@ class PDFReader(BaseReader):
         # o DISPLAY desses erros não-fatais da lib C; exceções Python reais
         # do fitz continuam sendo propagadas normalmente.
         fitz.TOOLS.mupdf_display_errors(False)
-        self._doc = fitz.open(str(self._filepath))
-        self._total_pages = self._doc.page_count
+        try:
+            self._doc = fitz.open(str(self._filepath))
+            self._total_pages = self._doc.page_count
+        except Exception as exc:
+            self._doc = None
+            raise BookOpenError(
+                f"Arquivo PDF danificado ou ilegível: {self._filepath.name}"
+            ) from exc
         self._is_open = True
 
     def close(self) -> None:

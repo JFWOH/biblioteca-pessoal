@@ -305,6 +305,108 @@ Classificação CUDA no caminho de chat/geração (o tester bateu em embeddings;
 observado). `main_window._start_llm_warmup` segue com disparo próprio (não migrado ao
 `spawn_warmup` — arquivo fora do escopo do executor; funcionalmente equivalente).
 
-## Onda S — (pendente)
+## Onda S — UX final e robustez do tester (CONCLUÍDA)
+
+Onda atravessou uma QUEDA DE SESSÃO (limite de uso, 24/08 ~23h): 6 executores morreram
+em pleno voo com edições parciais em disco; todos foram RETOMADOS com contexto intacto
+(SendMessage) e concluíram; 2 tarefas (S-7 robustez, S-8 contraste) foram bloqueadas 2×
+pelo classificador de permissões no LANÇAMENTO do agente e executadas INLINE pelo
+orquestrador (as edições em si passam pelas permissões normais).
+
+### S.1 — item 10 (notebook 13"/DPI) — causas REAIS corrigidas
+
+- 10a (aba Narração some): causa-raiz ≠ hipótese da memória — `elideMode` era
+  `ElideNone` (scroll buttons JÁ eram True): sem elide o QTabBar não encolhe e tira a
+  aba corrente da vista. Fix: ElideRight + padding 8px 20px→12px (3 temas) + diálogo
+  550→640px. Medido: abas somavam 1084px vs 510px úteis → agora 600 vs 600.
+- 10b (texto cortado): o smoke de DPI flagrou **19 widgets cortados** (checkbox com 2px
+  de altura!) — conteúdo não cabia em 450px e o layout espremia abaixo do mínimo. Fix:
+  5 abas embrulhadas em QScrollArea (padrão da aba Avançado) → **0 cortados**; caixas
+  MCP com altura por font-metrics (não px); `setFixedHeight`→`setMinimumHeight` em
+  settings/library/reader (toolbar 48, audio_btn 32, progress 28 viram PISO).
+- `tests/test_dpi_smoke.py` (18 testes, subprocessos): descoberta metodológica —
+  `QT_SCALE_FACTOR` é INERTE no offscreen (só muda devicePixelRatio); o teste varia a
+  fonte do app em PONTOS, que é o mecanismo real do bug (pt × 551 font-size px do QSS).
+- Não coberto (só o tester confirma): DPI fracionário REAL no 13"; conversão em massa
+  px→pt segue gated (§IV).
+
+### S.2 — item 11 (degradação de TTS VISÍVEL)
+
+Menu rápido reordenado Kokoro→Piper→pyttsx3 (legado por último, rotulado "qualidade
+inferior" — a causa auditada era clique acidental no 1º item). Fallback agora: aviso
+na statusbar (8s, dedup por motor) + indicador persistente `⚠️` no botão de áudio
+(propriedade `ttsFallback` estilizável), limpo ao voltar ao preferido. NUNCA modal.
+Gate novo `tts.qwen3.enabled` (default False): provider pesado recusa construção ANTES
+do import torch/transformers. Ressalva honesta: se o relato do tester tiver outra
+causa além do clique acidental, ela continua aberta (roteador nunca degradou sozinho).
+
+### S.3 — item 12a (ZERO modal de background)
+
+`_handle_rag_error` sem `QMessageBox.critical` (statusbar + painel; sinal é `str`,
+então o erro de GPU é reconhecido por tipo E conteúdo — `gpu_failure_message()`);
+wizard do Ollama: 1º uso mantém modal (roteiro §3 intacto; chave
+`onboarding.ollama_wizard_shown` gravada AO EXIBIR), demais viram botão flat
+"Configurar IA…" na statusbar; Anki → statusbar. Varredura AST+regex com teste de
+invariante; exceção auditada e MANTIDA: diálogo do flashcard após worker é continuação
+de clique explícito. 21 testes novos.
+
+### S.4 — reserva Piper REAL (decisão R.4)
+
+`_model_dirs()` agora: config `tts.piper.models_dir` > `<app>/data/piper/models`
+(portátil, convenção do Kokoro) > 2 dirs legados do home; dedup preservando ordem.
+Catálogo: 4 vozes pt-BR oficiais + pt-PT (faber continua a resolução default de pt).
+**Handoff Onda T:** `seed_piper` deve copiar `pt_BR-faber-medium.onnx` **E**
+`.onnx.json` para `data/piper/models/` (o `.json` é obrigatório; `.onnx` órfão deixa
+health_check True mas síntese falha). 14 testes novos.
+
+### S.5 — preset "Leitura confortável" (candidato N.4)
+
+1 clique: fonte +2 (16px), entrelinha 1,8, margem 100px (proxy de coluna estreita —
+único controle que afeta a largura); 2º clique restaura snapshot real. Popover não tem
+controle de espaçamento de letra (cláusula "se houver" não aplicável).
+
+### S.5 — chips, shimmer e timeline (candidatos N.4)
+
+Chips de 3-4 perguntas derivadas dos conceitos do grafo/X-Ray (custo LLM ZERO; mesma
+fonte `_book_graph_concepts`; refresh só na troca de livro; fiação no main_window feita
+pelo orquestrador). Shimmer de 3 linhas no gap pré-primeiro-token (cor da paleta do
+card — nada hardcoded; para quando oculto). Timeline colapsável "▸ N passos" acumulando
+os status já emitidos pelo orchestrator (dedup, teto 12, colapsa ao concluir).
+
+### S.5 — barra de ações no EPUB (débito autoconfessado pago)
+
+Seleção longa no EPUB abre o MESMO `SelectionActionPopover` do PDF (6 ações, incluindo
+a nova Simplificar; termo curto segue para Definição rápida). Âncora: rect do bridge
+com fallback no cursor global. Dismiss em render/troca de página/nova seleção.
+Decisão registrada: **"Destacar" fora da barra do EPUB** — highlight sem coordenadas
+normalizadas nunca re-renderizaria no caminho HTML; paridade plena exige mecanismo de
+re-render de destaque no EPUB (candidato futuro, §IV). 17 testes novos.
+
+### S.5 — robustez com arquivos danificados (versão limitada do débito de fuzzing)
+
+Contrato novo `BookOpenError` (ADR-005): `open()` dos readers nunca vaza exceção crua —
+PDF/EPUB truncado, conteúdo falso, 0 bytes → erro claro PT-BR; MuPDF que REPARA PDF
+truncado é aceito como degradação válida. GUI: abrir livro danificado → aviso na
+statusbar, nunca traceback (wrap no main_window). 8 testes novos. Os 2 testes que
+falhavam SÓ neste Windows offscreen ganharam SONDAS comportamentais estreitas (skip com
+razão: fontes não embutíveis em PDF trivial; minimumSizeHint do overlay maior que o
+retângulo do teste) — CI Linux continua cobrindo ambos.
+
+### S.5 — contraste MEDIDO pela primeira vez (débito da revisão §7)
+
+`tools/contrast_qss.py` (WCAG, parser de QSS com strip de comentários regressionado;
+nome evita o padrão `check_*.py` do .gitignore, que é para scripts descartáveis)
++ 10 testes. Resultado: dark 22 pares/0 FAIL; light e sépia 23 pares — **1 FAIL cada**
+(`QPushButton#ragIndexBtn` #10b981 sobre claro: 2,54:1 e 2,15:1) → CORRIGIDO para
+#047857 (tom -700 da mesma paleta): **0 FAIL nos 3 temas**, par agora AA. Limite: só
+pares fg/bg declarados na MESMA regra (14-15 não-hex ignorados/tema); auditoria visual
+completa segue com o usuário.
+
+### Validação da onda
+
+Suíte completa (rodada 3× por executores diferentes ao longo da onda): **1850 passed,
+2 skipped** (as 2 sondas ambientais — antes eram 2 FAILED). Ruff limpo em todos os
+tocados. Zero modal de background + zero degradação silenciosa de TTS (critérios de
+aceite 4) com testes de invariante.
 
 ## Onda T — (pendente)

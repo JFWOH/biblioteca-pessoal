@@ -143,17 +143,28 @@ atualiza o mapa de oportunidades com o estado da arte de AGORA. Somente desktop.
 - Critério: cada mudança de prompt/parâmetro com teste ou trace comparativo registrado.
 
 ### Onda S — UX final e robustez do tester
-- [ ] **S.1** Item 10: layout quebrado em notebook 13"/DPI fracionário — remover
+- [x] **S.1** Item 10: layout quebrado em notebook 13"/DPI fracionário — remover
   alturas fixas em px do QSS onde quebram; garantir aba Narração visível; teste de
   fumaça com fonte/scale ampliados.
-- [ ] **S.2** Item 11: degradação de TTS passa a ser VISÍVEL — aviso não-modal na UI
+  *(causa real 10a = ElideNone no QTabBar; smoke flagrou 19 widgets cortados → 0 com
+  QScrollArea nas abas; fixed→minimum heights; 18 testes de fumaça)*
+- [x] **S.2** Item 11: degradação de TTS passa a ser VISÍVEL — aviso não-modal na UI
   quando a narração cair de Kokoro para reserva/legacy (nunca silencioso).
-- [ ] **S.3** Item 12: driver NVIDIA antigo (erro CUDA/PTX no Ollama) → detectar e
+  *(statusbar + indicador persistente no botão; pyttsx3 sai do topo do menu; gate do
+  qwen3 pesado)*
+- [x] **S.3** Item 12: driver NVIDIA antigo (erro CUDA/PTX no Ollama) → detectar e
   degradar com mensagem acionável; NENHUM diálogo modal disparado por tarefa de
   background (auditar todos os `QMessageBox` em caminhos de worker).
-- [ ] **S.4** Reserva Piper conforme decisão da Onda R (pré-seed no pacote ou
+  *(classificador tipado na Onda Q + reconhecimento na UI; RAG/wizard/Anki sem modal;
+  invariante com teste; wizard de 1º uso preservado)*
+- [x] **S.4** Reserva Piper conforme decisão da Onda R (pré-seed no pacote ou
   download guiado) — a cadeia de fallback do TTS deixa de ser teórica.
-- [ ] **S.5** O que mais as Ondas R/N classificarem como UX.
+  *(dirs config>pacote>home + catálogo 4 vozes pt-BR; pré-seed em si é o estágio
+  seed_piper da Onda T)*
+- [x] **S.5** O que mais as Ondas R/N classificarem como UX.
+  *(popover EPUB; preset Leitura confortável; chips X-Ray + shimmer + timeline;
+  BookOpenError p/ arquivos danificados + sondas ambientais nos 2 testes; contraste
+  medido e único FAIL corrigido — detalhes no registro)*
 
 ### Onda T — RELEASE DE TESTE (fecha a rodada)
 - [ ] **T.1** Verificação integral no worktree: suíte completa + ruff + `validar-adrs`

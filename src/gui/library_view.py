@@ -353,7 +353,7 @@ class LibraryView(QWidget):
 
         select_broken_btn = QPushButton("Selecionar quebrados")
         select_broken_btn.setIcon(emoji_icon("☠️", 14))
-        select_broken_btn.setFixedHeight(30)
+        select_broken_btn.setMinimumHeight(30)
         select_broken_btn.setObjectName("librarySelectBrokenBtn")
         select_broken_btn.clicked.connect(self._select_all_broken)
         bulk_layout.addWidget(select_broken_btn)
@@ -363,14 +363,18 @@ class LibraryView(QWidget):
         # src/gui/styles.py::emoji_icon (mesma correção da Onda 0.1).
         delete_btn = QPushButton("Excluir Selecionados")
         delete_btn.setIcon(emoji_icon("🗑️", 14))
-        delete_btn.setFixedHeight(30)
+        # Altura mínima, não fixa: em DPI fracionário o rótulo cresce e o teto
+        # fixo cortava o texto (item 10b). Os três botões desta barra mudam
+        # juntos para a linha não ficar desalinhada. O teto real continua sendo
+        # a altura da própria barra (48px).
+        delete_btn.setMinimumHeight(30)
         delete_btn.setObjectName("libraryBulkDeleteBtn")
         delete_btn.clicked.connect(self._on_bulk_delete_clicked)
         bulk_layout.addWidget(delete_btn)
 
         cancel_btn = QPushButton("Cancelar")
         cancel_btn.setIcon(emoji_icon("✕", 12))
-        cancel_btn.setFixedHeight(30)
+        cancel_btn.setMinimumHeight(30)
         cancel_btn.setObjectName("libraryBulkCancelBtn")
         cancel_btn.clicked.connect(self._clear_selection)
         bulk_layout.addWidget(cancel_btn)

@@ -31,6 +31,23 @@ class TestManualPdf:
         embutidas e ZERO texto extraível (ilegível E inindexável pelo RAG).
         Estas duas propriedades são o discriminador exato do defeito."""
         import fitz
+        # Sonda de ambiente (Onda S): em algumas máquinas Windows o plugin
+        # offscreen não entrega fonte NENHUMA ao Qt — aí nenhum PDF via Qt
+        # embute fonte e este teste mediria o ambiente, não o app. A sonda
+        # usa o mesmo mecanismo num documento trivial: se nem "hello" embute
+        # fonte, o problema é da plataforma → skip. O CI Linux tem fontes e
+        # continua cobrindo a regressão de verdade.
+        from PyQt6.QtGui import QPageSize, QPdfWriter, QTextDocument
+        sonda = tmp_path / "sonda_fonte.pdf"
+        writer = QPdfWriter(str(sonda))
+        writer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+        doc_sonda = QTextDocument()
+        doc_sonda.setPlainText("hello")
+        doc_sonda.print(writer)
+        with fitz.open(str(sonda)) as probe:
+            if not probe[0].get_fonts():
+                pytest.skip("Qt offscreen sem fontes do sistema nesta máquina "
+                            "— regressão coberta no CI Linux")
         out = generate_manual_pdf(out_path=tmp_path / "manual.pdf")
         doc = fitz.open(str(out))
         try:

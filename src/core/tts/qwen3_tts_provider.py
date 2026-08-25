@@ -22,6 +22,24 @@ from src.core.tts.base_tts_provider import (
 
 logger = logging.getLogger(__name__)
 
+#: Chave de config que habilita o provider pesado (opt-in explícito).
+QWEN3_ENABLED_KEY = "tts.qwen3.enabled"
+
+
+def qwen3_gate_enabled() -> bool:
+    """Lê ``tts.qwen3.enabled`` da config do app (default: False).
+
+    Import da config feito aqui dentro (não no topo) para manter o módulo
+    barato de importar. Qualquer falha de leitura → gate FECHADO: é a opção
+    conservadora (ADR-005), já que abrir por engano custa o import do torch.
+    """
+    try:
+        from src.core.config import ConfigManager
+        return bool(ConfigManager().get(QWEN3_ENABLED_KEY, False))
+    except Exception as e:  # pragma: no cover - defensivo
+        logger.debug("QWEN3_TTS: gate ilegível (%s) — assumindo desabilitado", e)
+        return False
+
 
 class Qwen3TTSProvider(BaseTTSProvider):
     """TTS provider using Qwen3-TTS (advanced neural TTS).
@@ -35,11 +53,26 @@ class Qwen3TTSProvider(BaseTTSProvider):
     Requires: transformers, torch, and the Qwen3-TTS model weights.
     """
 
-    def __init__(self):
+    def __init__(self, enabled: Optional[bool] = None):
         self._model = None
         self._processor = None
         self._available = False
         self._default_voice_id: Optional[str] = None
+
+        # ── Gate de opt-in (item 11 da rodada UX) ─────────────────────────
+        # O provider é OPCIONAL e caro. Sem ``tts.qwen3.enabled`` a construção
+        # falha ANTES de tocar em torch/transformers — assim
+        # ``TTSRouter.auto_register_providers`` (que envolve a instanciação em
+        # try/except) simplesmente não registra o provider e NÃO paga o import
+        # pesado. ``enabled`` explícito existe para testes/uso programático.
+        self._gate_enabled = qwen3_gate_enabled() if enabled is None else bool(enabled)
+        if not self._gate_enabled:
+            logger.info(
+                "QWEN3_TTS: desabilitado (%s=false) — provider não registrado "
+                "e dependências pesadas não importadas.", QWEN3_ENABLED_KEY)
+            raise TTSProviderError(
+                f"Qwen3-TTS desabilitado: habilite '{QWEN3_ENABLED_KEY}' na config."
+            )
 
         # Check dependencies. Captura Exception (não só ImportError) porque um
         # torch instalado mas quebrado/incompatível lança OSError (ex.: WinError 193
@@ -72,19 +105,23 @@ class Qwen3TTSProvider(BaseTTSProvider):
         }
 
     def initialize(self) -> None:
-        """Load the Qwen3-TTS model (heavy operation)."""
-        if not self._available:
+        """Load the Qwen3-TTS model (heavy operation).
+
+        Só chega aqui quem passou pelo gate ``tts.qwen3.enabled`` no
+        ``__init__`` — o TODO histórico ("only load if explicitly configured")
+        está cumprido lá, antes do import de torch/transformers.
+        """
+        if not self._gate_enabled or not self._available:
             return
 
         try:
             # Model name placeholder for the advanced tier architecture:
             # "Qwen/Qwen2-Audio-7B-Instruct". Avoid hitting the HuggingFace
             # API during auto-registration.
-            # TODO: Only load this heavy model if explicitly configured by the user.
             # For Phase 13, this is an architectural stub.
             self._model = None
             self._processor = None
-            
+
         except Exception as e:
             logger.warning("QWEN3_TTS: Failed to load model: %s", e)
             self._model = None
@@ -92,7 +129,8 @@ class Qwen3TTSProvider(BaseTTSProvider):
 
     def health_check(self) -> bool:
         """Qwen3-TTS requires explicit initialization due to model weight."""
-        if not self._available:
+        # Honesto: gate fechado → indisponível, sem tentar carregar nada.
+        if not self._gate_enabled or not self._available:
             return False
         # Don't auto-initialize — model is heavy. Return True only if already loaded.
         return self._model is not None and self._processor is not None

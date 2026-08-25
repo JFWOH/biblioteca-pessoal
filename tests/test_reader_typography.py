@@ -13,7 +13,12 @@ from pathlib import Path
 from PyQt6.QtWidgets import QPushButton
 
 from src.gui.styles import get_reader_css
-from src.gui.widgets.reader_typography_popover import ReaderTypographyPopover
+from src.gui.widgets.reader_typography_popover import (
+    ReaderTypographyPopover,
+    _COMFORT_FONT_SIZE,
+    _COMFORT_LINE_HEIGHT,
+    _COMFORT_MARGIN_HORIZONTAL,
+)
 from src.gui.widgets.bookmarks_panel import BookmarksPanel
 
 _READER_VIEW = Path(__file__).resolve().parent.parent / "src" / "gui" / "reader_view.py"
@@ -77,6 +82,60 @@ def test_popover_theme_button_emits(qtbot):
     pop._theme_buttons["sepia"].click()
     assert received == ["sepia"]
     assert pop._theme_buttons["sepia"].isChecked()
+
+
+def test_popover_comfort_preset_applies_calibrated_values(qtbot):
+    pop = ReaderTypographyPopover()
+    qtbot.addWidget(pop)
+    pop.set_values("Georgia", 14, 1.6, 60, "dark")
+    # Família real resolvida pelo QFontComboBox no ambiente do teste (o
+    # offscreen QPA não tem "Georgia" instalada e cai num fallback) — o que
+    # importa aqui é que o preset não MUDE a família, não qual ela é.
+    baseline_family = pop.current_values()["font_family"]
+    received = []
+    pop.typography_changed.connect(received.append)
+    pop._comfort_btn.click()
+    assert len(received) == 1  # um único sinal consolidado, não um por controle
+    vals = received[-1]
+    assert vals["font_size"] == _COMFORT_FONT_SIZE
+    assert vals["line_height"] == _COMFORT_LINE_HEIGHT
+    assert vals["margin_horizontal"] == _COMFORT_MARGIN_HORIZONTAL
+    assert vals["font_family"] == baseline_family  # preset não mexe na família da fonte
+    # Controles refletem o preset (mesma fonte que os sinais existentes usam)
+    assert pop._font_size.value() == _COMFORT_FONT_SIZE
+    assert pop.current_values()["line_height"] == _COMFORT_LINE_HEIGHT
+    assert pop._margin.value() == _COMFORT_MARGIN_HORIZONTAL
+    assert pop._comfort_btn.text() == "Restaurar"
+
+
+def test_popover_comfort_preset_second_click_restores_snapshot(qtbot):
+    pop = ReaderTypographyPopover()
+    qtbot.addWidget(pop)
+    pop.set_values("Verdana", 13, 1.4, 45, "light")
+    baseline = pop.current_values()  # valores REAIS resolvidos pelos widgets
+    received = []
+    pop.typography_changed.connect(received.append)
+    pop._comfort_btn.click()  # aplica o preset
+    pop._comfort_btn.click()  # restaura
+    assert len(received) == 2
+    restored = received[-1]
+    assert restored == baseline
+    assert pop.current_values() == restored
+    assert pop._comfort_btn.text() == "Leitura confortável"
+    assert pop._comfort_snapshot is None
+
+
+def test_popover_set_values_resets_pending_preset(qtbot):
+    pop = ReaderTypographyPopover()
+    qtbot.addWidget(pop)
+    pop.set_values("Georgia", 14, 1.6, 60, "dark")
+    pop._comfort_btn.click()
+    assert pop._comfort_snapshot is not None
+    assert pop._comfort_btn.text() == "Restaurar"
+    # Reabrir o popover (nova chamada externa) descarta o preset pendente
+    pop.set_values("Georgia", 14, 1.6, 60, "dark")
+    assert pop._comfort_snapshot is None
+    assert pop._comfort_btn.text() == "Leitura confortável"
 
 
 def test_popover_closed_signal_on_hide(qtbot):

@@ -73,6 +73,11 @@ class RAGPanel(QWidget):
         ("Genérica", "generica"),
     )
 
+    # Chips de perguntas sugeridas: no máx. 4 (a linha é horizontal e o painel
+    # também vive num dock estreito) e cada chip limitado em largura.
+    _SUGGESTION_MAX_CHIPS = 4
+    _SUGGESTION_CHIP_MAX_PX = 200
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._is_generating = False
@@ -98,6 +103,11 @@ class RAGPanel(QWidget):
         # Fontes clicáveis (Tarefa 3.1): provedor da lista de livros do banco,
         # usado para resolver citações [Título, p. X] → book_id (fuzzy match).
         self._books_provider = None
+        # Chips de perguntas sugeridas (rodada UX ago/2026, onda S): provedor
+        # dos conceitos do livro aberto, injetado pelo host (ADR-006 — o painel
+        # não conhece DB nem GraphStore). Sem provedor não há chips.
+        self._concepts_provider = None
+        self._suggestion_btns: list[QPushButton] = []
         # Re-warm do modelo (onda Q): o relógio do debounce já começa contando
         # na criação do painel, porque o warmup de startup do MainWindow cobre
         # os primeiros minutos — abrir o chat logo depois não precisa repetir.
@@ -329,6 +339,26 @@ class RAGPanel(QWidget):
         self._gen_status.setObjectName("ragGenStatus")
         self._gen_status.setVisible(False)
         chat_layout.addWidget(self._gen_status)
+
+        # ── Perguntas sugeridas (chips, custo LLM zero) ───────────────────────
+        # Derivadas dos conceitos do livro aberto no grafo (mesma fonte do
+        # X-Ray) — nenhuma chamada ao modelo. Sem grafo/conceitos/livro, a
+        # linha inteira fica invisível: sugestão é opcional por natureza, não
+        # rende estado de erro (ADR-005). Os chips reusam o objectName dos
+        # chips de motivo do 👎 (mesmo papel visual, já estilizado nos 3 temas).
+        self._suggestions_row = QWidget()
+        self._suggestions_row.setObjectName("ragSuggestionsRow")
+        self._suggestions_row.setVisible(False)
+        self._suggestions_layout = QHBoxLayout(self._suggestions_row)
+        self._suggestions_layout.setContentsMargins(0, 0, 0, 0)
+        self._suggestions_layout.setSpacing(6)
+        self._suggestions_hint = QLabel("💡")
+        self._suggestions_hint.setObjectName("ragReasonLabel")
+        self._suggestions_hint.setToolTip(
+            "Perguntas sugeridas a partir dos conceitos deste livro")
+        self._suggestions_layout.addWidget(self._suggestions_hint)
+        self._suggestions_layout.addStretch()   # chips entram ANTES do stretch
+        chat_layout.addWidget(self._suggestions_row)
 
         # ── Input area ────────────────────────────────────────────────────────
         self._input_frame = QFrame()
@@ -628,7 +658,8 @@ class RAGPanel(QWidget):
         # RAGEngine). Só reseta quando o livro muda — não a cada virada de página,
         # senão apagaria a resposta enquanto o usuário navega lendo.
         prev = self._reading_context
-        if prev is not None and prev.get("book_id") != book_id:
+        prev_book_id = prev.get("book_id") if prev is not None else None
+        if prev is not None and prev_book_id != book_id:
             self._reset_conversation_view()
         self._reading_context = {
             "book_id": book_id,
@@ -636,6 +667,10 @@ class RAGPanel(QWidget):
             "page": page,
             "text": text,
         }
+        # Livro novo → conceitos novos. Só aqui (não a cada virada de página):
+        # a consulta ao grafo é barata, mas trocar os chips sob o cursor não.
+        if prev_book_id != book_id:
+            self._refresh_suggestion_chips()
 
     def _reset_conversation_view(self) -> None:
         """Limpa a área de conversa ao trocar de livro (apenas visual)."""
@@ -654,6 +689,7 @@ class RAGPanel(QWidget):
     def clear_reading_context(self) -> None:
         """Limpa o contexto de leitura (útil para modo standalone)."""
         self._reading_context = None
+        self._refresh_suggestion_chips()   # sem livro aberto, sem sugestões
 
     def get_reading_context(self) -> dict | None:
         """Retorna o contexto atual de leitura, se houver."""
@@ -958,6 +994,75 @@ class RAGPanel(QWidget):
         """
         self._books_provider = provider
 
+    # ── Perguntas sugeridas (chips do grafo de conceitos) ──────────────────────
+
+    def set_concepts_provider(self, provider) -> None:
+        """Define o provedor de conceitos do livro aberto.
+
+        ``provider(limit)`` devolve uma lista de nomes de conceitos vindos do
+        grafo (é a assinatura de ``MainWindow._book_graph_concepts``, a mesma
+        fonte que alimenta o X-Ray). Sem provedor — ou com provedor que
+        devolve vazio/levanta — o painel simplesmente não mostra chips
+        (ADR-005: degradação graciosa, zero estado de erro).
+        """
+        self._concepts_provider = provider
+        self._refresh_suggestion_chips()
+
+    def _suggested_questions(self) -> list[tuple[str, str]]:
+        """(rótulo do chip, pergunta enviada) — 2 formatos, sem LLM."""
+        provider = self._concepts_provider
+        if provider is None:
+            return []
+        try:
+            concepts = provider(self._SUGGESTION_MAX_CHIPS) or []
+        except Exception:
+            logger.debug("Provedor de conceitos falhou; sem chips.", exc_info=True)
+            return []
+        names = [str(c).strip() for c in concepts if str(c).strip()]
+        if not names:
+            return []
+        pairs = [(f"O que é {n}?", f"O que é {n}?") for n in names]
+        # 2º formato só para o conceito mais forte: "se relaciona com o livro"
+        # repetido em 4 chips vira ruído. O rótulo é curto (o chip não pode
+        # empurrar a largura mínima do painel); a pergunta enviada é completa.
+        pairs.insert(1, (f"{names[0]} e o livro",
+                         f"Como {names[0]} se relaciona com o livro?"))
+        return pairs[:self._SUGGESTION_MAX_CHIPS]
+
+    def _refresh_suggestion_chips(self) -> None:
+        """Reconstrói a linha de chips (ao trocar de livro ou de provedor)."""
+        for btn in self._suggestion_btns:
+            self._suggestions_layout.removeWidget(btn)
+            btn.setParent(None)
+            btn.deleteLater()
+        self._suggestion_btns = []
+
+        for offset, (label, question) in enumerate(self._suggested_questions()):
+            chip = QPushButton(self._elide(label))
+            chip.setObjectName("ragReasonChipBtn")
+            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            chip.setToolTip(question)
+            chip.setMaximumWidth(self._SUGGESTION_CHIP_MAX_PX)
+            chip.clicked.connect(
+                lambda _=False, q=question: self._on_suggestion_clicked(q))
+            # +1: o rótulo "💡" ocupa o índice 0; o stretch fica sempre no fim.
+            self._suggestions_layout.insertWidget(1 + offset, chip)
+            self._suggestion_btns.append(chip)
+
+        self._suggestions_row.setVisible(
+            bool(self._suggestion_btns) and not self._is_generating)
+
+    @staticmethod
+    def _elide(text: str, limit: int = 26) -> str:
+        return text if len(text) <= limit else text[: limit - 1] + "…"
+
+    def _on_suggestion_clicked(self, question: str) -> None:
+        """Chip clicado: cai no fluxo normal de envio (campo + _on_send)."""
+        if self._is_generating:
+            return
+        self._question_input.setText(question)
+        self._on_send()
+
     def on_sources_found(self, sources: list) -> None:
         """Popula o painel de fontes consultadas.
 
@@ -1259,6 +1364,10 @@ class RAGPanel(QWidget):
         # Indicador de raciocínio: começa oculto e só reaparece quando um status
         # 💭/🧠 chega (on_status_updated). Ao terminar/parar, some.
         self._thinking_indicator.setVisible(False)
+        # Chips de sugestão sob o mesmo regime do campo de pergunta: fora do ar
+        # enquanto gera, de volta (se houver) quando termina.
+        self._suggestions_row.setVisible(
+            bool(self._suggestion_btns) and not active)
         if active:
             self._save_note_btn.setVisible(False)
             self._flashcard_btn.setVisible(False)

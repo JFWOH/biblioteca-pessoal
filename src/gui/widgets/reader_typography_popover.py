@@ -30,13 +30,23 @@ from src.utils.constants import (
 
 _THEMES = [("dark", "Escuro"), ("light", "Claro"), ("sepia", "Sépia")]
 
+# Preset "Leitura confortável" — calibrado a partir dos PADRÕES (não do valor
+# atual do usuário), para o resultado ser sempre o mesmo: fonte +2px sobre o
+# padrão, entrelinha folgada e margem maior (coluna de texto mais estreita).
+# Não há controle de espaçamento de letra/palavra neste popover — sem isso
+# para orquestrar.
+_COMFORT_FONT_SIZE = min(DEFAULT_FONT_SIZE + 2, MAX_FONT_SIZE)
+_COMFORT_LINE_HEIGHT = 1.8
+_COMFORT_MARGIN_HORIZONTAL = 100
+
 
 class ReaderTypographyPopover(QDialog):
     """Popover flutuante com os controles de tipografia do leitor.
 
     Sinais:
       - ``typography_changed(dict)``: {font_family, font_size, line_height,
-        margin_horizontal} — a cada ajuste de fonte/tamanho/entrelinha/margem.
+        margin_horizontal} — a cada ajuste de fonte/tamanho/entrelinha/margem,
+        inclusive pelo preset "Leitura confortável" e seu restaurar.
       - ``theme_changed(str)``: "dark" | "light" | "sepia".
       - ``closed()``: o popover foi ocultado/fechado (sincroniza o botão "Aa").
     """
@@ -53,6 +63,7 @@ class ReaderTypographyPopover(QDialog):
         self.setFixedWidth(290)
 
         self._loading = False
+        self._comfort_snapshot = None  # dict com valores de antes do preset, ou None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 14)
@@ -73,6 +84,18 @@ class ReaderTypographyPopover(QDialog):
         close_btn.clicked.connect(self.close)
         header.addWidget(close_btn)
         layout.addLayout(header)
+
+        # Preset "Leitura confortável": aplica de um clique um conjunto
+        # calibrado de tipografia (fonte maior, mais entrelinha, coluna mais
+        # estreita). Um segundo clique restaura os valores de antes do preset.
+        preset_row = QHBoxLayout()
+        self._comfort_btn = QPushButton()
+        self._comfort_btn.setObjectName("readerComfortPresetButton")
+        self._comfort_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._comfort_btn.clicked.connect(self._on_comfort_preset_clicked)
+        preset_row.addWidget(self._comfort_btn, stretch=1)
+        layout.addLayout(preset_row)
+        self._set_comfort_button_apply_mode()
 
         # Fonte
         font_row = QHBoxLayout()
@@ -143,6 +166,10 @@ class ReaderTypographyPopover(QDialog):
     def set_values(self, font_family: str, font_size: int, line_height: float,
                    margin_horizontal: int, theme: str) -> None:
         """Carrega os valores atuais nos controles SEM emitir sinais."""
+        # Valores externos novos = nova linha de base: qualquer preset "em
+        # aberto" de uma sessão anterior do popover deixa de fazer sentido.
+        self._comfort_snapshot = None
+        self._set_comfort_button_apply_mode()
         self._loading = True
         try:
             self._font_combo.setCurrentFont(QFont(font_family or DEFAULT_FONT_FAMILY))
@@ -163,6 +190,53 @@ class ReaderTypographyPopover(QDialog):
             "line_height": self._line_height.value() / 10,
             "margin_horizontal": self._margin.value(),
         }
+
+    # ── Preset "Leitura confortável" ──────────────────────────────────────
+
+    def _apply_values(self, *, font_family: str, font_size: int,
+                       line_height: float, margin_horizontal: int) -> None:
+        """Ajusta os controles para os valores dados e emite UM
+        ``typography_changed`` consolidado (em vez de um por controle)."""
+        self._loading = True
+        try:
+            self._font_combo.setCurrentFont(QFont(font_family or DEFAULT_FONT_FAMILY))
+            self._font_size.setValue(int(font_size))
+            self._line_height.setValue(int(round(float(line_height) * 10)))
+            self._line_label.setText(f"{float(line_height):.1f}")
+            self._margin.setValue(int(margin_horizontal))
+            self._margin_label.setText(f"{int(margin_horizontal)}px")
+        finally:
+            self._loading = False
+        self.typography_changed.emit(self.current_values())
+
+    def _on_comfort_preset_clicked(self) -> None:
+        """1º clique: guarda um snapshot dos valores atuais e aplica o preset
+        calibrado. 2º clique: restaura o snapshot e volta ao modo "aplicar"."""
+        if self._comfort_snapshot is None:
+            self._comfort_snapshot = self.current_values()
+            self._apply_values(
+                font_family=self._font_combo.currentFont().family(),
+                font_size=_COMFORT_FONT_SIZE,
+                line_height=_COMFORT_LINE_HEIGHT,
+                margin_horizontal=_COMFORT_MARGIN_HORIZONTAL,
+            )
+            self._set_comfort_button_restore_mode()
+        else:
+            snapshot, self._comfort_snapshot = self._comfort_snapshot, None
+            self._apply_values(**snapshot)
+            self._set_comfort_button_apply_mode()
+
+    def _set_comfort_button_apply_mode(self) -> None:
+        self._comfort_btn.setIcon(emoji_icon("✨"))
+        self._comfort_btn.setText("Leitura confortável")
+        self._comfort_btn.setToolTip(
+            "Fonte ampliada e mais respiro entre linhas, em um clique"
+        )
+
+    def _set_comfort_button_restore_mode(self) -> None:
+        self._comfort_btn.setIcon(emoji_icon("↺"))
+        self._comfort_btn.setText("Restaurar")
+        self._comfort_btn.setToolTip("Volta à tipografia de antes do preset")
 
     # ── Sinais internos ─────────────────────────────────────────────────
 
