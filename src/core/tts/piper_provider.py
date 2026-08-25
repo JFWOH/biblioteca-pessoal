@@ -20,8 +20,19 @@ from src.core.tts.base_tts_provider import (
     TTSProviderError,
     VoiceInfo,
 )
+from src.utils.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
+
+# Chave de config com o diretório explícito de vozes (vazio = ignorada).
+CONFIG_KEY_MODELS_DIR = "tts.piper.models_dir"
+
+# Vozes DENTRO do app/pacote portátil. Mesmo padrão do Kokoro pré-seedado
+# (``data/hf_cache``, ver ``src/main.py::_apply_portable_env``): ``DATA_DIR``
+# é relativo à raiz do projeto/ZIP descompactado, então o pacote pode embutir
+# a voz de reserva sem escrever no perfil do usuário. É este o diretório que o
+# estágio ``seed_piper`` do build deve preencher.
+PACKAGE_MODELS_DIR = str(DATA_DIR / "piper" / "models")
 
 
 class PiperProvider(BaseTTSProvider):
@@ -34,7 +45,16 @@ class PiperProvider(BaseTTSProvider):
     This provider tries the Python API first, then falls back to CLI.
     """
 
-    def __init__(self):
+    def __init__(self, config=None):
+        """*config*: objeto com ``get(chave, default)`` (``ConfigManager``).
+
+        ``None`` (caso do roteador) ⇒ o ``ConfigManager`` padrão é criado
+        preguiçosamente na 1ª busca por modelos, para não pagar leitura de
+        disco no startup.
+        """
+        self._config = config
+        self._config_models_dir: Optional[str] = None
+        self._config_models_dir_resolved = False
         self._piper_module = None
         self._piper_cli_path: Optional[str] = None
         self._model_path: Optional[str] = None
@@ -140,8 +160,24 @@ class PiperProvider(BaseTTSProvider):
         devolve o catálogo comum como referência (ADR-005, degradação graciosa).
         """
         catalog = [
+            # pt-BR oficiais (rhasspy/piper-voices, MIT). Faber PRIMEIRO e
+            # única com tags de estilo: a resolução por idioma do roteador
+            # casa estilo (passo 2) e, sem casar, cai no 1º do idioma (passo
+            # 3) — nos dois caminhos o pt continua indo para a faber, como
+            # antes. As demais ficam selecionáveis por ``voice_id`` explícito.
             VoiceInfo("pt_BR-faber-medium", "Faber (PT-BR)", "pt-BR", "male",
                       "Brazilian Portuguese male voice", ["serene"]),
+            VoiceInfo("pt_BR-cadu-medium", "Cadu (PT-BR)", "pt-BR", "male",
+                      "Brazilian Portuguese male voice (alternative)",
+                      ["alternative"]),
+            VoiceInfo("pt_BR-jeff-medium", "Jeff (PT-BR)", "pt-BR", "male",
+                      "Brazilian Portuguese male voice (alternative)",
+                      ["alternative"]),
+            VoiceInfo("pt_BR-edresson-low", "Edresson (PT-BR)", "pt-BR", "male",
+                      "Brazilian Portuguese male voice, low quality (smallest)",
+                      ["alternative", "compact"]),
+            VoiceInfo("pt_PT-tugão-medium", "Tugão (PT-PT)", "pt-PT", "male",
+                      "European Portuguese male voice", ["alternative"]),
             VoiceInfo("en_US-lessac-medium", "Lessac (EN-US)", "en-US", "female",
                       "English female voice, medium quality", ["didactic"]),
             VoiceInfo("en_US-amy-medium", "Amy (EN-US)", "en-US", "female",
@@ -273,25 +309,75 @@ class PiperProvider(BaseTTSProvider):
                 return p
         return None
 
-    @staticmethod
-    def _model_dirs() -> list[str]:
-        return [
+    def _configured_models_dir(self) -> Optional[str]:
+        """Diretório de ``tts.piper.models_dir`` (``None`` se vazio/ausente).
+
+        Resolvido uma única vez por instância (ADR-005: qualquer falha ao ler
+        a config degrada para "sem diretório explícito", nunca quebra o TTS).
+        """
+        if self._config_models_dir_resolved:
+            return self._config_models_dir
+        self._config_models_dir_resolved = True
+
+        if self._config is None:
+            try:
+                from src.core.config import ConfigManager
+                self._config = ConfigManager()
+            except Exception as e:  # pragma: no cover - ambiente sem config
+                logger.debug("PIPER: config indisponível (%s)", e)
+                return None
+        try:
+            raw = self._config.get(CONFIG_KEY_MODELS_DIR, "")
+        except Exception as e:  # pragma: no cover - config exótica
+            logger.debug("PIPER: falha ao ler %s (%s)", CONFIG_KEY_MODELS_DIR, e)
+            return None
+
+        if isinstance(raw, str) and raw.strip():
+            self._config_models_dir = os.path.expanduser(raw.strip())
+        return self._config_models_dir
+
+    def _model_dirs(self) -> list[str]:
+        """Diretórios onde procurar vozes ``.onnx``, em ordem de precedência:
+
+        1. ``tts.piper.models_dir`` — diretório explícito do usuário (vazio =
+           ignorado);
+        2. ``<raiz do app>/data/piper/models`` (``PACKAGE_MODELS_DIR``) — voz
+           embutida no pacote portátil, alvo do estágio ``seed_piper`` do
+           build; funciona com o ZIP descompactado em qualquer pasta;
+        3. ``~/.local/share/piper-tts/models`` — instalação manual (legado);
+        4. ``~/piper-models`` — instalação manual (legado).
+
+        Duplicatas são removidas preservando a ordem (config apontando para o
+        diretório do pacote não faz o mesmo dir ser varrido duas vezes).
+        """
+        candidates = [
+            self._configured_models_dir(),
+            PACKAGE_MODELS_DIR,
             os.path.expanduser("~/.local/share/piper-tts/models"),
             os.path.expanduser("~/piper-models"),
         ]
+        dirs: list[str] = []
+        seen: set[str] = set()
+        for d in candidates:
+            if not d:
+                continue
+            key = os.path.normcase(os.path.abspath(d))
+            if key in seen:
+                continue
+            seen.add(key)
+            dirs.append(d)
+        return dirs
 
-    @staticmethod
-    def _find_default_model() -> Optional[str]:
-        """Try to find a default Piper model."""
-        for d in PiperProvider._model_dirs():
+    def _find_default_model(self) -> Optional[str]:
+        """Primeiro ``.onnx`` encontrado, na ordem de ``_model_dirs``."""
+        for d in self._model_dirs():
             if os.path.isdir(d):
-                for f in os.listdir(d):
+                for f in sorted(os.listdir(d)):
                     if f.endswith(".onnx"):
                         return os.path.join(d, f)
         return None
 
-    @staticmethod
-    def _installed_model_ids() -> Optional[set[str]]:
+    def _installed_model_ids(self) -> Optional[set[str]]:
         """IDs de voz (basename sem ``.onnx``) dos modelos Piper instalados.
 
         Retorna ``None`` quando não há nenhum ``.onnx`` para inspecionar (não
@@ -299,7 +385,7 @@ class PiperProvider(BaseTTSProvider):
         conjunto (possivelmente parcial) quando encontramos modelos.
         """
         found: Optional[set[str]] = None
-        for d in PiperProvider._model_dirs():
+        for d in self._model_dirs():
             if os.path.isdir(d):
                 for f in os.listdir(d):
                     if f.endswith(".onnx"):
