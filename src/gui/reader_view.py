@@ -76,6 +76,14 @@ class ReaderView(QWidget):
     # curtos (palavra/expressão), não para trechos/frases inteiras.
     _WORD_WISE_MAX_WORDS = 4
 
+    # Barra de ações da seleção no EPUB: mesmas chaves do menu de contexto do
+    # EPUB (_populate_ai_menu), na ordem da barra do PDF. Sem "highlight" (o
+    # destaque depende de coords de página, que só o caminho PDF tem) e sem
+    # "word_wise" (termo curto já dispara a definição direto, sem barra) — ver
+    # _show_epub_selection_popover. 6 botões: cabe em notebook 13" (item 10).
+    _EPUB_SELECTION_ACTIONS = ("explain", "simplify", "translate", "search",
+                               "save_note", "flashcard")
+
     def __init__(self, parent=None, tts_router=None, rag_engine=None, db=None):
         super().__init__(parent)
         self._tts_router = tts_router
@@ -229,7 +237,10 @@ class ReaderView(QWidget):
 
         # Toolbar do leitor
         toolbar = QWidget()
-        toolbar.setFixedHeight(48)
+        # Item 10 do backlog UX: altura MÍNIMA, não fixa. Em notebook 13" com
+        # DPI alto o teto de 48px cortava o texto dos botões; o layout só
+        # depende do piso (nada aqui posiciona por altura absoluta).
+        toolbar.setMinimumHeight(48)
         toolbar.setObjectName("readerToolbar")
         # QWidget puro não pinta background vindo de QSS sem este atributo
         # (mesma lição do AnnotationPanel — Onda 0b 1/2, PR #42/#43).
@@ -425,12 +436,14 @@ class ReaderView(QWidget):
         # exibido na toolbar). Emoji do botão via emoji_icon (padrão de
         # botão); emoji dos itens do QMenu embutido no texto (padrão já usado
         # pelos demais QAction deste arquivo, ex.: _act_double_page).
+        # Motor de reserva atualmente em uso (item 11) — None = sem degradação.
+        self._tts_fallback_provider: str | None = None
         self._audio_btn = QToolButton()
         self._audio_btn.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self._audio_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._audio_btn.setText("Ouvir")
         self._audio_btn.setIcon(emoji_icon("🔊"))
-        self._audio_btn.setFixedHeight(32)
+        self._audio_btn.setMinimumHeight(32)  # item 10: piso, não teto (DPI alto)
         self._audio_btn.setMinimumWidth(100)
         self._audio_btn.setToolTip("Ouvir Página (TTS)")
         self._audio_btn.setObjectName("readerAudioBtn")
@@ -623,12 +636,16 @@ class ReaderView(QWidget):
         self._web_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._web_view.customContextMenuRequested.connect(self._on_epub_context_menu)
 
-        # Word Wise no EPUB (débito 3.4 / rodada B3): o QWebEngineView roda o
+        # Seleção no EPUB (débito 3.4 / rodada B3): o QWebEngineView roda o
         # Chromium em processo separado e não entrega os mouse events do Qt de
         # forma confiável ao eventFilter. Detectamos o fim da seleção pelo
         # ``mouseup`` do DOM (via QWebChannel — ver EpubSelectionBridge) e
-        # roteamos seleções curtas para o mesmo popover do PDF. A fiação JS é
-        # re-injetada a cada página no ``loadFinished`` (o setHtml troca o doc).
+        # roteamos para os MESMOS popovers do PDF: termo curto → Word Wise,
+        # trecho longo → barra de ações. A fiação JS é re-injetada a cada
+        # página no ``loadFinished`` (o setHtml troca o documento).
+        # Texto da seleção longa que está sob a barra de ações no EPUB (o
+        # caminho PDF usa coords de página; aqui só existe o texto do DOM).
+        self._last_epub_selection: str = ""
         self._epub_selection_bridge = EpubSelectionBridge()
         self._epub_web_channel = QWebChannel(self._web_view.page())
         self._epub_web_channel.registerObject("epubBridge", self._epub_selection_bridge)
@@ -665,7 +682,7 @@ class ReaderView(QWidget):
 
         # Barra de progresso inferior
         self._progress_bar_widget = QWidget()
-        self._progress_bar_widget.setFixedHeight(28)
+        self._progress_bar_widget.setMinimumHeight(28)  # item 10: piso, não teto
         self._progress_bar_widget.setObjectName("readerProgressBarWidget")
         # QWidget puro não pinta background vindo de QSS sem este atributo
         # (mesma lição do AnnotationPanel — Onda 0b 1/2, PR #42/#43).
@@ -1075,6 +1092,11 @@ class ReaderView(QWidget):
 
     def _render_page(self, content: PageContent):
         """Renderiza o conteúdo da página."""
+        # Toda troca/re-render de página invalida a seleção anterior: no EPUB o
+        # setHtml recria o documento (a seleção do DOM some) e no PDF o pixmap
+        # muda. Fica aqui — e não só no _go_to_page — porque a virada de página
+        # do EPUB passa por _handle_next_scroll/_handle_prev_scroll.
+        self._dismiss_selection_ui()
         if content.content_type == "image":
             # PDF — renderiza como imagem
             pixmap = QPixmap()
@@ -1225,10 +1247,7 @@ class ReaderView(QWidget):
         """
         if not preserve_audio:
             self._stop_audio_if_running()
-        if hasattr(self, "_selection_popover"):
-            self._selection_popover.hide()
-        if hasattr(self, "_word_wise_popover"):
-            self._word_wise_popover.hide()
+        self._dismiss_selection_ui()
         if self._reader:
             content = self._reader.go_to_page(page)
             if content:
@@ -1965,23 +1984,69 @@ class ReaderView(QWidget):
     def _on_epub_selection_ended(self, text: str, rect_json: str) -> None:
         """Fim de uma seleção no EPUB (mouseup do DOM via QWebChannel).
 
-        Espelha o caminho PDF (``_show_selection_popover``): seleção CURTA
-        (≤ ``_WORD_WISE_MAX_WORDS``) dispara o Word Wise; seleção vazia (clique
-        simples) esconde o popover. Seleções LONGAS ainda NÃO abrem a barra de
-        ações (SelectionActionPopover) no EPUB nesta rodada — débito registrado.
+        Espelha a decisão do caminho PDF (``_show_selection_popover``): termo
+        CURTO (≤ ``_WORD_WISE_MAX_WORDS``) dispara a Definição rápida (Word
+        Wise) direto; TRECHO longo abre a mesma barra de ações
+        (``SelectionActionPopover``) do PDF; seleção vazia (clique simples)
+        fecha o que estiver aberto. Paridade PDF↔EPUB fechada nesta rodada.
         """
+        # Uma seleção nova invalida a barra/cartão da seleção anterior.
+        self._dismiss_selection_ui()
         text = (text or "").strip()
         if not text:
-            if hasattr(self, "_word_wise_popover"):
-                self._word_wise_popover.hide()
             return
         if len(text.split()) > self._WORD_WISE_MAX_WORDS:
+            self._show_epub_selection_popover(text, rect_json)
             return
         anchor = self._epub_selection_anchor(rect_json)
         if anchor is None:
             return
         self._last_selection_anchor = anchor
         self._start_word_wise(text)
+
+    def _show_epub_selection_popover(self, text: str, rect_json: str) -> None:
+        """Abre a barra de ações sobre um trecho longo selecionado no EPUB.
+
+        Reusa o mesmo widget do PDF (``SelectionActionPopover``), então a ação
+        "Simplificar" vem de graça. Diferenças em relação ao PDF, ambas por
+        falta de geometria de página no caminho HTML:
+
+        * sem "Destacar" — o destaque exige coords normalizadas e só é
+          re-desenhado para ``PDFReader`` (ver ``load_annotations``); um
+          destaque sem posição nunca reapareceria sobre o texto;
+        * o texto vem do DOM (não de ``get_selection_flow``) e fica guardado em
+          ``_last_epub_selection`` até a ação ser escolhida.
+
+        Posicionamento: o rect do bridge é a fonte preferida (viewport CSS ×
+        zoomFactor, validado no spike B3); quando ele não é confiável — rect
+        vazio/ilegível ou seleção rolada para fora da vista — cai no cursor
+        global, que acabou de soltar o botão do mouse ali. ADR-005: preferimos
+        uma âncora aproximada a engolir a intenção do usuário.
+        """
+        if not hasattr(self, "_selection_popover"):
+            return
+        anchor = self._epub_selection_anchor(rect_json)
+        if anchor is None:
+            from PyQt6.QtGui import QCursor
+            anchor = self.mapFromGlobal(QCursor.pos())
+        self._last_epub_selection = text
+        self._last_selection_anchor = anchor
+        self._selection_popover.set_actions(self._EPUB_SELECTION_ACTIONS)
+        self._selection_popover.show_at(anchor)
+
+    def _dismiss_selection_ui(self) -> None:
+        """Fecha a barra de ações e o cartão de definição da seleção.
+
+        Ciclo de vida comum ao PDF e ao EPUB: troca de página/livro
+        (``_render_page``/``_go_to_page``) e perda da seleção no EPUB. Também
+        esquece o texto do EPUB — uma barra sobrevivente agiria sobre um
+        trecho que não está mais na tela.
+        """
+        self._last_epub_selection = ""
+        if hasattr(self, "_selection_popover"):
+            self._selection_popover.hide()
+        if hasattr(self, "_word_wise_popover"):
+            self._word_wise_popover.hide()
 
     def _epub_selection_anchor(self, rect_json: str):
         """Converte o retângulo da seleção (coords CSS do viewport) em um ponto
@@ -2182,7 +2247,15 @@ class ReaderView(QWidget):
         self._selection_popover.show_at(anchor)
 
     def _on_selection_popover_action(self, action: str) -> None:
-        """Executa a ação escolhida no popover de seleção (PDF)."""
+        """Executa a ação escolhida no popover de seleção (PDF ou EPUB)."""
+        epub_text = getattr(self, "_last_epub_selection", "")
+        if epub_text:
+            # EPUB: não há coords de página nem destaque — todas as chaves
+            # oferecidas (_EPUB_SELECTION_ACTIONS) caem no mesmo fluxo do menu
+            # de contexto, emitindo ai_action_requested.
+            self._last_epub_selection = ""
+            self.ai_action_requested.emit(action, epub_text)
+            return
         coords = self._last_selection_coords
         if coords is None:
             return
@@ -2362,6 +2435,10 @@ class ReaderView(QWidget):
         self._audio_btn.setIcon(emoji_icon(icon_emoji))
         self._audio_btn.setToolTip(tooltip)
         self._act_audio_toggle.setText(f"{icon_emoji} {menu_label or label}")
+        # Item 11: o rótulo acabou de ser reescrito — reaplica o marcador de
+        # motor de reserva para que o aviso PERSISTA através das transições
+        # de estado (Ouvir → Pausar → Parar).
+        self._apply_tts_fallback_indicator()
 
     def _pause_audio(self):
         """Pausa a narração (retomável no mesmo ponto)."""
@@ -2530,8 +2607,19 @@ class ReaderView(QWidget):
 
     def _show_status(self, msg: str, ms: int = 4000):
         parent_window = self.window()
-        if parent_window and hasattr(parent_window, "_statusbar") and parent_window._statusbar:
-            parent_window._statusbar.showMessage(msg, ms)
+        if parent_window is None:
+            return
+        bar = getattr(parent_window, "_statusbar", None)
+        if bar is None:
+            # Janela sem o atributo privado: a API pública do QMainWindow
+            # devolve a MESMA barra registrada por setStatusBar (main_window
+            # faz os dois), então o aviso não se perde.
+            try:
+                bar = parent_window.statusBar()
+            except (AttributeError, RuntimeError):
+                bar = None
+        if bar:
+            bar.showMessage(msg, ms)
 
     def _on_audio_finished(self, chunks):
         """Fim natural da narração: no modo contínuo, encadeia a próxima página.
@@ -2991,13 +3079,45 @@ class ReaderView(QWidget):
                              exc_info=True)
         self._audio_paused = False
 
+    TTS_FALLBACK_MARK = "⚠️ "
+
+    def _apply_tts_fallback_indicator(self) -> None:
+        """Indicador PERSISTENTE de motor de reserva no botão de áudio (item 11).
+
+        Não-modal por construção: uma propriedade dinâmica ``ttsFallback``
+        (estilizável por QSS, sem depender de styles.py) mais um "⚠️" no
+        rótulo, ambos mantidos enquanto a reserva durar. Idempotente — é
+        reaplicado a cada _set_audio_button_state.
+        """
+        btn = getattr(self, "_audio_btn", None)
+        if btn is None:
+            return
+        active = bool(getattr(self, "_tts_fallback_provider", None))
+        if bool(btn.property("ttsFallback")) != active:
+            btn.setProperty("ttsFallback", active)
+            style = btn.style()
+            if style is not None:
+                style.unpolish(btn)
+                style.polish(btn)
+        text = btn.text() or ""
+        marked = text.startswith(self.TTS_FALLBACK_MARK)
+        if active and not marked:
+            btn.setText(f"{self.TTS_FALLBACK_MARK}{text}")
+        elif not active and marked:
+            btn.setText(text[len(self.TTS_FALLBACK_MARK):])
+
     def _on_audio_provider_changed(self, provider_name: str):
-        """Item 4 (transparência do motor): mostra qual engine TTS está ativo.
+        """Item 4 + item 11: mostra — e AVISA — qual engine TTS está ativo.
 
         ``provider_changed`` é emitido pelo AudioWorker ao iniciar a fala (e ao
-        final). Se o engine ativo difere do preferido, sinaliza "reserva" tanto
-        no tooltip do botão quanto no sufixo do item "Pausar" do menu — assim o
-        usuário entende por que uma voz do motor preferido pode não se aplicar.
+        final). Se o engine ativo difere do preferido, a queda para o motor de
+        reserva deixa de ser passiva (item 11: o tester não percebeu a
+        degradação): além do tooltip e do sufixo do item "Pausar", sai um aviso
+        NÃO-MODAL na statusbar e o botão de áudio ganha um marcador persistente
+        enquanto a reserva durar. Voltando ao motor preferido, tudo é limpo.
+
+        O aviso de statusbar é deduplicado por motor: o sinal reemite a cada
+        página da leitura contínua e repetir a mensagem seria ruído.
         """
         pretty = provider_name if provider_name and provider_name != "none" else ""
         if self._audio_paused or not pretty:
@@ -3011,11 +3131,18 @@ class ReaderView(QWidget):
                 preferred = ""
         is_fallback = bool(preferred) and pretty.lower() != preferred.lower()
         if is_fallback:
-            self._audio_btn.setToolTip(f"Narrando via {pretty} (motor reserva)")
+            self._audio_btn.setToolTip(
+                f"Narrando via {pretty} (motor reserva) — o preferido "
+                f"({preferred}) não pôde ser usado")
             self._act_audio_toggle.setText(f"⏸️ Pausar página · {pretty} (reserva)")
+            if getattr(self, "_tts_fallback_provider", None) != pretty:
+                self._show_status(f"⚠️ Narrando via {pretty} (motor reserva)", 8000)
+            self._tts_fallback_provider = pretty
         else:
             self._audio_btn.setToolTip(f"Pausar Leitura · narrando via {pretty}")
             self._act_audio_toggle.setText(f"⏸️ Pausar página · {pretty}")
+            self._tts_fallback_provider = None
+        self._apply_tts_fallback_indicator()
 
     def _on_voice_selected(self, voice_id):
         """Grava a voz escolhida e, se houver narração ATIVA, aplica-a já (item 4).
@@ -3086,10 +3213,16 @@ class ReaderView(QWidget):
         provider_menu = menu.addMenu("🔊 Motor de Voz (Engine)")
         current_provider = config.get("tts.book_narrator.preferred_provider", "kokoro")
         
+        # Item 11 do backlog UX: ordem DELIBERADA — motores neurais primeiro e
+        # o legado pyttsx3 POR ÚLTIMO, fora do caminho do dedo. Antes ele era o
+        # 1º item e um clique acidental já regravava o motor preferido para o
+        # pior (foi a explicação mais provável do "TTS degradou sozinho"
+        # reportado pelo tester: o roteador NÃO degrada para pyttsx3 sozinho).
+        # Continua a 1 clique, sem confirmação — só deixou de ser o alvo fácil.
         providers = [
-            ("pyttsx3 (Legado Local)", "pyttsx3"),
             ("Kokoro (Neural Local)", "kokoro"),
             ("Piper (Neural Rápido)", "piper"),
+            ("pyttsx3 (Legado — qualidade inferior)", "pyttsx3"),
         ]
         
         for name, key in providers:
