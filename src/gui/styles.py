@@ -1062,7 +1062,7 @@ QTabBar::tab {
     background-color: #161920;
     border: 1px solid #2d333f;
     border-bottom: none;
-    padding: 8px 20px;
+    padding: 8px 12px;
     border-top-left-radius: 8px;
     border-top-right-radius: 8px;
     color: #94a3b8;
@@ -2536,7 +2536,7 @@ QTabBar::tab {
     background-color: #f4f4f5;
     border: 1px solid #e4e4e7;
     border-bottom: none;
-    padding: 8px 20px;
+    padding: 8px 12px;
     border-top-left-radius: 8px;
     border-top-right-radius: 8px;
     color: #555555;
@@ -3414,7 +3414,9 @@ QFrame#ragIdxFrame {
 #ragIndexedCountLbl { color: #555555; font-size: 11px; }
 QPushButton#ragIndexBtn {
     background-color: #FFFFFF;
-    color: #10b981;
+    /* Onda S (medição de contraste): #10b981 sobre branco dava 2,54:1 (FAIL
+       WCAG). #047857 é o mesmo verde da paleta (tom -700) com AA. */
+    color: #047857;
     border: 1px solid #d4d4d8;
     border-radius: 8px;
     padding: 8px 12px;
@@ -4007,7 +4009,7 @@ QTabBar::tab {
     background-color: #ebe5d9;
     border: 1px solid #d4cbb8;
     border-bottom: none;
-    padding: 8px 20px;
+    padding: 8px 12px;
     border-top-left-radius: 8px;
     border-top-right-radius: 8px;
     color: #705E4B;
@@ -4885,7 +4887,9 @@ QFrame#ragIdxFrame {
 #ragIndexedCountLbl { color: #705E4B; font-size: 11px; }
 QPushButton#ragIndexBtn {
     background-color: #F4ECD8;
-    color: #10b981;
+    /* Onda S (medição de contraste): #10b981 sobre sépia dava 2,15:1 (FAIL
+       WCAG). Tom -700 da mesma paleta recupera AA. */
+    color: #047857;
     border: 1px solid #d4cbb8;
     border-radius: 8px;
     padding: 8px 12px;

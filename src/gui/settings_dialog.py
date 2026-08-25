@@ -20,6 +20,39 @@ from src.utils.constants import (
 )
 
 
+def _com_rolagem(conteudo: QWidget) -> QScrollArea:
+    """Embrulha o conteúdo de uma aba numa área rolável.
+
+    Item 10b do backlog do tester: em 450px de altura o conteúdo das abas não
+    cabia e o layout espremia os widgets ABAIXO do mínimo — medido nesta
+    rodada, spinboxes com 16px contra 29px de sizeHint e checkboxes com 2px.
+    Era isso que aparecia como "texto cortado". Com a rolagem cada widget
+    mantém a altura própria e o excedente vira scroll (mesmo padrão que a aba
+    "Avançado" já usava).
+    """
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+    scroll.setWidget(conteudo)
+    return scroll
+
+
+def _altura_por_linhas(edit: QPlainTextEdit, linhas: int) -> None:
+    """Dimensiona a caixa pela MÉTRICA DA FONTE, não por pixels crus.
+
+    Item 10b do backlog do tester: alturas em px fixo (``setFixedHeight``)
+    cortam o texto quando a fonte cresce — a fonte do app é declarada em
+    PONTOS (``src/main.py``) e o QSS em PIXELS, então em DPI fracionário as
+    letras crescem e a caixa não. Amarrando a altura ao ``lineSpacing``, a
+    caixa acompanha a fonte em 100%, 125% ou 150%.
+    """
+    fm = edit.fontMetrics()
+    margens = 2 * int(edit.document().documentMargin()) + 2 * edit.frameWidth()
+    altura = fm.lineSpacing() * linhas + margens + 4
+    edit.setMinimumHeight(altura)
+    edit.setMaximumHeight(altura)
+
+
 class SettingsDialog(QDialog):
     """Diálogo de configurações com abas."""
 
@@ -30,7 +63,9 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self._config = config
         self.setWindowTitle("⚙️ Configurações")
-        self.setMinimumSize(QSize(550, 450))
+        # 640 acomoda as 6 abas com folga em 100% e ainda cabe num notebook
+        # 13" a 125% (1366x768 lógicos ÷ 1.25 ≈ 1092x614 úteis).
+        self.setMinimumSize(QSize(640, 450))
         self.setModal(True)
         self._setup_ui()
         if hasattr(self, "_tabs"):
@@ -53,12 +88,25 @@ class SettingsDialog(QDialog):
 
         # Abas
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._create_appearance_tab(), "🎨 Aparência")
-        self._tabs.addTab(self._create_reader_tab(), "📖 Leitor")
-        self._tabs.addTab(self._create_library_tab(), "📚 Biblioteca")
-        self._tabs.addTab(self._create_tts_tab(), "🔊 Narração")
+        # Item 10a do backlog do tester: em tela estreita (notebook 13" a 125%)
+        # a soma das 6 abas passa de 1000px contra ~500px úteis. Sem elide o
+        # QTabBar entra em modo scroll e a aba do meio ("Narração") some da
+        # vista. Com elide as abas encolhem; os botões de rolagem ficam como
+        # rede de segurança quando nem o texto encurtado couber.
+        self._tabs.setElideMode(Qt.TextElideMode.ElideRight)
+        self._tabs.setUsesScrollButtons(True)
+        # Item 10b: cada aba rola por conta própria. A "Avançado" já traz a
+        # rolagem embutida (o aviso fica fixo acima dela), por isso é a única
+        # que não passa pelo _com_rolagem.
+        self._tabs.addTab(_com_rolagem(self._create_appearance_tab()),
+                          "🎨 Aparência")
+        self._tabs.addTab(_com_rolagem(self._create_reader_tab()), "📖 Leitor")
+        self._tabs.addTab(_com_rolagem(self._create_library_tab()),
+                          "📚 Biblioteca")
+        self._tabs.addTab(_com_rolagem(self._create_tts_tab()), "🔊 Narração")
         self._tabs.addTab(self._create_advanced_tab(), "⚙️ Avançado")
-        self._tabs.addTab(self._create_integrations_tab(), "🔌 Integrações")
+        self._tabs.addTab(_com_rolagem(self._create_integrations_tab()),
+                          "🔌 Integrações")
         layout.addWidget(self._tabs)
 
         # Botões
@@ -675,7 +723,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(QLabel("Claude Code — cole no terminal uma única vez:"))
         self._mcp_cmd_edit = QPlainTextEdit(self._mcp_register_command())
         self._mcp_cmd_edit.setReadOnly(True)
-        self._mcp_cmd_edit.setFixedHeight(64)
+        _altura_por_linhas(self._mcp_cmd_edit, 4)
         layout.addWidget(self._mcp_cmd_edit)
         copy_cmd_btn = QPushButton("Copiar comando")
         copy_cmd_btn.setIcon(emoji_icon("📋"))
@@ -689,7 +737,7 @@ class SettingsDialog(QDialog):
             "Outros hosts (Cursor, VS Code, Gemini CLI…) — bloco mcpServers:"))
         self._mcp_json_edit = QPlainTextEdit(self._mcp_servers_json())
         self._mcp_json_edit.setReadOnly(True)
-        self._mcp_json_edit.setFixedHeight(120)
+        _altura_por_linhas(self._mcp_json_edit, 8)
         layout.addWidget(self._mcp_json_edit)
         copy_json_btn = QPushButton("Copiar configuração JSON")
         copy_json_btn.setIcon(emoji_icon("📋"))
