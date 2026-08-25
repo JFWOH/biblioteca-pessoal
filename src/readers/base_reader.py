@@ -5,6 +5,15 @@ from pathlib import Path
 from dataclasses import dataclass
 
 
+class BookOpenError(Exception):
+    """Arquivo de livro danificado, incompleto ou ilegível (ADR-005).
+
+    Contrato da Onda S: ``open()`` de qualquer reader NUNCA deixa vazar exceção
+    crua da biblioteca de parsing (fitz/ebooklib/zipfile) para a GUI — falha de
+    leitura vira este tipo, com mensagem PT-BR pronta para exibir ao usuário.
+    """
+
+
 @dataclass
 class PageContent:
     """Conteúdo de uma página renderizada."""

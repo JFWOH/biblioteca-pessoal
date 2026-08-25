@@ -1,7 +1,7 @@
 """Leitor de documentos EPUB."""
 
 from pathlib import Path
-from src.readers.base_reader import BaseReader, PageContent, TOCEntry
+from src.readers.base_reader import BaseReader, BookOpenError, PageContent, TOCEntry
 
 
 class EPUBReader(BaseReader):
@@ -22,7 +22,13 @@ class EPUBReader(BaseReader):
         from ebooklib import epub
         from bs4 import BeautifulSoup
 
-        self._book = epub.read_epub(str(self._filepath))
+        try:
+            self._book = epub.read_epub(str(self._filepath))
+        except Exception as exc:
+            self._book = None
+            raise BookOpenError(
+                f"Arquivo EPUB danificado ou ilegível: {self._filepath.name}"
+            ) from exc
         self._chapters = []
 
         # Extrai capítulos na ordem da spine
