@@ -66,9 +66,24 @@ DEFAULT_CONFIG = {
             "style": "didactic",
             "language": "pt-BR",
         },
+        # Piper (Tier C, reserva): diretório EXPLÍCITO com as vozes ``.onnx``.
+        # Vazio (padrão) = ignorado — o provider ainda procura no pacote
+        # portátil (``data/piper/models``) e no perfil do usuário. Ordem
+        # completa de busca: ver ``PiperProvider._model_dirs``.
+        "piper": {
+            "models_dir": "",
+        },
         "auto_fallback": True,
         "continuous_reading": False,  # narração vira páginas automaticamente
         "continuous_translate_reading": False,  # leitura contínua com tradução automática (consumidor futuro)
+        # Gate do provider PESADO Qwen3-TTS (Tier A). Default False: sem opt-in
+        # explícito, o auto-registro pula o provider ANTES de importar
+        # torch/transformers — o custo do import (≈1,9 s de startup, ver
+        # baselines jul/2026) e o download dos pesos só acontecem se o usuário
+        # ligar a chave. Ver Qwen3TTSProvider.__init__.
+        "qwen3": {
+            "enabled": False,
+        },
     },
     # Tradução offline (NLLB + revisão pelo LLM local).
     "translation": {
