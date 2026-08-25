@@ -167,17 +167,24 @@ atualiza o mapa de oportunidades com o estado da arte de AGORA. Somente desktop.
   medido e único FAIL corrigido — detalhes no registro)*
 
 ### Onda T — RELEASE DE TESTE (fecha a rodada)
-- [ ] **T.1** Verificação integral no worktree: suíte completa + ruff + `validar-adrs`
+- [x] **T.1** Verificação integral no worktree: suíte completa + ruff + `validar-adrs`
   + CI verde na main após o último merge.
-- [ ] **T.2** ZIP portátil: `venv\Scripts\python.exe -m src.tools.build_package --out
+  *(1865 passed/2 skipped; ruff limpo no escopo do CI; ADR-006 ok; main verde)*
+- [x] **T.2** ZIP portátil: `venv\Scripts\python.exe -m src.tools.build_package --out
   build\BibliotecaPessoal` com o pré-seed decidido (vozes/modelos que couberem) e
   smoke do pacote executado por agente conforme
   `docs/agents/roteiro_validacao_pacote.md` (tudo que não exigir interação humana).
-- [ ] **T.3** README/docs atualizados se algo de usuário mudou; este contrato 100%
+  *(build exit 0; seed Kokoro + seed_piper NOVO com os 2 arquivos; ZIP 1.085,6 MB;
+  smoke §0 IMPORT_OK; presenças 10/10; vetos 5/5)*
+- [x] **T.3** README/docs atualizados se algo de usuário mudou; este contrato 100%
   marcado; memória persistente atualizada.
-- [ ] **T.4** Relatório final (skill `relatorio-final`) + **Roteiro de teste do
+  *(manual atualizado na Onda Q; packaging/roteiro/§9 regularizados; memória na
+  sessão de encerramento)*
+- [x] **T.4** Relatório final (skill `relatorio-final`) + **Roteiro de teste do
   usuário** desta versão: o que mudou, onde olhar, como reportar (o feedback dele
   define a próxima versão).
+  *(`docs/agents/roteiro_teste_usuario_2026-08.md`; relatório final entregue no
+  encerramento da sessão)*
 - Critério de encerramento: ZIP gerado e smoke-testado; ZERO checkbox aberto neste
   contrato; "o que NÃO foi coberto" do relatório contém APENAS itens do §IV.
 

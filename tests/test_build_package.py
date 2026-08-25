@@ -151,3 +151,55 @@ class TestSeedKokoro:
         out.mkdir()
         assert seed_kokoro(out, hf_hub_dir=tmp_path / "nada") is False
         assert not (out / "data" / "hf_cache").exists()
+
+
+class TestSeedPiper:
+    """Estágio novo da Onda T (decisão R.4): voz de reserva no pacote."""
+
+    def test_copia_do_cache_local(self, tmp_path, monkeypatch):
+        from src.tools import build_package as bp
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        (cache / f"{bp.PIPER_VOICE_ID}.onnx").write_bytes(b"voz")
+        (cache / f"{bp.PIPER_VOICE_ID}.onnx.json").write_text("{}")
+        monkeypatch.setattr(bp, "_download",
+                            lambda *a, **k: pytest.fail("não deveria baixar"))
+        out = tmp_path / "pkg"
+        out.mkdir()
+        assert bp.seed_piper(out, cache_dir=cache) is True
+        dst = out / "data" / "piper" / "models"
+        assert (dst / f"{bp.PIPER_VOICE_ID}.onnx").read_bytes() == b"voz"
+        assert (dst / f"{bp.PIPER_VOICE_ID}.onnx.json").is_file()
+
+    def test_sem_cache_baixa_os_dois_arquivos(self, tmp_path, monkeypatch):
+        from src.tools import build_package as bp
+        baixados = []
+
+        def fake_download(url, dest):
+            baixados.append(url)
+            dest.write_bytes(b"conteudo")
+
+        monkeypatch.setattr(bp, "_download", fake_download)
+        out = tmp_path / "pkg"
+        out.mkdir()
+        assert bp.seed_piper(out, cache_dir=tmp_path / "nada") is True
+        assert len(baixados) == 2
+        assert all(u.startswith(bp.PIPER_VOICE_BASE_URL) for u in baixados)
+
+    def test_falha_de_download_limpa_parciais(self, tmp_path, monkeypatch):
+        """Regra do S.4: .onnx órfão (sem .json) engana o health_check —
+        falha no 2º arquivo tem de remover o 1º."""
+        from src.tools import build_package as bp
+
+        def fake_download(url, dest):
+            if url.endswith(".onnx.json"):
+                raise OSError("rede caiu")
+            dest.write_bytes(b"so o onnx")
+
+        monkeypatch.setattr(bp, "_download", fake_download)
+        out = tmp_path / "pkg"
+        out.mkdir()
+        assert bp.seed_piper(out, cache_dir=tmp_path / "nada") is False
+        dst = out / "data" / "piper" / "models"
+        assert not (dst / f"{bp.PIPER_VOICE_ID}.onnx").exists()
+        assert not (dst / f"{bp.PIPER_VOICE_ID}.onnx.json").exists()

@@ -234,9 +234,9 @@ para votos onde o usuário ignorou os chips.
 
 | Item | Status | Commit | Observações |
 |---|---|---|---|
-| DB — `add_feedback` retorna lastrowid + novos métodos | ⬜ | | |
-| Core — `feedback_learning.py` + testes | ⬜ | | |
-| Injeção no `orchestrator.query_rag` + evento de trace | ⬜ | | |
-| GUI — chips + sinal `feedback_reason_submitted` | ⬜ | | |
-| GUI — `on_feedback_persisted` + persistência do motivo | ⬜ | | |
-| Suíte completa final | ⬜ | | |
+| DB — `add_feedback` retorna lastrowid + novos métodos | ✅ | | Bookkeeping regularizado na rodada ago/2026 (Onda T): código e testes JÁ estavam entregues (`src/core/feedback_learning.py`, `tests/test_feedback_learning.py`, `tests/test_rag_panel_feedback.py`) — a tabela ficara sem preencher |
+| Core — `feedback_learning.py` + testes | ✅ | | idem |
+| Injeção no `orchestrator.query_rag` + evento de trace | ✅ | | idem |
+| GUI — chips + sinal `feedback_reason_submitted` | ✅ | | idem |
+| GUI — `on_feedback_persisted` + persistência do motivo | ✅ | | idem |
+| Suíte completa final | ✅ | | verde nas rodadas subsequentes (1850+ testes em ago/2026) |

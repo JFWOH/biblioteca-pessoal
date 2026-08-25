@@ -139,10 +139,10 @@ instalador Inno fica como evolução pós-feedback.
 | Ollama (daemon) | wizard de IA (1 clique) | ~700 MB | `OllamaInstaller` (/SILENT) — já implementado |
 | bge-m3 + gemma (tier) | wizard de IA | 1,2 + 2–8 GB | `pull_model` por `HardwareCapabilityService` |
 
-(Kokoro saiu desta tabela — vai embutido no pacote, decisão do usuário.)
-
-Decisão em aberto: embutir Kokoro (316 MB) no pacote p/ TTS funcionar offline
-de cara? (NLLB fica sempre no 1º uso — 2,4 GB no ZIP é caro demais.)
+(Kokoro saiu desta tabela — vai embutido no pacote, decisão do usuário.
+Rodada ago/2026: a voz de RESERVA do Piper, `pt_BR-faber-medium` ~63 MB,
+também vai embutida — estágio `piper` do build, decisão R.4. NLLB segue no
+1º uso: 2,4 GB no ZIP é caro demais.)
 
 ### O que NÃO vai (checklist de exclusão do build)
 `data/` do dev (chroma_db 6,9 GB, library.db, covers, traces, recovery*.sql),

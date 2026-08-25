@@ -153,6 +153,49 @@ def seed_kokoro(out_root: Path, hf_hub_dir: Path | None = None) -> bool:
     return True
 
 
+PIPER_VOICE_ID = "pt_BR-faber-medium"
+PIPER_VOICE_BASE_URL = ("https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+                        "pt/pt_BR/faber/medium/")
+
+
+def seed_piper(out_root: Path, cache_dir: Path | None = None) -> bool:
+    """Pré-seed da voz de RESERVA do TTS (Onda S.4/T.2, decisão R.4).
+
+    O caso real de 2026-08-10 era exatamente "Kokoro lento SEM reserva
+    instalada". Copia a voz pt-BR default do Piper para o layout portátil que
+    o ``PiperProvider`` passou a varrer (``data/piper/models``): usa o cache
+    local da máquina de build quando existir, senão baixa do repositório
+    oficial (rhasspy/piper-voices, MIT, ~63MB). Os DOIS arquivos são
+    obrigatórios (``.onnx`` órfão deixa o health_check True e a síntese
+    falha), então falha parcial limpa o destino e o pacote sai SEM a reserva
+    — com aviso honesto, como o seed do Kokoro.
+    """
+    files = (f"{PIPER_VOICE_ID}.onnx", f"{PIPER_VOICE_ID}.onnx.json")
+    fontes = [p for p in (
+        cache_dir,
+        Path.home() / ".local" / "share" / "piper-tts" / "models",
+        Path.home() / "piper-models",
+    ) if p is not None]
+    dst_dir = out_root / "data" / "piper" / "models"
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        for nome in files:
+            local = next((d / nome for d in fontes if (d / nome).is_file()), None)
+            if local is not None:
+                shutil.copy2(local, dst_dir / nome)
+                print(f"[piper] {nome} copiado do cache local ({local.parent})")
+            else:
+                _download(PIPER_VOICE_BASE_URL + nome, dst_dir / nome)
+    except Exception as exc:
+        for nome in files:
+            (dst_dir / nome).unlink(missing_ok=True)
+        print(f"[piper] AVISO: pré-seed falhou ({exc}) — pacote sai SEM a voz "
+              "de reserva (a cadeia de fallback fica só com o Kokoro).")
+        return False
+    print(f"[piper] voz de reserva pré-seedada em {dst_dir}")
+    return True
+
+
 def _download(url: str, dest: Path) -> None:
     print(f"[download] {url}")
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -211,7 +254,7 @@ def stage_zip(out_root: Path) -> Path:
     return Path(archive)
 
 
-ALL_STAGES = ("runtime", "deps", "app", "manual", "kokoro", "compile",
+ALL_STAGES = ("runtime", "deps", "app", "manual", "kokoro", "piper", "compile",
               "leiame", "zip")
 
 
@@ -243,6 +286,8 @@ def main(argv: list[str] | None = None) -> int:
             stage_manual(out_root)
         elif stage == "kokoro":
             seed_kokoro(out_root)
+        elif stage == "piper":
+            seed_piper(out_root)
         elif stage == "compile":
             stage_compile(out_root)
         elif stage == "leiame":
