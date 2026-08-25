@@ -409,4 +409,62 @@ Suíte completa (rodada 3× por executores diferentes ao longo da onda): **1850 
 tocados. Zero modal de background + zero degradação silenciosa de TTS (critérios de
 aceite 4) com testes de invariante.
 
-## Onda T — (pendente)
+## Onda T — Release de teste (CONCLUÍDA)
+
+### T.1 — verificação integral
+
+Suíte completa no worktree (tree final): **1865 passed, 2 skipped** (as 2 sondas
+ambientais deste Windows offscreen; CI Linux as cobre). Ruff limpo no escopo do CI
+(`src tests`; 3 E402 pré-existentes em `tools/validate_kokoro_gpu.py` de julho ficam
+fora do escopo do CI e desta rodada). ADR-006 verificada. **CI da main VERDE após o
+merge da Onda S** (run de 2m49s). Incidente de CI da onda S (segfault de teardown com
+QtWebEngine no shard t-z, 3×/3) diagnosticado e corrigido dentro do gate (tentativa 2
+verde): 3 arquivos de teste convertidos à convenção estática+subprocesso com guardas
+de higiene — o shard t-z hoje comprova ZERO WebEngine carregado.
+
+### T.2 — ZIP portátil + smoke
+
+Build real executado (`build_package --out build\BibliotecaPessoal`, todos os
+estágios, exit 0):
+- **Estágio novo `seed_piper` funcionou de primeira**: baixou
+  `pt_BR-faber-medium.onnx` + `.onnx.json` do repositório oficial para
+  `data\piper\models\` — a reserva de TTS deixa de ser teórica NO PACOTE.
+- Kokoro pré-seedado do cache local (como decidido em julho).
+- **ZIP: 1.085,6 MB** (pasta 2,45 GB — runtime 3.11 + torch CPU + deps + 2 seeds +
+  manual + bytecode pré-compilado).
+- Smoke automatizável (§0 do roteiro E5): `runtime\python.exe -c "import src.main"`
+  → **IMPORT_OK** (rodado como subprocesso do venv — o hook anti-python-solto do
+  projeto bloqueia invocação direta de outros pythons, por design); presenças 10/10
+  (runtime, src, manual PDF, LEIA-ME, lançadores, portable.flag, seed Kokoro, os DOIS
+  arquivos do Piper); vetos 5/5 ausentes (venv, chroma_db, library.db, tests,
+  docs/agents). `resources/` não existe no repo — a menção no roteiro antigo era
+  aspiracional; o pacote com `['src']` está correto.
+- ZIP final copiado para fora do worktree ao encerrar (caminho no relatório final).
+
+### T.3 — docs e bookkeeping
+
+`packaging_plan_2026-07.md`: contradição stale do Kokoro removida (+ decisão da voz
+de reserva registrada). `roteiro_validacao_pacote.md`: checklist pós-build ganha os 2
+arquivos do Piper (com o alerta do `.onnx` órfão). `aprendizado_feedback_rag §9`:
+tabela stale regularizada (era bookkeeping, não débito). Manual do usuário atualizado
+na Onda Q (Simplificar). Contrato da rodada 100% marcado.
+
+### T.4 — roteiro do usuário
+
+`docs/agents/roteiro_teste_usuario_2026-08.md`: o que sentir de diferente (números),
+verificação item a item do feedback de julho (10/11/12), novidades a experimentar,
+pré-requisito opcional (`ollama pull qwen3.5:4b`), validações que continuam com o
+usuário (máquina limpa E5, MCP no host real — re-testar exatamente o cenário do
+"database is locked" —, tradução §8.3, DPI real do 13") e como reportar.
+
+### Critérios de aceite da rodada (§III) — conferência final
+
+1. Ondas todas mescladas na main com CI verde (PRs #73/#74/#75/#76 + o desta onda);
+   gate de falha respeitado (1 falha de CI na S → corrigida na tentativa 2). ✅
+2. Nenhum débito novo "segue como está" fora do §IV. ✅ (riscos residuais estão
+   listados por onda neste registro e no relatório final)
+3. Medições antes/depois para TODA otimização de perf (P: startup/miniaturas/TTFB;
+   Q: traces de chamadas/consultas; harness commitado). ✅
+4. Zero modal de background + zero degradação silenciosa de TTS — com testes de
+   invariante. ✅
+5. Pacote de teste entregue com roteiro. ✅
